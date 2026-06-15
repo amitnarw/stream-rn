@@ -1,4 +1,4 @@
-package com.sozornandroid
+package com.anonymous.sozornandroid
 
 import android.os.Build
 import android.os.Bundle
