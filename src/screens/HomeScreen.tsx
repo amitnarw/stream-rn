@@ -3,6 +3,7 @@ import {
   View,
   Text,
   FlatList,
+  ScrollView,
   ActivityIndicator,
   TouchableOpacity,
   StyleSheet,
@@ -74,7 +75,7 @@ export default function HomeScreen({ navigation }: Props) {
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.providerRow}>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.providerRow}>
         {providers.map((p) => (
           <TouchableOpacity
             key={p.name}
@@ -94,7 +95,7 @@ export default function HomeScreen({ navigation }: Props) {
             </Text>
           </TouchableOpacity>
         ))}
-      </View>
+      </ScrollView>
 
       <FlatList
         data={sections}
@@ -132,7 +133,6 @@ export default function HomeScreen({ navigation }: Props) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#111' },
   providerRow: {
-    flexDirection: 'row',
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderBottomWidth: 1,

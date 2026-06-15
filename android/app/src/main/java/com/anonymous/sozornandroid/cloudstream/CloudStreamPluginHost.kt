@@ -21,7 +21,10 @@ import java.util.zip.ZipFile
 
 class CloudStreamPluginHost(private val appContext: Context) {
 
-    companion object { private const val TAG = "CloudStreamPluginHost" }
+    companion object {
+        private const val TAG = "CloudStreamPluginHost"
+        var instance: CloudStreamPluginHost? = null
+    }
 
     private val loadedPlugins = HashMap<String, BasePlugin>()
     private val pluginProviders = HashMap<String, List<String>>()
@@ -89,6 +92,19 @@ class CloudStreamPluginHost(private val appContext: Context) {
             }
         }
         return allProviders
+    }
+
+    fun loadLinksBlocking(providerName: String, data: String): String {
+        val api = apiByName(providerName) ?: return """{"sources":[],"subtitles":[]}"""
+        return try {
+            kotlinx.coroutines.runBlocking {
+                kotlinx.coroutines.withTimeout(30000L) {
+                    loadLinksJson(providerName, data)
+                }
+            }
+        } catch (_: Exception) {
+            """{"sources":[],"subtitles":[]}"""
+        }
     }
 
     private fun apiByName(name: String): MainAPI? {

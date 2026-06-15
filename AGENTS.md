@@ -2,7 +2,7 @@
 
 ## Overview
 
-A browse/search/play streaming Android app using **React Native (Expo SDK 56)** + **on-device CloudStream plugins** (.cs3 files loaded at runtime via `InMemoryDexClassLoader`). No custom backend. No custom scraper code. Content comes entirely from CloudStream plugin providers (Phisher Repo, Official Repo, etc.).
+A browse/search/play streaming Android app using **React Native (Expo SDK 55)** + **on-device CloudStream plugins** (.cs3 files loaded at runtime via `InMemoryDexClassLoader`). No custom backend. No custom scraper code. Content comes entirely from CloudStream plugin providers (Phisher Repo, Official Repo, etc.).
 
 **Core Architecture**: React Native old bridge (ReactContextBaseJavaModule) -> Kotlin native module -> CloudStream library (v4.7.0 on JitPack) -> .cs3 plugin files bundled in APK assets.
 
@@ -11,9 +11,9 @@ A browse/search/play streaming Android app using **React Native (Expo SDK 56)** 
 ## File Inventory
 
 ### Root
-- `D:\amit\sozo-rn-android\` - Expo bare-minimum project root
+- `C:\Users\Narwal\Desktop\stream-rn\` - Expo bare-minimum project root (this laptop)
 - `App.js` - Stack navigator (Home -> Search -> Detail)
-- `package.json` - Dependencies: react-navigation, expo-video, etc.
+- `package.json` - Dependencies: react-navigation, expo-video (SDK 55)
 
 ### TypeScript Source (`src/`)
 - `src/api/cloudStreamBridge.ts` - Native module bridge, returns parsed JSON
@@ -24,10 +24,10 @@ A browse/search/play streaming Android app using **React Native (Expo SDK 56)** 
 - `src/components/MediaCard.tsx` - Reusable poster card
 
 ### Android Native (`android/`)
-- `android/build.gradle` - Root build: Kotlin 2.3.20 (for CloudStream library compatibility)
+- `android/build.gradle` - Root build: Kotlin 2.3.21 (for CloudStream library compatibility)
 - `android/app/build.gradle` - App module: CloudStream library, ExoPlayer (Media3), Jsoup, kotlinx-coroutines, packaging excludes
 - `android/settings.gradle` - Expo module auto-linking
-- `android/local.properties` - `sdk.dir=D:/Android/Sdk`
+- `android/local.properties` - `sdk.dir=C\:\\Users\\Narwal\\android-sdk`
 
 ### Kotlin Native Module (`android/app/src/main/java/com/anonymous/sozornandroid/`)
 - `MainApplication.kt` - Registers `CloudStreamPackage`
@@ -77,11 +77,16 @@ A browse/search/play streaming Android app using **React Native (Expo SDK 56)** 
 - CloudStream library only has `BasePlugin` (not `Plugin`)
 - `Plugin` class is part of CloudStream app module, not library
 
-### Kotlin Version: 2.3.20 (root) for CloudStream Compatibility
+### Kotlin Version: 2.3.21 (root) for CloudStream Compatibility
 - CloudStream library v4.7.0 compiled with Kotlin 2.3.0
-- Root build.gradle uses Kotlin 2.3.20 to match
-- Expo modules compiled with 2.1.20 can be read by 2.3.20 compiler (verified, builds pass)
+- Root build.gradle uses Kotlin 2.3.21 to match
+- Expo modules compiled with 2.1.20 can be read by 2.3.21 compiler (verified, builds pass)
 - Metadata mismatch warning is non-fatal
+
+### Expo SDK 55 over SDK 56
+- Downgraded from SDK 56 → 55 to avoid `pika-compiler` dependency (required by SDK 56's New Architecture for Kotlin 2.3.x, unavailable on JitPack from this network)
+- SDK 55 uses React Native 0.83.6, React 19.2.0
+- SDK 55's New Architecture does NOT require pika-compiler on JitPack (RN 0.83 uses a different codegen pipeline)
 
 ---
 
@@ -89,8 +94,8 @@ A browse/search/play streaming Android app using **React Native (Expo SDK 56)** 
 
 ### Environment Variables (must be set in every session)
 ```
-$env:ANDROID_HOME = "D:\Android\Sdk"
-$env:JAVA_HOME = "C:\Program Files\Eclipse Adoptium\jdk-17.0.19.10-hotspot"
+$env:ANDROID_HOME = "C:\Users\Narwal\android-sdk"
+$env:JAVA_HOME = "C:\Users\Narwal\jdk-17"
 $env:Path = "$env:ANDROID_HOME\platform-tools;$env:Path"
 ```
 
@@ -107,7 +112,7 @@ npx expo run:android
 ```
 
 ### Key Dependencies (build.gradle)
-- Kotlin: 2.3.20 (root build.gradle - for CloudStream compatibility)
+- Kotlin: 2.3.21 (root build.gradle - for CloudStream compatibility)
 - CloudStream: `com.github.recloudstream.cloudstream:library:v4.7.0` (JitPack)
 - ExoPlayer: `androidx.media3:media3-exoplayer:1.5.1`, `media3-ui:1.5.1`, `media3-exoplayer-hls:1.5.1`
 - Jsoup: `org.jsoup:jsoup:1.18.3`
@@ -119,8 +124,7 @@ npx expo run:android
 
 ### Working
 - Kotlin compilation passes (`BUILD SUCCESSFUL`)
-- CloudStream library dependency resolves correctly
-- JitPack format is correct
+- CloudStream library dependency resolves correctly (JitPack accessible via IPv4 with `-Djava.net.preferIPv4Stack=true`)
 - All **7 plugins** in assets/plugins/ (Goojara, Cinemacity, FourKHDHub, YTS, StreamPlay, InternetArchiveProvider, InvidiousProvider)
 - TypeScript screens compile (Home, Search, Detail)
 - Native module bridge compiles
@@ -128,10 +132,11 @@ npx expo run:android
 - DEX byte reading fixed (`readBytes()` ensures complete read)
 - FourKHDHub class verified in DEX (`com.fourKHDHub.FourKHDHubProvider`)
 - adb connected to Nothing Phone 3 (model A024, MetroidIND)
-- Kotlin 2.3.20 + Expo modules compatibility verified (build passes)
+- Kotlin 2.3.21 + Expo modules compatibility verified (build passes)
+- **Full APK assembled successfully** (`BUILD SUCCESSFUL`)
+- **APK installed on Nothing Phone 3** (via `adb install`)
 
 ### Not Yet Tested
-- Full APK assembly (install on device) - NOT YET RUN
 - Runtime plugin loading - UNTESTED
 - Main page browsing - UNTESTED
 - Search - UNTESTED
@@ -143,7 +148,7 @@ npx expo run:android
 - `expo-constants:createExpoConfig` warning about NODE_ENV (harmless)
 - Gradle deprecated features warnings (harmless)
 - `FLAG_FULLSCREEN`, `systemUiVisibility` deprecated on API 36 (harmless, still work)
-- The `kotlinVersion` in root project is 2.3.20 while Expo gradle plugin reports `kotlin: 2.1.20` (Expo modules are compiled with 2.1.20, metadata mismatch is non-fatal)
+- The `kotlinVersion` in root project is 2.3.21 while Expo gradle plugin reports `kotlin: 2.1.20` (Expo modules are compiled with 2.1.20, metadata mismatch is non-fatal)
 
 ---
 
@@ -163,7 +168,7 @@ npx expo run:android
 
 ## Next Steps
 
-1. **Build + install on device**: `npx expo run:android` or `.\gradlew.bat :app:assembleDebug` + `adb install`
+1. **Build + install on device**: `npx expo run:android` or `.\gradlew.bat :app:assembleDebug` + `adb install` ✅ DONE
 2. **Test plugin loading** - Check Logcat: `adb logcat -s CloudStreamPluginHost`
 3. **Test browsing** - Does `getMainPage` return sections?
 4. **Test detail loading** - Tap a media card, does `loadDetail` work?

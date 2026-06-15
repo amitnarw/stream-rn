@@ -1,5 +1,5 @@
 kotlin version: 2.1.20
-error message: org.jetbrains.kotlin.util.FileAnalysisException: While analysing D:/amit/sozo-rn-android/android/app/src/main/java/com/anonymous/sozornandroid/MainActivity.kt:14:3: org.jetbrains.kotlin.utils.exceptions.KotlinIllegalArgumentExceptionWithAttachments: Exception in type checkers
+error message: org.jetbrains.kotlin.util.FileAnalysisException: While analysing C:/Users/Narwal/Desktop/stream-rn/android/app/src/main/java/com/anonymous/sozornandroid/MainActivity.kt:14:3: org.jetbrains.kotlin.utils.exceptions.KotlinIllegalArgumentExceptionWithAttachments: Exception in type checkers
 	at org.jetbrains.kotlin.util.AnalysisExceptionsKt.wrapIntoFileAnalysisExceptionIfNeeded(AnalysisExceptions.kt:57)
 	at org.jetbrains.kotlin.fir.FirCliExceptionHandler.handleExceptionOnFileAnalysis(Utils.kt:251)
 	at org.jetbrains.kotlin.fir.pipeline.AnalyseKt.runCheckers(analyse.kt:68)
@@ -30,7 +30,7 @@ error message: org.jetbrains.kotlin.util.FileAnalysisException: While analysing 
 	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(Native Method)
 	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:77)
 	at java.base/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43)
-	at java.base/java.lang.reflect.Method.invoke(Method.java:569)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:568)
 	at java.rmi/sun.rmi.server.UnicastServerRef.dispatch(UnicastServerRef.java:360)
 	at java.rmi/sun.rmi.transport.Transport$1.run(Transport.java:200)
 	at java.rmi/sun.rmi.transport.Transport$1.run(Transport.java:197)

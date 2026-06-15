@@ -3,6 +3,7 @@ import {
   TouchableOpacity,
   Image,
   Text,
+  View,
   StyleSheet,
   Dimensions,
 } from 'react-native';
@@ -36,8 +37,6 @@ export default function MediaCard({ item, onPress }: Props) {
     </TouchableOpacity>
   );
 }
-
-import { View } from 'react-native';
 
 const styles = StyleSheet.create({
   card: {

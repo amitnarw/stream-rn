@@ -100,16 +100,28 @@ export async function loadLinks(
   };
 }
 
+export function playWithMediaRef(
+  providerName: string,
+  data: string,
+  title?: string,
+) {
+  CloudStreamModule.playWithMediaRef(providerName, data, title ?? '');
+}
+
 export function playStream(
   url: string,
   headers?: Record<string, string>,
   title?: string,
-  subtitleUrl?: string
+  subtitleUrl?: string,
+  allSources?: { quality: string; url: string; type: string; headers: Record<string, string> }[],
+  allSubtitles?: { lang: string; url: string }[],
 ) {
   CloudStreamModule.playStream(
     url,
     headers ? JSON.stringify(headers) : '{}',
     title ?? '',
     subtitleUrl ?? '',
+    allSources ? JSON.stringify(allSources) : '',
+    allSubtitles ? JSON.stringify(allSubtitles) : '',
   );
 }

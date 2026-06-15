@@ -9,7 +9,9 @@ import kotlinx.coroutines.withTimeout
 class CloudStreamModule(reactContext: ReactApplicationContext) :
     ReactContextBaseJavaModule(reactContext) {
 
-    private val pluginHost = CloudStreamPluginHost(reactContext)
+    private val pluginHost = CloudStreamPluginHost(reactContext).also {
+        CloudStreamPluginHost.instance = it
+    }
 
     override fun getName(): String = "CloudStreamModule"
 
@@ -83,7 +85,30 @@ class CloudStreamModule(reactContext: ReactApplicationContext) :
     }
 
     @ReactMethod
-    fun playStream(url: String, headers: String, title: String, subtitleUrl: String = "") {
+    fun playWithMediaRef(providerName: String, data: String, title: String) {
+        try {
+            val context = reactApplicationContext
+            val intent = Intent(context, PlayerActivity::class.java).apply {
+                putExtra("providerName", providerName)
+                putExtra("data", data)
+                putExtra("title", title)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+        } catch (e: Exception) {
+            Log.e("CloudStreamModule", "Error starting player with media ref", e)
+        }
+    }
+
+    @ReactMethod
+    fun playStream(
+        url: String,
+        headers: String,
+        title: String,
+        subtitleUrl: String = "",
+        sourcesJson: String = "",
+        subtitlesJson: String = ""
+    ) {
         try {
             val context = reactApplicationContext
             val intent = Intent(context, PlayerActivity::class.java).apply {
@@ -92,6 +117,8 @@ class CloudStreamModule(reactContext: ReactApplicationContext) :
                 putExtra("referer", "")
                 putExtra("subtitleUrl", subtitleUrl)
                 putExtra("title", title)
+                putExtra("sourcesJson", sourcesJson)
+                putExtra("subtitlesJson", subtitlesJson)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
             context.startActivity(intent)
