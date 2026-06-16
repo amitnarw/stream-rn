@@ -203,6 +203,34 @@ class CloudStreamPluginHost(private val appContext: Context) {
                 })
             }
         }
+
+        val cast = JSONArray()
+        resp.actors?.forEach { a ->
+            cast.put(JSONObject().apply {
+                put("name", a.actor?.name ?: "Unknown")
+                put("image", a.actor?.image ?: JSONObject.NULL)
+                put("role", a.roleString ?: a.role?.name ?: JSONObject.NULL)
+            })
+        }
+
+        val recommendations = JSONArray()
+        resp.recommendations?.forEach { rec -> recommendations.put(cardJson(rec, api.name)) }
+
+        val trailers = JSONArray()
+        (resp.trailers ?: emptyList()).forEach { t ->
+            trailers.put(JSONObject().apply {
+                put("url", t.extractorUrl)
+                put("referer", t.referer ?: "")
+                put("raw", t.raw)
+            })
+        }
+
+        val scoreStr = try { resp.score?.toString() } catch (_: Exception) { null }
+
+        val syncMap = resp.syncData
+        val imdbId = syncMap["imdb_id"] ?: syncMap["imdbId"]
+        val tmdbId = syncMap["tmdb_id"] ?: syncMap["tmdbId"]
+
         return JSONObject().apply {
             put("provider", api.name)
             put("url", resp.url)
@@ -213,6 +241,16 @@ class CloudStreamPluginHost(private val appContext: Context) {
             put("year", resp.year ?: JSONObject.NULL)
             put("isSerial", isSerial)
             put("episodes", episodes)
+            put("score", scoreStr ?: JSONObject.NULL)
+            put("tags", JSONArray(resp.tags ?: emptyList<String>()))
+            put("duration", resp.duration ?: JSONObject.NULL)
+            put("comingSoon", resp.comingSoon)
+            put("contentRating", resp.contentRating ?: JSONObject.NULL)
+            put("imdbId", imdbId ?: JSONObject.NULL)
+            put("tmdbId", tmdbId ?: JSONObject.NULL)
+            put("cast", cast)
+            put("recommendations", recommendations)
+            put("trailers", trailers)
         }.toString()
     }
 

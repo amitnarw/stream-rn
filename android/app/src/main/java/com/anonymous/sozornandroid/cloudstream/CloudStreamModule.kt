@@ -107,7 +107,9 @@ class CloudStreamModule(reactContext: ReactApplicationContext) :
         title: String,
         subtitleUrl: String = "",
         sourcesJson: String = "",
-        subtitlesJson: String = ""
+        subtitlesJson: String = "",
+        episodesJson: String = "",
+        currentEpisodeIndex: Int = -1
     ) {
         try {
             val context = reactApplicationContext
@@ -119,6 +121,8 @@ class CloudStreamModule(reactContext: ReactApplicationContext) :
                 putExtra("title", title)
                 putExtra("sourcesJson", sourcesJson)
                 putExtra("subtitlesJson", subtitlesJson)
+                putExtra("episodesJson", episodesJson)
+                putExtra("currentEpisodeIndex", currentEpisodeIndex)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
             context.startActivity(intent)

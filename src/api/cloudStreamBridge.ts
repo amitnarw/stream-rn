@@ -9,6 +9,44 @@ import type {
 
 const { CloudStreamModule } = NativeModules;
 
+export class OfflineError extends Error {
+  constructor() {
+    super('No internet connection. Please check your network and try again.');
+    this.name = 'OfflineError';
+  }
+}
+
+let lastOnlineCheck = 0;
+let lastOnlineResult = true;
+const CACHE_TTL = 15000;
+
+export async function checkOnline(): Promise<boolean> {
+  const now = Date.now();
+  if (now - lastOnlineCheck < CACHE_TTL) {
+    return lastOnlineResult;
+  }
+  try {
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), 4000);
+    await fetch('https://www.google.com/generate_204', {
+      method: 'HEAD',
+      mode: 'no-cors',
+      signal: controller.signal,
+    });
+    clearTimeout(id);
+    lastOnlineResult = true;
+  } catch {
+    lastOnlineResult = false;
+  }
+  lastOnlineCheck = Date.now();
+  return lastOnlineResult;
+}
+
+async function ensureOnline(): Promise<void> {
+  const online = await checkOnline();
+  if (!online) throw new OfflineError();
+}
+
 function parseJson<T>(json: string): T {
   return JSON.parse(json);
 }
@@ -24,19 +62,26 @@ function mapItem(item: any): MediaItem {
 }
 
 export async function loadPlugins(): Promise<PluginProvider[]> {
+  await ensureOnline();
   const json = await CloudStreamModule.loadPlugins();
   return parseJson<PluginProvider[]>(json);
 }
 
 export async function getProviders(): Promise<PluginProvider[]> {
+  await ensureOnline();
   const json = await CloudStreamModule.getProviders();
-  return parseJson<PluginProvider[]>(json);
+  const providers = parseJson<PluginProvider[]>(json);
+  const excludeNames = ['Internet Archive', 'Invidious'];
+  return providers.filter(
+    (p) => !excludeNames.some((ex) => p.name.toLowerCase().includes(ex.toLowerCase()))
+  );
 }
 
 export async function getMainPage(
   providerName: string,
   page: number = 1
 ): Promise<HomeSection[]> {
+  await ensureOnline();
   const json = await CloudStreamModule.getMainPage(providerName, page);
   const obj = parseJson<{ sections: any[] }>(json);
   return (obj.sections ?? []).map((s: any) => ({
@@ -49,6 +94,7 @@ export async function search(
   providerName: string,
   query: string
 ): Promise<MediaItem[]> {
+  await ensureOnline();
   const json = await CloudStreamModule.search(providerName, query);
   const obj = parseJson<{ items: any[] }>(json);
   return (obj.items ?? []).map(mapItem);
@@ -58,8 +104,10 @@ export async function loadDetail(
   providerName: string,
   url: string
 ): Promise<DetailResult> {
+  await ensureOnline();
   const json = await CloudStreamModule.loadDetail(providerName, url);
   const obj = parseJson<any>(json);
+  if (!obj || !obj.title) throw new Error('Failed to load details from provider');
   return {
     provider: obj.provider ?? '',
     url: obj.url ?? '',
@@ -77,6 +125,25 @@ export async function loadDetail(
       season: e.season,
       overview: e.overview,
     })),
+    score: obj.score ?? null,
+    tags: obj.tags ?? [],
+    duration: obj.duration ?? null,
+    comingSoon: obj.comingSoon ?? false,
+    contentRating: obj.contentRating ?? null,
+    logoUrl: obj.logoUrl ?? null,
+    imdbId: obj.imdbId ?? null,
+    tmdbId: obj.tmdbId ?? null,
+    cast: (obj.cast ?? []).map((a: any) => ({
+      name: a.name ?? '',
+      image: a.image ?? null,
+      role: a.role ?? null,
+    })),
+    recommendations: (obj.recommendations ?? []).map(mapItem),
+    trailers: (obj.trailers ?? []).map((t: any) => ({
+      url: t.url ?? '',
+      referer: t.referer ?? '',
+      raw: t.raw ?? false,
+    })),
   };
 }
 
@@ -84,8 +151,12 @@ export async function loadLinks(
   providerName: string,
   data: string
 ): Promise<LinksResult> {
+  await ensureOnline();
   const json = await CloudStreamModule.loadLinks(providerName, data);
   const obj = parseJson<{ sources: any[]; subtitles: any[] }>(json);
+  if (!obj.sources || obj.sources.length === 0) {
+    throw new Error('No playable sources found for this item');
+  }
   return {
     sources: (obj.sources ?? []).map((s: any) => ({
       quality: s.quality ?? '',
@@ -115,6 +186,8 @@ export function playStream(
   subtitleUrl?: string,
   allSources?: { quality: string; url: string; type: string; headers: Record<string, string> }[],
   allSubtitles?: { lang: string; url: string }[],
+  episodesJson?: string,
+  currentEpisodeIndex?: number,
 ) {
   CloudStreamModule.playStream(
     url,
@@ -123,5 +196,7 @@ export function playStream(
     subtitleUrl ?? '',
     allSources ? JSON.stringify(allSources) : '',
     allSubtitles ? JSON.stringify(allSubtitles) : '',
+    episodesJson ?? '',
+    currentEpisodeIndex ?? -1,
   );
 }

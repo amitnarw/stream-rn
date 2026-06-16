@@ -2,11 +2,15 @@ package com.anonymous.sozornandroid.cloudstream
 
 import android.animation.Animator
 import android.animation.AnimatorListenerAdapter
+import android.app.PendingIntent
+import android.content.Intent
 import android.content.pm.ActivityInfo
+import androidx.activity.OnBackPressedCallback
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.media.AudioManager
-import androidx.media3.common.AudioAttributes
+import android.media.session.MediaSession
+import android.media.session.PlaybackState
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -28,7 +32,7 @@ import android.widget.SeekBar
 import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.view.WindowInsetsControllerCompat
+import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
@@ -69,14 +73,22 @@ class PlayerActivity : AppCompatActivity() {
     private lateinit var loadingText: TextView
     private lateinit var sourcesBtn: ImageView
     private lateinit var subtitleBtn: ImageView
+    private lateinit var prevEpBtn: ImageView
+    private lateinit var nextEpBtn: ImageView
+    private lateinit var sleepTimerBtn: ImageView
+    private lateinit var errorOverlay: FrameLayout
+    private lateinit var errorMessageTv: TextView
+    private lateinit var errorRetryBtn: TextView
+    private lateinit var errorBackBtn: TextView
 
+    private var mediaSession: MediaSession? = null
+    private var audioManager: AudioManager? = null
     private var isControlsVisible = true
     private var isSeeking = false
     private var isBuffering = false
     private val hideHandler = Handler(Looper.getMainLooper())
     private val HIDE_DELAY = 4000L
     private var lastBrightness = -1f
-    private var audioManager: AudioManager? = null
     private var playerVolumeBeforeGesture = 1f
 
     private var allSources: JSONArray? = null
@@ -85,6 +97,17 @@ class PlayerActivity : AppCompatActivity() {
     private var currentSubtitleIndex = -1
     private var currentUrl = ""
     private var currentHeadersJson = "{}"
+
+    private var episodesArray: JSONArray? = null
+    private var currentEpisodeIndex = -1
+    private var providerName: String? = null
+
+    private var sleepTimerEnd = -1L
+    private var sleepTimerEndOfEpisode = false
+    private val sleepHandler = Handler(Looper.getMainLooper())
+    private val sleepRunnable = Runnable { finish() }
+
+    private var isErrorShowing = false
 
     private lateinit var root: FrameLayout
     private var gesturePill: View? = null
@@ -100,7 +123,9 @@ class PlayerActivity : AppCompatActivity() {
         audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
         lastBrightness = window.attributes.screenBrightness
 
-        val providerName = intent.getStringExtra("providerName")
+        setupMediaSession()
+
+        providerName = intent.getStringExtra("providerName")
         val mediaRef = intent.getStringExtra("data")
         val url = intent.getStringExtra("url")
         val headersJson = intent.getStringExtra("headers") ?: "{}"
@@ -108,9 +133,12 @@ class PlayerActivity : AppCompatActivity() {
         val subtitleUrl = intent.getStringExtra("subtitleUrl") ?: ""
         val sourcesJsonStr = intent.getStringExtra("sourcesJson") ?: ""
         val subtitlesJsonStr = intent.getStringExtra("subtitlesJson") ?: ""
+        val episodesJsonStr = intent.getStringExtra("episodesJson") ?: ""
+        currentEpisodeIndex = intent.getIntExtra("currentEpisodeIndex", -1)
 
         allSources = try { JSONArray(sourcesJsonStr) } catch (_: Exception) { null }
         allSubtitles = try { JSONArray(subtitlesJsonStr) } catch (_: Exception) { null }
+        episodesArray = try { JSONArray(episodesJsonStr) } catch (_: Exception) { null }
 
         currentUrl = url ?: ""
         currentHeadersJson = headersJson
@@ -141,6 +169,10 @@ class PlayerActivity : AppCompatActivity() {
         bottomBar = createBottomBar()
         root.addView(bottomBar, matchParent())
 
+        errorOverlay = createErrorOverlay()
+        root.addView(errorOverlay, matchParent())
+        errorOverlay.visibility = View.GONE
+
         setContentView(root)
         window.decorView.post { immersiveMode() }
 
@@ -162,12 +194,68 @@ class PlayerActivity : AppCompatActivity() {
         }
 
         if (providerName != null && mediaRef != null) {
-            resolveAndPlay(providerName, mediaRef)
+            resolveAndPlay(providerName!!, mediaRef)
         } else if (currentUrl.isNotEmpty()) {
             loadingGroup.visibility = View.GONE
             showControlsAfterLoad()
             setupExoPlayer(currentUrl, currentHeadersJson, getCurrentSubtitleUrl())
         }
+
+        updateEpisodeButtonState()
+
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                finish()
+            }
+        })
+    }
+
+    private fun setupMediaSession() {
+        mediaSession = MediaSession(this, "SozoPlayer")
+        mediaSession?.setCallback(object : MediaSession.Callback() {
+            override fun onPlay() { player?.play() }
+            override fun onPause() { player?.pause() }
+            override fun onSkipToPrevious() { playPreviousEpisode() }
+            override fun onSkipToNext() { playNextEpisode() }
+            override fun onStop() { finish() }
+        })
+        mediaSession?.isActive = true
+
+        val sessionIntent = packageManager?.getLaunchIntentForPackage(packageName)
+        val pi = PendingIntent.getActivity(this, 0, sessionIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        mediaSession?.setSessionActivity(pi)
+    }
+
+    private fun updateMediaSession(title: String) {
+        mediaSession?.let { ms ->
+            val state = if (player?.isPlaying == true) PlaybackState.STATE_PLAYING else PlaybackState.STATE_PAUSED
+            ms.setPlaybackState(
+                PlaybackState.Builder()
+                    .setState(state, player?.currentPosition ?: 0L, 1f)
+                    .setActions(
+                        PlaybackState.ACTION_PLAY or
+                        PlaybackState.ACTION_PAUSE or
+                        PlaybackState.ACTION_SKIP_TO_PREVIOUS or
+                        PlaybackState.ACTION_SKIP_TO_NEXT or
+                        PlaybackState.ACTION_STOP
+                    )
+                    .build()
+            )
+            ms.setMetadata(
+                android.media.MediaMetadata.Builder()
+                    .putString(android.media.MediaMetadata.METADATA_KEY_TITLE, title)
+                    .putString(android.media.MediaMetadata.METADATA_KEY_DISPLAY_TITLE, title)
+                    .build()
+            )
+        }
+    }
+
+    override fun onDestroy() {
+        mediaSession?.isActive = false
+        mediaSession?.release()
+        mediaSession = null
+        sleepHandler.removeCallbacks(sleepRunnable)
+        super.onDestroy()
     }
 
     private fun getCurrentSubtitleUrl(): String {
@@ -179,6 +267,8 @@ class PlayerActivity : AppCompatActivity() {
     }
 
     private fun resolveAndPlay(providerName: String, mediaRef: String) {
+        isErrorShowing = false
+        errorOverlay.visibility = View.GONE
         loadingGroup.visibility = View.VISIBLE
         loadingText.text = "Preparing video..."
         CoroutineScope(Dispatchers.IO).launch {
@@ -217,9 +307,18 @@ class PlayerActivity : AppCompatActivity() {
                                 bestSource = s
                             }
                         }
+                        if (bestSource == null && sources.length() > 0) {
+                            bestSource = sources.getJSONObject(0)
+                        }
                         bestSource?.let { src ->
                             currentUrl = src.optString("url")
                             currentHeadersJson = src.optJSONObject("headers")?.toString() ?: "{}"
+                            currentSourceIndex = sources.length() - 1
+                            for (i in 0 until sources.length()) {
+                                if (sources.getJSONObject(i).optString("url") == currentUrl) {
+                                    currentSourceIndex = i
+                                }
+                            }
                             val subUrl = if (subs.isNotEmpty() && currentSubtitleIndex >= 0) subs[0] else ""
                             loadingGroup.animate()
                                 .alpha(0f)
@@ -232,21 +331,102 @@ class PlayerActivity : AppCompatActivity() {
                                 })
                             showControlsAfterLoad()
                             setupExoPlayer(currentUrl, currentHeadersJson, subUrl)
-                        } ?: showError("No playable source found")
+                        } ?: showError("No playable source found", providerName, mediaRef)
                     } else {
-                        showError("No sources found")
+                        showError("No sources found", providerName, mediaRef)
                     }
                 } catch (e: Exception) {
-                    showError("Failed to load: ${e.message}")
+                    showError("Failed to load: ${e.message}", providerName, mediaRef)
                 }
             }
         }
     }
 
-    private fun showError(msg: String) {
-        loadingText.text = msg
-        loadingText.setTextColor(Color.parseColor("#FF5555"))
-        loadingText.postDelayed({ finish() }, 3000)
+    private fun showError(msg: String, epProvider: String? = null, epMediaRef: String? = null) {
+        errorOverlay.visibility = View.VISIBLE
+        isErrorShowing = true
+        loadingGroup.visibility = View.GONE
+        loadingGroup.alpha = 1f
+        bufferingView.visibility = View.GONE
+        errorMessageTv.text = msg
+
+        errorRetryBtn.setOnClickListener {
+            if (epProvider != null && epMediaRef != null) {
+                resolveAndPlay(epProvider, epMediaRef)
+            } else if (currentUrl.isNotEmpty()) {
+                errorOverlay.visibility = View.GONE
+                isErrorShowing = false
+                loadingGroup.visibility = View.VISIBLE
+                loadingText.text = "Retrying..."
+                setupExoPlayer(currentUrl, currentHeadersJson, getCurrentSubtitleUrl())
+            }
+        }
+        errorBackBtn.setOnClickListener { finish() }
+    }
+
+    private fun createErrorOverlay(): FrameLayout {
+        val container = FrameLayout(this)
+        container.setBackgroundColor(Color.parseColor("#DD000000"))
+
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+        }
+        val params = FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.WRAP_CONTENT,
+            FrameLayout.LayoutParams.WRAP_CONTENT
+        )
+        params.gravity = Gravity.CENTER
+        container.addView(content, params)
+
+        val errorIcon = TextView(this).apply {
+            text = "!"
+            setTextColor(Color.parseColor("#FF5555"))
+            textSize = 48f
+            gravity = Gravity.CENTER
+        }
+        content.addView(errorIcon)
+
+        errorMessageTv = TextView(this).apply {
+            setTextColor(Color.parseColor("#CCFFFFFF"))
+            textSize = 15f
+            gravity = Gravity.CENTER
+            setPadding(dp(32), dp(8), dp(32), dp(8))
+        }
+        content.addView(errorMessageTv)
+
+        val btnRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+        }
+        content.addView(btnRow)
+
+        errorRetryBtn = TextView(this).apply {
+            text = "Retry"
+            setTextColor(Color.WHITE)
+            textSize = 15f
+            gravity = Gravity.CENTER
+            setBackgroundColor(Color.parseColor("#E50914"))
+            setPadding(dp(32), dp(12), dp(32), dp(12))
+        }
+        val retryLp = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        )
+        retryLp.setMargins(0, 0, dp(12), 0)
+        btnRow.addView(errorRetryBtn, retryLp)
+
+        errorBackBtn = TextView(this).apply {
+            text = "Back"
+            setTextColor(Color.WHITE)
+            textSize = 15f
+            gravity = Gravity.CENTER
+            setBackgroundColor(Color.parseColor("#444444"))
+            setPadding(dp(32), dp(12), dp(32), dp(12))
+        }
+        btnRow.addView(errorBackBtn)
+
+        return container
     }
 
     private fun setupExoPlayer(url: String, headersJson: String, subtitleUrl: String) {
@@ -302,23 +482,33 @@ class PlayerActivity : AppCompatActivity() {
         player?.prepare()
         player?.play()
 
+        val epTitle = getCurrentEpisodeTitle()
+        updateMediaSession(epTitle)
+
         player?.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
                 updateBuffering(playbackState == Player.STATE_BUFFERING && isControlsVisible)
                 if (playbackState == Player.STATE_READY) {
                     loadingGroup.visibility = View.GONE
                     bufferingView.visibility = View.GONE
+                    updateMediaSession(getCurrentEpisodeTitle())
+                }
+                if (playbackState == Player.STATE_ENDED) {
+                    if (sleepTimerEndOfEpisode) {
+                        finish()
+                        return
+                    }
+                    autoPlayNext()
                 }
             }
 
             override fun onPlayerError(error: PlaybackException) {
-                loadingText.text = "Playback error: ${error.localizedMessage}"
-                loadingText.setTextColor(Color.parseColor("#FF5555"))
-                loadingGroup.visibility = View.VISIBLE
+                showError("Playback error: ${error.localizedMessage}", providerName, getCurrentMediaRef())
             }
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 updateCenterPlayPauseIcon()
+                updateMediaSession(getCurrentEpisodeTitle())
             }
         })
 
@@ -328,7 +518,7 @@ class PlayerActivity : AppCompatActivity() {
                     player?.let { p ->
                         val dur = p.duration
                         if (dur > 0) {
-                            val seekPos = (dur * progress / 1000).toLong()
+                            val seekPos = dur * progress / 1000L
                             currentTimeTv.text = formatTime(seekPos)
                         }
                     }
@@ -341,7 +531,7 @@ class PlayerActivity : AppCompatActivity() {
                     val dur = p.duration
                     if (dur > 0) {
                         sb?.let {
-                            val seekPos = (dur * it.progress / 1000).toLong()
+                            val seekPos = dur * it.progress / 1000L
                             p.seekTo(seekPos)
                         }
                     }
@@ -370,6 +560,69 @@ class PlayerActivity : AppCompatActivity() {
         updater.run()
 
         if (player?.isPlaying == true) hideControls()
+
+        updateEpisodeButtonState()
+    }
+
+    private fun getCurrentEpisodeTitle(): String {
+        val base = intent.getStringExtra("title") ?: ""
+        if (episodesArray != null && currentEpisodeIndex >= 0 && currentEpisodeIndex < episodesArray!!.length()) {
+            try {
+                val ep = episodesArray!!.getJSONObject(currentEpisodeIndex)
+                val label = ep.optString("label", "")
+                if (label.isNotEmpty()) return "$base - $label"
+            } catch (_: Exception) {}
+        }
+        return base
+    }
+
+    private fun getCurrentMediaRef(): String? {
+        if (episodesArray != null && currentEpisodeIndex >= 0 && currentEpisodeIndex < episodesArray!!.length()) {
+            try {
+                return episodesArray!!.getJSONObject(currentEpisodeIndex).optString("mediaRef")
+            } catch (_: Exception) {}
+        }
+        return null
+    }
+
+    private fun playNextEpisode() {
+        if (episodesArray == null || currentEpisodeIndex < 0 || currentEpisodeIndex >= episodesArray!!.length() - 1) return
+        currentEpisodeIndex++
+        val mediaRef = getCurrentMediaRef() ?: return
+        val pName = providerName ?: return
+        resolveAndPlay(pName, mediaRef)
+        updateEpisodeButtonState()
+    }
+
+    private fun playPreviousEpisode() {
+        if (episodesArray == null || currentEpisodeIndex <= 0) return
+        currentEpisodeIndex--
+        val mediaRef = getCurrentMediaRef() ?: return
+        val pName = providerName ?: return
+        resolveAndPlay(pName, mediaRef)
+        updateEpisodeButtonState()
+    }
+
+    private fun autoPlayNext() {
+        if (episodesArray == null || currentEpisodeIndex < 0 || currentEpisodeIndex >= episodesArray!!.length() - 1) return
+        currentEpisodeIndex++
+        val mediaRef = getCurrentMediaRef() ?: return
+        val pName = providerName ?: return
+        loadingGroup.visibility = View.VISIBLE
+        loadingText.text = getCurrentEpisodeTitle()
+        resolveAndPlay(pName, mediaRef)
+        updateEpisodeButtonState()
+    }
+
+    private fun updateEpisodeButtonState() {
+        if (::prevEpBtn.isInitialized && ::nextEpBtn.isInitialized) {
+            val hasPrev = episodesArray != null && currentEpisodeIndex > 0
+            val hasNext = episodesArray != null && currentEpisodeIndex >= 0 && currentEpisodeIndex < episodesArray!!.length() - 1
+            prevEpBtn.alpha = if (hasPrev) 1f else 0.3f
+            nextEpBtn.alpha = if (hasNext) 1f else 0.3f
+            prevEpBtn.isEnabled = hasPrev
+            nextEpBtn.isEnabled = hasNext
+        }
     }
 
     private fun createLoadingOverlay(): View {
@@ -522,12 +775,12 @@ class PlayerActivity : AppCompatActivity() {
         barLp.gravity = Gravity.TOP
         container.addView(bar, barLp)
 
-        val backBtn = ImageView(this).apply {
-            setImageResource(android.R.drawable.ic_menu_close_clear_cancel)
-            setPadding(dp(16), dp(16), dp(16), dp(16))
-            scaleX = 0.7f
-            scaleY = 0.7f
-            setColorFilter(Color.WHITE)
+        val backBtn = TextView(this).apply {
+            text = "\u2190"
+            textSize = 26f
+            setTextColor(Color.WHITE)
+            gravity = Gravity.CENTER
+            setPadding(dp(12), dp(12), dp(16), dp(12))
             setOnClickListener { finish() }
         }
         bar.addView(backBtn, LinearLayout.LayoutParams(dp(52), dp(52)))
@@ -545,21 +798,45 @@ class PlayerActivity : AppCompatActivity() {
             0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f
         ).apply { setMargins(dp(4), 0, dp(4), 0) })
 
+        prevEpBtn = ImageView(this).apply {
+            setImageResource(android.R.drawable.ic_media_previous)
+            setPadding(dp(8), dp(8), dp(8), dp(8))
+            setColorFilter(Color.WHITE)
+            setOnClickListener { playPreviousEpisode() }
+        }
+        bar.addView(prevEpBtn, LinearLayout.LayoutParams(dp(44), dp(44)))
+
+        nextEpBtn = ImageView(this).apply {
+            setImageResource(android.R.drawable.ic_media_next)
+            setPadding(dp(8), dp(8), dp(8), dp(8))
+            setColorFilter(Color.WHITE)
+            setOnClickListener { playNextEpisode() }
+        }
+        bar.addView(nextEpBtn, LinearLayout.LayoutParams(dp(44), dp(44)))
+
+        sleepTimerBtn = ImageView(this).apply {
+            setImageResource(android.R.drawable.ic_lock_idle_alarm)
+            setPadding(dp(8), dp(8), dp(8), dp(8))
+            setColorFilter(Color.parseColor("#FFFFFF"))
+            setOnClickListener { showSleepTimerDialog() }
+        }
+        bar.addView(sleepTimerBtn, LinearLayout.LayoutParams(dp(44), dp(44)))
+
         sourcesBtn = ImageView(this).apply {
             setImageResource(android.R.drawable.ic_menu_sort_by_size)
-            setPadding(dp(12), dp(12), dp(12), dp(12))
+            setPadding(dp(8), dp(8), dp(8), dp(8))
             setColorFilter(Color.WHITE)
             setOnClickListener { showSourcePicker() }
         }
-        bar.addView(sourcesBtn, LinearLayout.LayoutParams(dp(48), dp(48)))
+        bar.addView(sourcesBtn, LinearLayout.LayoutParams(dp(44), dp(44)))
 
         subtitleBtn = ImageView(this).apply {
             setImageResource(android.R.drawable.ic_menu_info_details)
-            setPadding(dp(12), dp(12), dp(12), dp(12))
+            setPadding(dp(8), dp(8), dp(8), dp(8))
             setColorFilter(Color.parseColor("#E50914"))
             setOnClickListener { cycleSubtitles() }
         }
-        bar.addView(subtitleBtn, LinearLayout.LayoutParams(dp(48), dp(48)))
+        bar.addView(subtitleBtn, LinearLayout.LayoutParams(dp(44), dp(44)))
 
         return container
     }
@@ -629,6 +906,28 @@ class PlayerActivity : AppCompatActivity() {
         timeRow.addView(spacer2)
 
         return container
+    }
+
+    private fun showSleepTimerDialog() {
+        val items = arrayOf("15 minutes", "30 minutes", "60 minutes", "End of episode", "Off")
+        val dialog = AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog)
+        dialog.setTitle("Sleep Timer")
+        dialog.setItems(items) { _, which ->
+            sleepHandler.removeCallbacks(sleepRunnable)
+            when (which) {
+                0 -> { sleepTimerEnd = System.currentTimeMillis() + 15 * 60 * 1000; showToastLabel("Sleep: 15 min") }
+                1 -> { sleepTimerEnd = System.currentTimeMillis() + 30 * 60 * 1000; showToastLabel("Sleep: 30 min") }
+                2 -> { sleepTimerEnd = System.currentTimeMillis() + 60 * 60 * 1000; showToastLabel("Sleep: 60 min") }
+                3 -> { sleepTimerEndOfEpisode = true; showToastLabel("Sleep: End of episode") }
+                4 -> { sleepTimerEnd = -1; sleepTimerEndOfEpisode = false; showToastLabel("Sleep: Off") }
+            }
+            if (which in 0..2) {
+                val delay = (sleepTimerEnd - System.currentTimeMillis()).coerceAtLeast(0)
+                sleepHandler.postDelayed(sleepRunnable, delay)
+            }
+        }
+        dialog.show()
+        resetHideTimer()
     }
 
     private fun updateCenterPlayPauseIcon() {
@@ -757,8 +1056,7 @@ class PlayerActivity : AppCompatActivity() {
         val subs = allSubtitles ?: return
         if (subs.length() == 0) return
 
-        currentSubtitleIndex = (currentSubtitleIndex + 1) % (subs.length() + 1) - 1
-        // -1 = off, 0..n-1 = subtitle index
+        currentSubtitleIndex = (currentSubtitleIndex + 2) % (subs.length() + 1) - 1
 
         switchToSource(currentSourceIndex)
 
@@ -793,8 +1091,6 @@ class PlayerActivity : AppCompatActivity() {
     }
 
     private inner class PlayerGestureListener : GestureDetector.SimpleOnGestureListener() {
-        private var isVolumeGesture = false
-        private var isBrightnessGesture = false
 
         override fun onDoubleTap(e: MotionEvent): Boolean {
             player?.let { p ->
@@ -820,25 +1116,21 @@ class PlayerActivity : AppCompatActivity() {
             return true
         }
 
-        override fun onLongPress(e: MotionEvent) {
-            isVolumeGesture = e.x > widthPx / 2f
-            isBrightnessGesture = e.x <= widthPx / 2f
-        }
-
         override fun onScroll(e1: MotionEvent?, e2: MotionEvent, distanceX: Float, distanceY: Float): Boolean {
             if (e1 == null) return false
             val dy = e1.y - e2.y
-            if (abs(dy) > 30 && abs(dy) > abs(e1.x - e2.x) * 2) {
+            val dx = abs(e1.x - e2.x)
+            if (abs(dy) > 30 && abs(dy) > dx * 2) {
                 val sensitivity = 200f
                 val delta = dy / sensitivity
-                if (isVolumeGesture) {
+                if (e1.x > widthPx / 2f) {
                     val am = audioManager ?: return true
                     val maxVol = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
                     val curVol = am.getStreamVolume(AudioManager.STREAM_MUSIC)
                     val newVol = (curVol + delta).toInt().coerceIn(0, maxVol)
                     am.setStreamVolume(AudioManager.STREAM_MUSIC, newVol, 0)
                     showVolumePill(newVol, maxVol)
-                } else if (isBrightnessGesture) {
+                } else {
                     val lp = window.attributes
                     val newBright = (lp.screenBrightness + delta / 10f).coerceIn(0.01f, 1f)
                     lp.screenBrightness = newBright
@@ -854,7 +1146,7 @@ class PlayerActivity : AppCompatActivity() {
     private fun showVolumePill(volume: Int, max: Int) {
         gesturePill?.let { root.removeView(it) }
         val pct = (volume.toFloat() / max * 100).toInt()
-        val pill = createGesturePill("🔊 $pct%")
+        val pill = createGesturePill("$pct%")
         root.addView(pill, gesturePillParams())
         gesturePill = pill
     }
@@ -918,6 +1210,8 @@ class PlayerActivity : AppCompatActivity() {
 
     private fun immersiveMode() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            @Suppress("DEPRECATION")
+            window.setDecorFitsSystemWindows(false)
             window.insetsController?.hide(
                 WindowInsets.Type.statusBars() or WindowInsets.Type.navigationBars()
             )
@@ -928,7 +1222,9 @@ class PlayerActivity : AppCompatActivity() {
             window.decorView.systemUiVisibility = (
                 View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
                 View.SYSTEM_UI_FLAG_FULLSCREEN or
-                View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+                View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
+                View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
                 )
         }
     }
@@ -960,12 +1256,15 @@ class PlayerActivity : AppCompatActivity() {
     override fun onStop() {
         super.onStop()
         hideHandler.removeCallbacksAndMessages(null)
+        player?.stop()
         player?.release()
         player = null
+        mediaSession?.isActive = false
     }
 
     override fun onResume() {
         super.onResume()
         immersiveMode()
+        mediaSession?.isActive = true
     }
 }

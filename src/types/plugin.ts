@@ -25,6 +25,18 @@ export interface EpisodeItem {
   overview?: string;
 }
 
+export interface Actor {
+  name: string;
+  image: string | null;
+  role: string | null;
+}
+
+export interface Trailer {
+  url: string;
+  referer: string;
+  raw: boolean;
+}
+
 export interface DetailResult {
   provider: string;
   url: string;
@@ -35,6 +47,17 @@ export interface DetailResult {
   year: number | null;
   isSerial: boolean;
   episodes: EpisodeItem[];
+  score: string | null;
+  tags: string[];
+  duration: number | null;
+  comingSoon: boolean;
+  contentRating: string | null;
+  logoUrl: string | null;
+  imdbId: string | null;
+  tmdbId: string | null;
+  cast: Actor[];
+  recommendations: MediaItem[];
+  trailers: Trailer[];
 }
 
 export interface VideoSource {

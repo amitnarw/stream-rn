@@ -27,7 +27,7 @@ A browse/search/play streaming Android app using **React Native (Expo SDK 55)** 
 - `android/build.gradle` - Root build: Kotlin 2.3.21 (for CloudStream library compatibility)
 - `android/app/build.gradle` - App module: CloudStream library, ExoPlayer (Media3), Jsoup, kotlinx-coroutines, packaging excludes
 - `android/settings.gradle` - Expo module auto-linking
-- `android/local.properties` - `sdk.dir=C\:\\Users\\Narwal\\android-sdk`
+- `android/local.properties` - `sdk.dir=D:/Android/Sdk`
 
 ### Kotlin Native Module (`android/app/src/main/java/com/anonymous/sozornandroid/`)
 - `MainApplication.kt` - Registers `CloudStreamPackage`
@@ -37,14 +37,14 @@ A browse/search/play streaming Android app using **React Native (Expo SDK 55)** 
 - `cloudstream/PlayerActivity.kt` - ExoPlayer (Media3) activity. **Landscape mode**, top overlay (title + back), auto-hide controls, DefaultTrackSelector for adaptive quality, subtitle track support.
 - `AndroidManifest.xml` - Added PlayerActivity with `Theme.AppCompat.NoActionBar`
 
-### Assets (Plugins)
+### Assets (Plugins) — actual files on disk
 - `android/app/src/main/assets/plugins/Goojara.cs3` ✅
-- `android/app/src/main/assets/plugins/Cinemacity.cs3` ✅
-- `android/app/src/main/assets/plugins/FourKHDHub.cs3` ✅ (class verified in DEX)
-- `android/app/src/main/assets/plugins/YTS.cs3` NEW (Phisher)
-- `android/app/src/main/assets/plugins/StreamPlay.cs3` NEW (Phisher)
-- `android/app/src/main/assets/plugins/InternetArchiveProvider.cs3` NEW (Official)
-- `android/app/src/main/assets/plugins/InvidiousProvider.cs3` NEW (Official)
+- `android/app/src/main/assets/plugins/FourKHDHub.cs3` ✅
+- `android/app/src/main/assets/plugins/YTS.cs3` ✅
+- `android/app/src/main/assets/plugins/CloudPlay.cs3` ✅
+- `android/app/src/main/assets/plugins/Movies4u.cs3` ✅
+- `android/app/src/main/assets/plugins/Movierulzhd.cs3` ✅
+- `android/app/src/main/assets/plugins/HDhub4u.cs3` ✅
 
 ---
 
@@ -94,7 +94,7 @@ A browse/search/play streaming Android app using **React Native (Expo SDK 55)** 
 
 ### Environment Variables (must be set in every session)
 ```
-$env:ANDROID_HOME = "C:\Users\Narwal\android-sdk"
+$env:ANDROID_HOME = "D:\Android\Sdk"
 $env:JAVA_HOME = "C:\Users\Narwal\jdk-17"
 $env:Path = "$env:ANDROID_HOME\platform-tools;$env:Path"
 ```
@@ -120,34 +120,36 @@ npx expo run:android
 
 ---
 
-## Current State (June 15, 2026)
+## Current State (June 16, 2026)
 
 ### Working
 - Kotlin compilation passes (`BUILD SUCCESSFUL`)
 - CloudStream library dependency resolves correctly (JitPack accessible via IPv4 with `-Djava.net.preferIPv4Stack=true`)
-- All **7 plugins** in assets/plugins/ (Goojara, Cinemacity, FourKHDHub, YTS, StreamPlay, InternetArchiveProvider, InvidiousProvider)
 - TypeScript screens compile (Home, Search, Detail)
 - Native module bridge compiles
 - PlayerActivity compiles with landscape mode, subtitle support, top overlay
 - DEX byte reading fixed (`readBytes()` ensures complete read)
 - FourKHDHub class verified in DEX (`com.fourKHDHub.FourKHDHubProvider`)
-- adb connected to Nothing Phone 3 (model A024, MetroidIND)
 - Kotlin 2.3.21 + Expo modules compatibility verified (build passes)
 - **Full APK assembled successfully** (`BUILD SUCCESSFUL`)
 - **APK installed on Nothing Phone 3** (via `adb install`)
+- Network security config added (cleartext traffic allowed for streaming)
+- Offline/connectivity detection in JS bridge
+- Error UI with retry on all screens (Home, Search, Detail)
+- PlayerActivity: proper back arrow + system back handling
+- PlayerActivity: true immersive mode (edge-to-edge, hides status/nav bars on all API levels)
+- PlayerActivity: brightness/volume gestures (swipe left half = brightness, right half = volume)
+- PlayerActivity: non-fatal error overlay with Retry/Back options
+- PlayerActivity: Next/Previous episode buttons + auto-play next
+- PlayerActivity: sleep timer (15min, 30min, 60min, End of episode)
+- PlayerActivity: MediaSession integration (lock-screen controls, notification, audio focus)
 
-### Not Yet Tested
-- Runtime plugin loading - UNTESTED
-- Main page browsing - UNTESTED
-- Search - UNTESTED
-- Detail/Episode loading - UNTESTED
-- Stream playback with landscape/subtitle overlay - UNTESTED
-- FourKHDHub plugin now that DEX reads fully - UNTESTED
+### Not Yet Tested (Runtime)
+- All UI features are compile-verified but runtime-untested
 
 ### Known Issues
 - `expo-constants:createExpoConfig` warning about NODE_ENV (harmless)
 - Gradle deprecated features warnings (harmless)
-- `FLAG_FULLSCREEN`, `systemUiVisibility` deprecated on API 36 (harmless, still work)
 - The `kotlinVersion` in root project is 2.3.21 while Expo gradle plugin reports `kotlin: 2.1.20` (Expo modules are compiled with 2.1.20, metadata mismatch is non-fatal)
 
 ---
@@ -162,7 +164,7 @@ npx expo run:android
 | `search(providerName, query)` | String, String | `{items: [{provider, url, title, posterUrl, type}]}` |
 | `loadDetail(providerName, url)` | String, String | `{provider, url, title, description, posterUrl, banner, year, isSerial, episodes}` |
 | `loadLinks(providerName, data)` | String, String | `{videoUrl, sources: [{quality, url, type, host, headers}], subtitles: [{lang, url}]}` |
-| `playStream(url, headers, title, subtitleUrl)` | String, String, String, String | void (starts PlayerActivity in landscape) |
+| `playStream(url, headers, title, subtitleUrl, sourcesJson, subtitlesJson)` | String, String, String, String, String, String | void (starts PlayerActivity in landscape) |
 
 ---
 
