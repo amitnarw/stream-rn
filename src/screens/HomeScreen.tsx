@@ -8,11 +8,16 @@ import {
   TouchableOpacity,
   StyleSheet,
   Animated,
+  Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { BlurView } from 'expo-blur';
+import { LinearGradient } from 'expo-linear-gradient';
 import type { PluginProvider, HomeSection, MediaItem } from '../types/plugin';
 import * as bridge from '../api/cloudStreamBridge';
 import MediaCard from '../components/MediaCard';
+
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 function SkeletonBox({ width, height, borderRadius = 4 }: { width: number; height: number; borderRadius?: number }) {
   const opacity = useRef(new Animated.Value(0.3)).current;
@@ -34,7 +39,7 @@ function SkeletonBox({ width, height, borderRadius = 4 }: { width: number; heigh
         width,
         height,
         borderRadius,
-        backgroundColor: '#333',
+        backgroundColor: '#201f20',
         opacity,
       }}
     />
@@ -114,12 +119,12 @@ export default function HomeScreen({ navigation }: Props) {
       <View style={styles.skeletonCardsContainer}>
         {[1, 2].map((row) => (
           <View key={row} style={styles.skeletonRow}>
-            <SkeletonBox width={180} height={16} borderRadius={4} />
-            <View style={{ height: 8 }} />
+            <SkeletonBox width={140} height={18} borderRadius={4} />
+            <View style={{ height: 12 }} />
             <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-              {[1, 2, 3, 4].map((_, i) => (
+              {[1, 2, 3].map((_, i) => (
                 <View key={i} style={{ marginRight: 12 }}>
-                  <SkeletonBox width={140} height={210} borderRadius={8} />
+                  <SkeletonBox width={120} height={180} borderRadius={16} />
                 </View>
               ))}
             </ScrollView>
@@ -162,9 +167,12 @@ export default function HomeScreen({ navigation }: Props) {
           <View style={styles.header}>
             <Text style={styles.headerTitle}>Browse</Text>
             <TouchableOpacity
+              style={styles.searchBtn}
               onPress={() => navigation.navigate('Search', { selectedProvider })}
             >
-              <Text style={styles.searchLink}>Search</Text>
+              <BlurView intensity={20} tint="light" style={styles.searchBtnBlur}>
+                <Text style={styles.searchLink}>Search 🔍</Text>
+              </BlurView>
             </TouchableOpacity>
           </View>
         }
@@ -175,6 +183,7 @@ export default function HomeScreen({ navigation }: Props) {
               horizontal
               data={section.items}
               keyExtractor={(_, i) => String(i)}
+              contentContainerStyle={{ paddingHorizontal: 12 }}
               renderItem={({ item }) => (
                 <MediaCard item={item} onPress={onMediaPress} />
               )}
@@ -187,7 +196,14 @@ export default function HomeScreen({ navigation }: Props) {
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+      {/* Background Glow */}
+      <LinearGradient
+        colors={['rgba(189, 92, 255, 0.15)', 'transparent']}
+        style={styles.ambientGlow}
+        pointerEvents="none"
+      />
+
       {error && !loading ? (
         <View style={styles.centerState}>
           <Text style={styles.errorText}>{error}</Text>
@@ -200,7 +216,7 @@ export default function HomeScreen({ navigation }: Props) {
           {loading ? (
             <View style={styles.providerRow}>
               <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                {[1, 2, 3, 4, 5].map((_, i) => (
+                {[1, 2, 3].map((_, i) => (
                   <View key={i} style={{ marginRight: 8 }}>
                     <SkeletonBox width={90} height={36} borderRadius={20} />
                   </View>
@@ -209,26 +225,39 @@ export default function HomeScreen({ navigation }: Props) {
             </View>
           ) : (
             <View style={styles.providerRow}>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                {providers.map((p) => (
-                  <TouchableOpacity
-                    key={p.name}
-                    style={[
-                      styles.providerBtn,
-                      selectedProvider === p.name && styles.providerBtnActive,
-                    ]}
-                    onPress={() => selectProvider(p.name)}
-                  >
-                    <Text
-                      style={[
-                        styles.providerText,
-                        selectedProvider === p.name && styles.providerTextActive,
-                      ]}
+              <ScrollView 
+                horizontal 
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{ paddingHorizontal: 16 }}
+              >
+                {providers.map((p) => {
+                  const isActive = selectedProvider === p.name;
+                  return (
+                    <TouchableOpacity
+                      key={p.name}
+                      style={styles.providerBtnContainer}
+                      onPress={() => selectProvider(p.name)}
                     >
-                      {p.name}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
+                      <BlurView 
+                        intensity={isActive ? 60 : 25} 
+                        tint="dark" 
+                        style={[
+                          styles.providerBtnBlur,
+                          isActive && styles.providerBtnActiveBorder
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.providerText,
+                            isActive && styles.providerTextActive,
+                          ]}
+                        >
+                          {p.name}
+                        </Text>
+                      </BlurView>
+                    </TouchableOpacity>
+                  );
+                })}
               </ScrollView>
             </View>
           )}
@@ -236,7 +265,7 @@ export default function HomeScreen({ navigation }: Props) {
           <View style={styles.contentArea}>
             {loading ? (
               <View style={styles.centerState}>
-                <ActivityIndicator size="large" color="#fff" />
+                <ActivityIndicator size="large" color="#bd5cff" />
               </View>
             ) : (
               renderContent()
@@ -249,47 +278,128 @@ export default function HomeScreen({ navigation }: Props) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#111' },
+  container: { 
+    flex: 1, 
+    backgroundColor: '#050505' 
+  },
+  ambientGlow: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 300,
+    zIndex: 0,
+  },
   providerRow: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#333',
+    paddingVertical: 12,
     minHeight: 56,
+    zIndex: 10,
   },
-  providerBtn: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+  providerBtnContainer: {
+    marginRight: 10,
     borderRadius: 20,
-    backgroundColor: '#333',
-    marginRight: 8,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
   },
-  providerBtnActive: { backgroundColor: '#e50914' },
-  providerText: { color: '#ccc', fontSize: 14 },
-  providerTextActive: { color: '#fff', fontWeight: 'bold' },
-  contentArea: { flex: 1 },
-  list: { paddingBottom: 24 },
+  providerBtnBlur: {
+    paddingHorizontal: 18,
+    paddingVertical: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  providerBtnActiveBorder: {
+    borderColor: '#bd5cff',
+    backgroundColor: 'rgba(189, 92, 255, 0.15)',
+  },
+  providerText: { 
+    color: '#A0A0A5', 
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  providerTextActive: { 
+    color: '#e3b5ff', 
+    fontWeight: '700' 
+  },
+  contentArea: { 
+    flex: 1 
+  },
+  list: { 
+    paddingBottom: 40 
+  },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
   },
-  headerTitle: { color: '#fff', fontSize: 24, fontWeight: 'bold' },
-  searchLink: { color: '#e50914', fontSize: 16 },
-  section: { marginBottom: 8 },
-  sectionTitle: { color: '#fff', fontSize: 18, fontWeight: 'bold', paddingHorizontal: 16, marginBottom: 8 },
-  skeletonCardsContainer: { paddingTop: 16 },
-  skeletonRow: { marginBottom: 24, paddingHorizontal: 16 },
-  centerState: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
-  errorText: { color: '#e50914', fontSize: 15, textAlign: 'center', marginBottom: 16, lineHeight: 22 },
-  emptyStateText: { color: '#666', fontSize: 16, textAlign: 'center' },
+  headerTitle: { 
+    color: '#fff', 
+    fontSize: 28, 
+    fontWeight: '800',
+    letterSpacing: -0.5,
+  },
+  searchBtn: {
+    borderRadius: 16,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  searchBtnBlur: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  searchLink: { 
+    color: '#fff', 
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  section: { 
+    marginBottom: 20 
+  },
+  sectionTitle: { 
+    color: '#fff', 
+    fontSize: 18, 
+    fontWeight: '800', 
+    paddingHorizontal: 20, 
+    marginBottom: 12,
+    letterSpacing: -0.2,
+  },
+  skeletonCardsContainer: { 
+    paddingTop: 16 
+  },
+  skeletonRow: { 
+    marginBottom: 24, 
+    paddingHorizontal: 20 
+  },
+  centerState: { 
+    flex: 1, 
+    justifyContent: 'center', 
+    alignItems: 'center', 
+    padding: 24 
+  },
+  errorText: { 
+    color: '#ffb4ab', 
+    fontSize: 15, 
+    textAlign: 'center', 
+    marginBottom: 16, 
+    lineHeight: 22 
+  },
+  emptyStateText: { 
+    color: '#666', 
+    fontSize: 16, 
+    textAlign: 'center' 
+  },
   retryBtn: {
-    backgroundColor: '#e50914',
+    backgroundColor: '#bd5cff',
     paddingHorizontal: 32,
     paddingVertical: 12,
     borderRadius: 24,
   },
-  retryBtnText: { color: '#fff', fontSize: 15, fontWeight: 'bold' },
+  retryBtnText: { 
+    color: '#fff', 
+    fontSize: 15, 
+    fontWeight: 'bold' 
+  },
 });

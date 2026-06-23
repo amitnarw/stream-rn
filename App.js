@@ -14,14 +14,13 @@ export default function App() {
       <StatusBar style="light" />
       <Stack.Navigator
         screenOptions={{
-          headerStyle: { backgroundColor: '#111' },
-          headerTintColor: '#fff',
-          contentStyle: { backgroundColor: '#111' },
+          headerShown: false,
+          contentStyle: { backgroundColor: '#050505' },
         }}
       >
-        <Stack.Screen name="Home" component={HomeScreen} options={{ title: 'SozoRN' }} />
-        <Stack.Screen name="Search" component={SearchScreen} options={{ title: 'Search' }} />
-        <Stack.Screen name="Detail" component={DetailScreen} options={{ title: 'Detail' }} />
+        <Stack.Screen name="Home" component={HomeScreen} />
+        <Stack.Screen name="Search" component={SearchScreen} />
+        <Stack.Screen name="Detail" component={DetailScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );

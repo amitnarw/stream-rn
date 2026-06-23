@@ -42,25 +42,30 @@ const styles = StyleSheet.create({
   card: {
     width: CARD_WIDTH,
     marginBottom: 16,
-    marginHorizontal: 4,
+    marginHorizontal: 6,
   },
   poster: {
     width: CARD_WIDTH,
     height: CARD_WIDTH * 1.5,
-    borderRadius: 8,
-    backgroundColor: '#222',
+    borderRadius: 16,
+    backgroundColor: '#1c1b1c',
   },
   placeholder: {
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
   },
   placeholderText: {
-    color: '#666',
+    color: '#8e8e93',
     fontSize: 32,
   },
   title: {
-    color: '#fff',
+    color: '#e5e2e3',
     fontSize: 12,
-    marginTop: 4,
+    fontWeight: '500',
+    marginTop: 6,
+    paddingHorizontal: 2,
+    lineHeight: 16,
   },
 });
