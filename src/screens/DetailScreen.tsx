@@ -2,11 +2,11 @@ import React, { useEffect, useState, useRef } from "react";
 import {
   View, Text, Image, ScrollView, TouchableOpacity,
   ActivityIndicator, StyleSheet, FlatList,
-  Modal, Alert, Animated, Dimensions, Pressable, Linking,
+  Alert, Animated, Dimensions, Pressable, Linking,
 } from "react-native";
 import { SafeAreaView } from 'react-native-safe-area-context';
 import YoutubeIframe from 'react-native-youtube-iframe';
-import { BlurView } from 'expo-blur';
+import { BlurView, BlurTargetView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import type { DetailResult, EpisodeItem, VideoSource, Trailer, Actor } from "../types/plugin";
 import * as bridge from "../api/cloudStreamBridge";
@@ -23,6 +23,7 @@ function extractYoutubeId(url: string): string | null {
 interface Props { route: any; navigation: any }
 
 export default function DetailScreen({ route, navigation }: Props) {
+  const blurTargetRef = useRef(null);
   const { providerName, url } = route.params;
   const [detail, setDetail] = useState<DetailResult | null>(null);
   const [episodes, setEpisodes] = useState<EpisodeItem[]>([]);
@@ -184,7 +185,13 @@ export default function DetailScreen({ route, navigation }: Props) {
             play={trailerPlaying}
           />
           <TouchableOpacity style={styles.closeTrailerBtn} onPress={onCloseTrailer}>
-            <BlurView intensity={50} tint="dark" style={styles.closeTrailerBlur}>
+            <BlurView 
+              intensity={50} 
+              tint="dark" 
+              style={styles.closeTrailerBlur}
+              blurTarget={blurTargetRef}
+              blurMethod="dimezisBlurView"
+            >
               <Text style={styles.closeTrailerText}>✕</Text>
             </BlurView>
           </TouchableOpacity>
@@ -217,7 +224,13 @@ export default function DetailScreen({ route, navigation }: Props) {
         {/* Custom Header Bar */}
         <View style={styles.headerBar}>
           <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-            <BlurView intensity={40} tint="dark" style={styles.backButtonBlur}>
+            <BlurView 
+              intensity={40} 
+              tint="dark" 
+              style={styles.backButtonBlur}
+              blurTarget={blurTargetRef}
+              blurMethod="dimezisBlurView"
+            >
               <Text style={styles.backButtonText}>←</Text>
             </BlurView>
           </TouchableOpacity>
@@ -228,7 +241,13 @@ export default function DetailScreen({ route, navigation }: Props) {
         {/* Video Play Trailer Button overlay */}
         {detail?.trailers && detail.trailers.length > 0 && (
           <TouchableOpacity style={styles.playTrailerBtn} onPress={onTrailerPress}>
-            <BlurView intensity={30} tint="light" style={styles.playTrailerBlur}>
+            <BlurView 
+              intensity={30} 
+              tint="light" 
+              style={styles.playTrailerBlur}
+              blurTarget={blurTargetRef}
+              blurMethod="dimezisBlurView"
+            >
               <Text style={styles.playTrailerBtnText}>▶ Play Trailer</Text>
             </BlurView>
           </TouchableOpacity>
@@ -236,18 +255,35 @@ export default function DetailScreen({ route, navigation }: Props) {
 
         {/* Metadata Pill */}
         <View style={styles.metadataPillContainer}>
-          <BlurView intensity={50} tint="dark" style={styles.metadataPill}>
-            <Text style={styles.metadataText}>{detail?.year || '2026'}</Text>
-            <View style={styles.pillDot} />
+          <BlurView 
+            intensity={50} 
+            tint="dark" 
+            style={styles.metadataPill}
+            blurTarget={blurTargetRef}
+            blurMethod="dimezisBlurView"
+          >
+            {/* Year */}
+            {detail?.year && <Text style={styles.metadataText}>{detail.year}</Text>}
+            
+            {/* Dot Separator */}
+            {detail?.year && (detail?.score || detail?.contentRating || detail?.isSerial || detail?.duration) && <View style={styles.pillDot} />}
+
+            {/* Score */}
+            {detail?.score && <Text style={styles.metadataText}>⭐ {detail.score}</Text>}
+            {detail?.score && (detail?.contentRating || detail?.isSerial || detail?.duration) && <View style={styles.pillDot} />}
+
+            {/* Rating */}
+            {detail?.contentRating && <Text style={styles.metadataText}>{detail.contentRating}</Text>}
+            {detail?.contentRating && (detail?.isSerial || detail?.duration) && <View style={styles.pillDot} />}
+
+            {/* Format/Length */}
             <Text style={styles.metadataText}>
-              {detail?.duration 
-                ? `${Math.floor(detail.duration / 60)}h ${detail.duration % 60}m` 
-                : detail?.isSerial ? 'Series' : '2h'}
+              {detail?.isSerial 
+                ? `${detail.episodes.length} Episodes` 
+                : detail?.duration 
+                  ? `${Math.floor(detail.duration / 60)}h ${detail.duration % 60}m` 
+                  : 'Movie'}
             </Text>
-            <View style={styles.pillDot} />
-            <Text style={styles.metadataText}>CC</Text>
-            <View style={styles.pillDot} />
-            <Text style={styles.metadataText}>4K</Text>
           </BlurView>
         </View>
       </View>
@@ -287,12 +323,19 @@ export default function DetailScreen({ route, navigation }: Props) {
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
-      {/* Top Section: Hero Banner / Trailer */}
-      {renderTopArea()}
-
-      {/* Details Bottom Sheet (Frosted Glassmorphic) */}
-      <View style={styles.bottomSheet}>
-        <BlurView intensity={90} tint="dark" style={styles.blurSheet}>
+      <BlurTargetView ref={blurTargetRef} style={styles.blurTarget}>
+        {/* Top Section: Hero Banner / Trailer */}
+        {renderTopArea()}
+  
+        {/* Details Bottom Sheet (Frosted Glassmorphic) */}
+        <View style={styles.bottomSheet}>
+          <BlurView 
+            intensity={90} 
+            tint="dark" 
+            style={styles.blurSheet}
+            blurTarget={blurTargetRef}
+            blurMethod="dimezisBlurView"
+          >
           <ScrollView 
             showsVerticalScrollIndicator={false} 
             contentContainerStyle={styles.scrollContent}
@@ -301,10 +344,46 @@ export default function DetailScreen({ route, navigation }: Props) {
             <Text style={styles.detailTitle}>{detail.title}</Text>
             
             {detail.isSerial && seasons.length > 1 && (
-              <TouchableOpacity style={styles.seasonSelector} onPress={() => setShowSeasonPicker(true)}>
-                <Text style={styles.seasonText}>Season {selectedSeason}</Text>
-                <Text style={styles.chevron}>▼</Text>
-              </TouchableOpacity>
+              <View style={{ zIndex: 100, position: 'relative', alignSelf: 'center' }}>
+                <TouchableOpacity style={styles.seasonSelector} onPress={() => setShowSeasonPicker(!showSeasonPicker)}>
+                  <Text style={styles.seasonText}>Season {selectedSeason}</Text>
+                  <Text style={styles.chevron}>{showSeasonPicker ? '▲' : '▼'}</Text>
+                </TouchableOpacity>
+                {showSeasonPicker && (
+                  <View style={styles.seasonDropdown}>
+                    <BlurView 
+                      intensity={95} 
+                      tint="dark" 
+                      style={styles.seasonDropdownBlur}
+                      blurTarget={blurTargetRef}
+                      blurMethod="dimezisBlurView"
+                    >
+                      <ScrollView style={styles.seasonDropdownScroll} nestedScrollEnabled={true}>
+                        {seasons.map((s) => (
+                          <TouchableOpacity
+                            key={s}
+                            style={[
+                              styles.seasonDropdownRow,
+                              selectedSeason === s && styles.seasonDropdownRowActive
+                            ]}
+                            onPress={() => {
+                              setSelectedSeason(s);
+                              setShowSeasonPicker(false);
+                            }}
+                          >
+                            <Text style={[
+                              styles.seasonDropdownRowText,
+                              selectedSeason === s && styles.seasonDropdownRowTextActive
+                            ]}>
+                              Season {s}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </ScrollView>
+                    </BlurView>
+                  </View>
+                )}
+              </View>
             )}
 
             {/* Description */}
@@ -379,7 +458,13 @@ export default function DetailScreen({ route, navigation }: Props) {
                         />
                         {/* Play overlay badge */}
                         <View style={styles.episodePlayOverlay}>
-                          <BlurView intensity={30} tint="light" style={styles.episodePlayCircle}>
+                          <BlurView 
+                            intensity={30} 
+                            tint="light" 
+                            style={styles.episodePlayCircle}
+                            blurTarget={blurTargetRef}
+                            blurMethod="dimezisBlurView"
+                          >
                             <Text style={styles.playArrow}>▶</Text>
                           </BlurView>
                         </View>
@@ -400,7 +485,7 @@ export default function DetailScreen({ route, navigation }: Props) {
                           <ActivityIndicator size="small" color="#e3b5ff" />
                         ) : (
                           <View style={styles.downloadIconCircle}>
-                            <Text style={styles.downloadIcon}>↓</Text>
+                            <Text style={styles.downloadIcon}>▶</Text>
                           </View>
                         )}
                       </View>
@@ -445,17 +530,19 @@ export default function DetailScreen({ route, navigation }: Props) {
           </ScrollView>
         </BlurView>
       </View>
+      </BlurTargetView>
 
-      {/* Source Picker Modal (Glassmorphic) */}
-      <Modal 
-        visible={showSourcePicker} 
-        transparent 
-        animationType="none" 
-        onRequestClose={() => { setShowSourcePicker(false); setPlayingEpisode(null); }}
-      >
+      {/* Source Picker Overlay (Glassmorphic) */}
+      {showSourcePicker && (
         <Pressable style={styles.sheetOverlay} onPress={() => { setShowSourcePicker(false); setPlayingEpisode(null); }}>
           <Animated.View style={[styles.sheet, { transform: [{ translateY: sheetAnim }] }]}>
-            <BlurView intensity={95} tint="dark" style={styles.sheetBlur}>
+            <BlurView 
+              intensity={95} 
+              tint="dark" 
+              style={styles.sheetBlur}
+              blurTarget={blurTargetRef}
+              blurMethod="dimezisBlurView"
+            >
               <Pressable onPress={(e) => e.stopPropagation()}>
                 <View style={styles.sheetHandle} />
                 <Text style={styles.sheetTitle}>Select Source</Text>
@@ -494,45 +581,9 @@ export default function DetailScreen({ route, navigation }: Props) {
             </BlurView>
           </Animated.View>
         </Pressable>
-      </Modal>
+      )}
 
-      {/* Season Picker Modal */}
-      <Modal
-        visible={showSeasonPicker}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowSeasonPicker(false)}
-      >
-        <Pressable style={styles.modalOverlay} onPress={() => setShowSeasonPicker(false)}>
-          <View style={styles.seasonPickerContainer}>
-            <BlurView intensity={90} tint="dark" style={styles.seasonPickerBlur}>
-              <Text style={styles.seasonPickerTitle}>Select Season</Text>
-              <ScrollView style={styles.seasonScroll}>
-                {seasons.map((s) => (
-                  <TouchableOpacity
-                    key={s}
-                    style={[
-                      styles.seasonRowButton,
-                      selectedSeason === s && styles.seasonRowButtonActive
-                    ]}
-                    onPress={() => {
-                      setSelectedSeason(s);
-                      setShowSeasonPicker(false);
-                    }}
-                  >
-                    <Text style={[
-                      styles.seasonRowText,
-                      selectedSeason === s && styles.seasonRowTextActive
-                    ]}>
-                      Season {s}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-            </BlurView>
-          </View>
-        </Pressable>
-      </Modal>
+      {/* Season Picker Modal removed */}
     </SafeAreaView>
   );
 }
@@ -541,6 +592,9 @@ const styles = StyleSheet.create({
   container: { 
     flex: 1, 
     backgroundColor: "#050505" 
+  },
+  blurTarget: {
+    flex: 1,
   },
   loadingContainer: {
     flex: 1,
@@ -942,8 +996,9 @@ const styles = StyleSheet.create({
   },
   downloadIcon: {
     color: 'rgba(255,255,255,0.8)',
-    fontSize: 12,
+    fontSize: 10,
     fontWeight: 'bold',
+    marginLeft: 2,
   },
   linksErrorContainer: { 
     paddingHorizontal: 16, 
@@ -957,9 +1012,14 @@ const styles = StyleSheet.create({
 
   // Source Picker Bottom Sheet
   sheetOverlay: { 
-    flex: 1, 
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
     justifyContent: "flex-end", 
-    backgroundColor: "rgba(0,0,0,0.6)" 
+    backgroundColor: "rgba(0,0,0,0.6)",
+    zIndex: 100,
   },
   sheet: { 
     borderTopLeftRadius: 24, 
@@ -1060,51 +1120,45 @@ const styles = StyleSheet.create({
     fontWeight: "600" 
   },
 
-  // Season Picker Modal Layout
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  seasonPickerContainer: {
-    width: SCREEN_WIDTH * 0.8,
-    maxHeight: SCREEN_HEIGHT * 0.5,
-    borderRadius: 24,
+  // Season Dropdown Layout
+  seasonDropdown: {
+    position: 'absolute',
+    top: 40,
+    alignSelf: 'center',
+    width: 140,
+    maxHeight: 200,
+    borderRadius: 16,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
+    borderColor: 'rgba(255, 255, 255, 0.12)',
+    zIndex: 1000,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
   },
-  seasonPickerBlur: {
-    padding: 24,
+  seasonDropdownBlur: {
+    paddingVertical: 6,
   },
-  seasonPickerTitle: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: '800',
-    marginBottom: 16,
-    textAlign: 'center',
+  seasonDropdownScroll: {
+    maxHeight: 188,
   },
-  seasonScroll: {
-    maxHeight: SCREEN_HEIGHT * 0.35,
-  },
-  seasonRowButton: {
-    paddingVertical: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.05)',
+  seasonDropdownRow: {
+    paddingVertical: 10,
+    paddingHorizontal: 16,
     alignItems: 'center',
   },
-  seasonRowButtonActive: {
-    backgroundColor: 'rgba(189, 92, 255, 0.1)',
-    borderRadius: 8,
+  seasonDropdownRowActive: {
+    backgroundColor: 'rgba(189, 92, 255, 0.15)',
   },
-  seasonRowText: {
-    color: 'rgba(255,255,255,0.6)',
-    fontSize: 16,
+  seasonDropdownRowText: {
+    color: '#A0A0A5',
+    fontSize: 14,
     fontWeight: '500',
   },
-  seasonRowTextActive: {
-    color: '#e3b5ff',
+  seasonDropdownRowTextActive: {
+    color: '#bd5cff',
     fontWeight: '700',
   },
 

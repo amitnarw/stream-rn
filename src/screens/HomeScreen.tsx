@@ -198,11 +198,11 @@ export default function HomeScreen({ navigation }: Props) {
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       {/* Background Glow */}
-      <LinearGradient
-        colors={['rgba(189, 92, 255, 0.15)', 'transparent']}
-        style={styles.ambientGlow}
-        pointerEvents="none"
-      />
+        <LinearGradient
+          colors={['rgba(189, 92, 255, 0.15)', 'transparent']}
+          style={styles.ambientGlow}
+          pointerEvents="none"
+        />
 
       {error && !loading ? (
         <View style={styles.centerState}>
