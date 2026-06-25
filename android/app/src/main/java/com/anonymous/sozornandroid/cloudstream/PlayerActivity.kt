@@ -478,7 +478,42 @@ class PlayerActivity : AppCompatActivity() {
             )
         }
 
+        val id = intent.getStringExtra("imdbId") ?: ""
+        val mediaType = intent.getStringExtra("mediaType") ?: "movie"
+        val season = getCurrentSeasonNumber()
+        val episode = getCurrentEpisodeNumber()
+
+        var savedPosition = 0L
+        if (id.isNotEmpty()) {
+            val prefs = getSharedPreferences("sozo_playback_history", MODE_PRIVATE)
+            val historyStr = prefs.getString("history", "[]") ?: "[]"
+            try {
+                val historyArr = JSONArray(historyStr)
+                for (i in 0 until historyArr.length()) {
+                    val obj = historyArr.getJSONObject(i)
+                    val oldId = obj.optString("imdbId")
+                    if (oldId == id) {
+                        val oldType = obj.optString("mediaType")
+                        if (oldType == "series") {
+                            val oldSeason = obj.optInt("season")
+                            val oldEpisode = obj.optInt("episode")
+                            if (oldSeason == season && oldEpisode == episode) {
+                                savedPosition = obj.optLong("position", 0L)
+                                break
+                            }
+                        } else {
+                            savedPosition = obj.optLong("position", 0L)
+                            break
+                        }
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+
         player?.setMediaItem(mediaItemBuilder.build())
+        if (savedPosition > 0L) {
+            player?.seekTo(savedPosition)
+        }
         player?.prepare()
         player?.play()
 
@@ -1254,12 +1289,108 @@ class PlayerActivity : AppCompatActivity() {
     }
 
     override fun onStop() {
+        savePlaybackPosition()
         super.onStop()
         hideHandler.removeCallbacksAndMessages(null)
         player?.stop()
         player?.release()
         player = null
         mediaSession?.isActive = false
+    }
+
+    private fun getCurrentSeasonNumber(): Int {
+        if (episodesArray != null && currentEpisodeIndex >= 0 && currentEpisodeIndex < episodesArray!!.length()) {
+            try {
+                val ep = episodesArray!!.getJSONObject(currentEpisodeIndex)
+                return ep.optInt("season", 1)
+            } catch (_: Exception) {}
+        }
+        return intent.getIntExtra("season", 1)
+    }
+
+    private fun getCurrentEpisodeNumber(): Int {
+        if (episodesArray != null && currentEpisodeIndex >= 0 && currentEpisodeIndex < episodesArray!!.length()) {
+            try {
+                val ep = episodesArray!!.getJSONObject(currentEpisodeIndex)
+                return ep.optInt("episode", 1)
+            } catch (_: Exception) {}
+        }
+        return intent.getIntExtra("episode", 1)
+    }
+
+    private fun getCurrentEpisodeLabel(): String {
+        if (episodesArray != null && currentEpisodeIndex >= 0 && currentEpisodeIndex < episodesArray!!.length()) {
+            try {
+                val ep = episodesArray!!.getJSONObject(currentEpisodeIndex)
+                return ep.optString("label", "")
+            } catch (_: Exception) {}
+        }
+        return intent.getStringExtra("episodeTitle") ?: ""
+    }
+
+    private fun savePlaybackPosition() {
+        val exo = player ?: return
+        val pos = exo.currentPosition
+        val dur = exo.duration
+        val id = intent.getStringExtra("imdbId") ?: ""
+        if (id.isEmpty()) return
+        
+        val mediaType = intent.getStringExtra("mediaType") ?: "movie"
+        val posterUrl = intent.getStringExtra("posterUrl") ?: ""
+        val season = getCurrentSeasonNumber()
+        val episode = getCurrentEpisodeNumber()
+        val episodeTitle = getCurrentEpisodeLabel()
+        val videoTitle = intent.getStringExtra("title") ?: ""
+
+        // If watched more than 95%, we'll consider it finished and not show it in continue watching anymore
+        val isFinished = dur > 0 && pos > (dur * 0.95)
+
+        val prefs = getSharedPreferences("sozo_playback_history", MODE_PRIVATE)
+        val historyStr = prefs.getString("history", "[]") ?: "[]"
+        val historyArr = try { JSONArray(historyStr) } catch (_: Exception) { JSONArray() }
+        
+        val item = JSONObject().apply {
+            put("imdbId", id)
+            put("mediaType", mediaType)
+            put("posterUrl", posterUrl)
+            put("season", season)
+            put("episode", episode)
+            put("episodeTitle", episodeTitle)
+            put("videoTitle", videoTitle)
+            put("position", pos)
+            put("duration", if (dur > 0) dur else 1L)
+            put("lastWatched", System.currentTimeMillis())
+        }
+        
+        val newArr = JSONArray()
+        if (!isFinished) {
+            newArr.put(item)
+        }
+        
+        for (i in 0 until historyArr.length()) {
+            val old = historyArr.getJSONObject(i)
+            val oldId = old.optString("imdbId")
+            if (oldId == id) {
+                if (mediaType == "movie") {
+                    continue
+                } else {
+                    val oldSeason = old.optInt("season")
+                    val oldEpisode = old.optInt("episode")
+                    if (oldSeason == season && oldEpisode == episode) {
+                        continue
+                    }
+                }
+            }
+            newArr.put(old)
+        }
+        
+        val finalArr = JSONArray()
+        val limit = minOf(newArr.length(), 20)
+        for (i in 0 until limit) {
+            finalArr.put(newArr.get(i))
+        }
+        
+        prefs.edit().putString("history", finalArr.toString()).apply()
     }
 
     override fun onResume() {

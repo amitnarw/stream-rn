@@ -209,4 +209,23 @@ Use Gradle 9.x format: `implementation(...)` with parentheses, not string notati
 ### "Cannot fit requested classes in a single dex file"
 Add `multiDexEnabled true` to `defaultConfig` in app/build.gradle.
 
+### "TypeError: cannot add a new property" (Ref Binding in Fabric / React Native 19)
+Under React Native 19 / Fabric New Architecture, RefObjects (e.g. returned by `useRef`) are frozen. Do NOT pass custom objects with getters/setters as `ref` props to native components. Instead, use the **Callback Ref with State** pattern:
+1. Create a standard RefObject: `const blurTargetRef = useRef<any>(null);`
+2. Define a callback setter:
+   ```tsx
+   const setBlurTargetRef = (val: any) => {
+     blurTargetRef.current = val;
+     if (val !== blurTarget) {
+       setBlurTarget(val);
+     }
+   };
+   ```
+3. Pass the callback ref to the target view: `<BlurTargetView ref={setBlurTargetRef as any}>`
+4. Pass the standard RefObject to the consumer: `<BlurView blurTarget={blurTargetRef}>`
+
+### "TypeError: cannot add a new property" (Animated Styles on Non-Animated Components)
+Do NOT pass `Animated.Value` or `Animated.Interpolation` variables (such as animated opacity) directly to the `style` prop of standard non-animated components (like `BlurView`). This will cause a Hermes crash during style resolution. 
+- **Fix:** Wrap the non-animated component inside a standard `<Animated.View style={[StyleSheet.absoluteFillObject, { opacity: animatedVal }]}>` and keep the inner component's styles static.
+
 ---

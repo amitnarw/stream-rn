@@ -115,11 +115,20 @@ export default function DetailScreen({ route, navigation }: Props) {
       season: e.season,
     }));
     bridge.playStream(
-      source.url, source.headers, title, subUrl,
+      source.url,
+      source.headers,
+      title,
+      subUrl,
       sources.map(s => ({ quality: s.quality, url: s.url, type: s.type, headers: s.headers })),
       subtitles,
       JSON.stringify(episodesPayload),
       playingEpisode ?? -1,
+      detail?.imdbId || '',
+      detail?.isSerial ? 'series' : 'movie',
+      detail?.posterUrl || '',
+      currentEp?.season || 1,
+      currentEp?.episode || 1,
+      currentEp?.label || '',
     );
   }
 

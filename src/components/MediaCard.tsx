@@ -1,11 +1,12 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import {
-  TouchableOpacity,
+  Pressable,
   Image,
   Text,
   View,
   StyleSheet,
   Dimensions,
+  Animated,
 } from 'react-native';
 import type { MediaItem } from '../types/plugin';
 
@@ -18,23 +19,50 @@ interface Props {
 }
 
 export default function MediaCard({ item, onPress }: Props) {
+  const scale = useRef(new Animated.Value(1)).current;
+
+  const handlePressIn = () => {
+    Animated.spring(scale, {
+      toValue: 0.94,
+      useNativeDriver: true,
+      speed: 40,
+      bounciness: 0,
+    }).start();
+  };
+
+  const handlePressOut = () => {
+    Animated.spring(scale, {
+      toValue: 1,
+      useNativeDriver: true,
+      speed: 40,
+      bounciness: 0,
+    }).start();
+  };
+
   return (
-    <TouchableOpacity style={styles.card} onPress={() => onPress(item)}>
-      {item.posterUrl ? (
-        <Image
-          source={{ uri: item.posterUrl }}
-          style={styles.poster}
-          resizeMode="cover"
-        />
-      ) : (
-        <View style={[styles.poster, styles.placeholder]}>
-          <Text style={styles.placeholderText}>?</Text>
-        </View>
-      )}
-      <Text style={styles.title} numberOfLines={2}>
-        {item.title}
-      </Text>
-    </TouchableOpacity>
+    <Pressable
+      onPress={() => onPress(item)}
+      onPressIn={handlePressIn}
+      onPressOut={handlePressOut}
+      style={styles.card}
+    >
+      <Animated.View style={[styles.cardContent, { transform: [{ scale }] }]}>
+        {item.posterUrl ? (
+          <Image
+            source={{ uri: item.posterUrl }}
+            style={styles.poster}
+            resizeMode="cover"
+          />
+        ) : (
+          <View style={[styles.poster, styles.placeholder]}>
+            <Text style={styles.placeholderText}>?</Text>
+          </View>
+        )}
+        <Text style={styles.title} numberOfLines={2}>
+          {item.title}
+        </Text>
+      </Animated.View>
+    </Pressable>
   );
 }
 
@@ -44,11 +72,16 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     marginHorizontal: 6,
   },
+  cardContent: {
+    width: '100%',
+  },
   poster: {
     width: CARD_WIDTH,
     height: CARD_WIDTH * 1.5,
     borderRadius: 16,
     backgroundColor: '#1c1b1c',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
   },
   placeholder: {
     alignItems: 'center',

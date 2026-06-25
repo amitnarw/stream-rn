@@ -105,11 +105,17 @@ class CloudStreamModule(reactContext: ReactApplicationContext) :
         url: String,
         headers: String,
         title: String,
-        subtitleUrl: String = "",
-        sourcesJson: String = "",
-        subtitlesJson: String = "",
-        episodesJson: String = "",
-        currentEpisodeIndex: Int = -1
+        subtitleUrl: String,
+        sourcesJson: String,
+        subtitlesJson: String,
+        episodesJson: String,
+        currentEpisodeIndex: Int,
+        imdbId: String,
+        mediaType: String,
+        posterUrl: String,
+        season: Int,
+        episode: Int,
+        episodeTitle: String
     ) {
         try {
             val context = reactApplicationContext
@@ -123,11 +129,39 @@ class CloudStreamModule(reactContext: ReactApplicationContext) :
                 putExtra("subtitlesJson", subtitlesJson)
                 putExtra("episodesJson", episodesJson)
                 putExtra("currentEpisodeIndex", currentEpisodeIndex)
+                putExtra("imdbId", imdbId)
+                putExtra("mediaType", mediaType)
+                putExtra("posterUrl", posterUrl)
+                putExtra("season", season)
+                putExtra("episode", episode)
+                putExtra("episodeTitle", episodeTitle)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
             context.startActivity(intent)
         } catch (e: Exception) {
             Log.e("CloudStreamModule", "Error starting player", e)
+        }
+    }
+
+    @ReactMethod
+    fun getPlaybackHistory(promise: Promise) {
+        try {
+            val prefs = reactApplicationContext.getSharedPreferences("sozo_playback_history", android.content.Context.MODE_PRIVATE)
+            val history = prefs.getString("history", "[]") ?: "[]"
+            promise.resolve(history)
+        } catch (e: Exception) {
+            promise.resolve("[]")
+        }
+    }
+
+    @ReactMethod
+    fun clearPlaybackHistory(promise: Promise) {
+        try {
+            val prefs = reactApplicationContext.getSharedPreferences("sozo_playback_history", android.content.Context.MODE_PRIVATE)
+            prefs.edit().remove("history").apply()
+            promise.resolve(true)
+        } catch (e: Exception) {
+            promise.resolve(false)
         }
     }
 }

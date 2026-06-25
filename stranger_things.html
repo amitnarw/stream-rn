@@ -1,0 +1,182 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>TV Series Details</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<style data-purpose="custom-styles">
+    /* Font setup to match the design */
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+    
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: #000;
+      color: #fff;
+    }
+
+    /* Custom gradient for the bottom sheet */
+    .glassmorphic-sheet {
+      background: linear-gradient(180deg, rgba(60,60,65,0.95) 0%, rgba(40,40,45,0.95) 100%);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+    }
+
+    /* Ambient glow effect */
+    .ambient-glow {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: radial-gradient(circle at 50% -20%, rgba(200, 100, 150, 0.2) 0%, transparent 70%);
+      pointer-events: none;
+    }
+
+    /* Hide scrollbar for the episode list */
+    .no-scrollbar::-webkit-scrollbar {
+      display: none;
+    }
+    .no-scrollbar {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+  </style>
+<script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            'card-bg': '#313136',
+            'pill-bg': 'rgba(0, 0, 0, 0.6)',
+            'text-muted': '#A0A0A5',
+            'imdb-yellow': '#F5C518'
+          },
+          borderRadius: {
+            '4xl': '2rem',
+          }
+        }
+      }
+    }
+  </script>
+</head>
+<body class="antialiased w-full h-screen overflow-hidden relative">
+<!-- Mobile Device Container (simulating the phone screen) -->
+<main class="w-full h-full max-w-md mx-auto relative overflow-hidden bg-black flex flex-col shadow-2xl sm:rounded-[3rem] sm:border-[8px] sm:border-gray-800 sm:h-[850px] sm:mt-10">
+<!-- Ambient Background Glow -->
+<div class="ambient-glow z-0"></div>
+<!-- BEGIN: Hero Image & Header Section -->
+<section class="relative w-full h-1/2 min-h-[400px] z-10 shrink-0">
+<!-- Background Image -->
+<!-- The requested image has a specific aspect ratio, using object-cover to fit -->
+<img alt="Stranger Things Hero" class="absolute inset-0 w-full h-full object-cover object-top opacity-80 mix-blend-screen" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDBYdJ_w1uExDzOQkZhKbDPcAvEAgSfpWHZS-jWR2RDv7XX__wFkJuc0vemq3GtOOfUIuM_8eqIQJPd-XV0cXJ8dN2Dr8DyL6PlggwJdoU6u8RCAkp3UMn6l02-jEJIe6gRpMN__H1NxFJEcUBPEoSzFvWsmxjeHZkJTPLjBYI-07KlZpxCOWnccQuIvO5zrc-7wp_6imNgNKLr2jm16s60I69nKUfH0acQCZH5DqM3UU1SDcFO4Pe5tpMC8xdgbYb1G-WO_Pw8oYuH">
+<!-- Gradient Overlay to blend with the sheet below -->
+<div class="absolute inset-0 bg-gradient-to-t from-black via-transparent to-black/40 pointer-events-none"></div>
+<!-- Top Navigation Bar -->
+<header class="absolute top-0 left-0 w-full p-6 pt-12 flex justify-between items-center z-20">
+<!-- Spacer for centering -->
+<div class="w-8 h-8"></div>
+<h1 class="text-white font-semibold text-lg tracking-wide drop-shadow-md">TV Series Details</h1>
+<!-- Close Button -->
+<button class="w-8 h-8 rounded-full bg-black/40 backdrop-blur-md flex items-center justify-center text-white/80 hover:bg-black/60 transition-colors">
+<svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+<path d="M6 18L18 6M6 6l12 12" stroke-linecap="round" stroke-linejoin="round"></path>
+</svg>
+</button>
+</header>
+<!-- Video Metadata Pill -->
+<div class="absolute bottom-16 left-0 w-full flex justify-center z-20">
+<div class="bg-pill-bg backdrop-blur-md text-xs text-white/90 px-6 py-2.5 rounded-full flex items-center gap-3 font-medium tracking-wide w-fit">
+<span class="">2014</span>
+<span class="w-1 h-1 rounded-full bg-white/50"></span>
+<span class="">2h 49m</span>
+<span class="w-1 h-1 rounded-full bg-white/50"></span>
+<span class="">CC</span>
+<span class="w-1 h-1 rounded-full bg-white/50"></span>
+<span class="">4K</span>
+</div>
+</div>
+</section>
+<!-- END: Hero Image & Header Section -->
+<!-- BEGIN: Details Bottom Sheet -->
+<!-- Positioned absolutely to overlap the hero image slightly -->
+<section class="absolute top-[45%] left-0 w-full h-[55%] glassmorphic-sheet rounded-t-4xl flex flex-col z-30 pt-8 pb-6 px-6">
+<!-- Title & Season Selector -->
+<div class="text-center mb-4">
+<h2 class="text-3xl font-bold text-white tracking-tight mb-2">Stranger Things</h2>
+<button class="flex items-center justify-center gap-1 mx-auto text-lg text-white/90 font-medium">
+          Season 3
+          <svg class="w-4 h-4 mt-0.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+<path d="M19.5 8.25l-7.5 7.5-7.5-7.5" stroke-linecap="round" stroke-linejoin="round"></path>
+</svg>
+</button>
+</div>
+<!-- Description -->
+<p class="text-center text-text-muted text-sm leading-relaxed mb-4 px-2">
+        When a young boy disappears, his mother, a police chief and his friends must confront terrifying supernatural forces in order to get him back.
+      </p>
+<!-- Genre & Rating -->
+<div class="flex items-center justify-center gap-3 text-sm text-text-muted mb-8">
+<span class="">Sci-Fi, Adventure</span>
+<!-- IMDb Badge -->
+<div class="flex items-center gap-1">
+<span class="bg-imdb-yellow text-black font-bold text-[10px] px-1 rounded-sm tracking-tighter">IMDb</span>
+<span class="font-semibold text-white">8.7</span>
+</div>
+</div>
+<!-- BEGIN: Episodes List -->
+<div class="flex-1 overflow-y-auto no-scrollbar pb-20">
+<!-- Episode 1 -->
+<div class="flex gap-4 mb-4 items-center">
+<!-- Thumbnail placeholder since specific image isn't provided, using a generic placeholder that fits the dark theme -->
+<div class="w-40 h-24 rounded-xl bg-gray-800 shrink-0 overflow-hidden relative">
+<img alt="Episode 1 Thumbnail" class="w-full h-full object-cover opacity-80" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCxdIpkZxd3cpSMBYJG0kkXOtNUbsw-fYmIG80hKudJJCD50cHibD0i8Ms7cD9nLY0LvW9aP32V-cpnqM42T10i1qNO3d18bn05a17GKdxtwP4-fXoAeWZpisi4Ka2KZ5Z0ubGLsfLRLeCzb6x_wQceNK-w1cUTM_8BvzBGFpSk93WeD1uiIMHWjz4Qi_GHRHk9KwAyozbMHX52jW4JNj0LRkroJwfE0-QMxerznUmZpu96orwek8MK9FH3dOS-eD-DWN2RrTFpn3oX">
+<!-- Play icon overlay -->
+<div class="absolute inset-0 flex items-center justify-center">
+<div class="w-6 h-6 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center">
+<svg class="w-3 h-3 text-white ml-0.5" fill="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+<path clip-rule="evenodd" d="M4.5 5.653c0-1.426 1.529-2.33 2.779-1.643l11.54 6.348c1.295.712 1.295 2.573 0 3.285L7.28 19.991c-1.25.687-2.779-.217-2.779-1.643V5.653z" fill-rule="evenodd"></path>
+</svg>
+</div>
+</div>
+</div>
+<div class="flex-1 flex flex-col justify-center">
+<div class="text-xs text-text-muted mb-1">Episode 01 . 49</div>
+<h3 class="text-white font-medium text-sm mb-2">The Hellfire Club</h3>
+<!-- Download Button -->
+<button class="w-7 h-7 rounded-full bg-white/10 flex items-center justify-center text-white/70 hover:bg-white/20 transition-colors">
+<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+<path d="M19.5 13.5L12 21m0 0l-7.5-7.5M12 21V3" stroke-linecap="round" stroke-linejoin="round"></path>
+</svg>
+</button>
+</div>
+</div>
+<!-- Episode 2 -->
+<div class="flex gap-4 mb-4 items-center">
+<div class="w-40 h-24 rounded-xl bg-gray-800 shrink-0 overflow-hidden relative">
+<img alt="Episode 2 Thumbnail" class="w-full h-full object-cover opacity-80" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCfLVyRKDWlS63VqQ2MZ1A-BmZQf9Y0mf9wpLl2FhrZC_wzIT4TY9L604ykNMTyqyEHlOBzOPr6t3kQJphXyuyPVRUMtKfo7CM1ZAmqtGqHiZ_xHq4OtLFhRm8RrmQmqMVheOsmU6fw5YtWCBJjYV7zSe-dh_n7ShNo1YFHb876pPvPe_EwVCl3Eya3YZd4IC96irdr_tT6E6xDNTMRerU6EmXQ2DNDLgPFBi5JC_7OcV_B0nMCK-kp5CyIREs1Sl3JFHOdi3iK5OpF">
+<div class="absolute inset-0 flex items-center justify-center">
+<div class="w-6 h-6 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center">
+<svg class="w-3 h-3 text-white ml-0.5" fill="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+<path clip-rule="evenodd" d="M4.5 5.653c0-1.426 1.529-2.33 2.779-1.643l11.54 6.348c1.295.712 1.295 2.573 0 3.285L7.28 19.991c-1.25.687-2.779-.217-2.779-1.643V5.653z" fill-rule="evenodd"></path>
+</svg>
+</div>
+</div>
+</div>
+<div class="flex-1 flex flex-col justify-center">
+<div class="text-xs text-text-muted mb-1">Episode 02 . 54</div>
+<h3 class="text-white font-medium text-sm mb-2">Vecna's Curse</h3>
+<!-- Download Button -->
+<button class="w-7 h-7 rounded-full bg-white/10 flex items-center justify-center text-white/70 hover:bg-white/20 transition-colors">
+<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+<path d="M19.5 13.5L12 21m0 0l-7.5-7.5M12 21V3" stroke-linecap="round" stroke-linejoin="round"></path>
+</svg>
+</button>
+</div>
+</div>
+</div>
+<!-- END: Episodes List -->
+</section>
+<!-- END: Details Bottom Sheet -->
+</main>
+
+
+</body></html>

@@ -24,18 +24,17 @@ interface Props {
 }
 
 export default function SearchScreen({ route, navigation }: Props) {
-  const providerName = route.params?.selectedProvider;
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<MediaItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function doSearch(q: string) {
-    if (!providerName || !q.trim()) return;
+    if (!q.trim()) return;
     setLoading(true);
     setError(null);
     try {
-      const items = await bridge.search(providerName, q);
+      const items = await bridge.search('Cinemeta', q);
       setResults(items);
       if (items.length === 0) {
         setError('No results found for this search.');
@@ -52,7 +51,7 @@ export default function SearchScreen({ route, navigation }: Props) {
 
   function onMediaPress(item: MediaItem) {
     navigation.navigate('Detail', {
-      providerName: item.provider || providerName,
+      providerName: item.provider || 'Cinemeta',
       url: item.url,
     });
   }
@@ -73,7 +72,7 @@ export default function SearchScreen({ route, navigation }: Props) {
             <Text style={styles.backButtonText}>←</Text>
           </BlurView>
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Search ({providerName || 'Provider'})</Text>
+        <Text style={styles.headerTitle}>Search</Text>
         <View style={{ width: 36 }} />
       </View>
 

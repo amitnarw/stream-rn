@@ -65,6 +65,7 @@ export interface VideoSource {
   url: string;
   type: string;
   headers: Record<string, string>;
+  provider?: string;
 }
 
 export interface LinksResult {
