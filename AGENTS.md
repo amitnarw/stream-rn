@@ -229,3 +229,42 @@ Do NOT pass `Animated.Value` or `Animated.Interpolation` variables (such as anim
 - **Fix:** Wrap the non-animated component inside a standard `<Animated.View style={[StyleSheet.absoluteFillObject, { opacity: animatedVal }]}>` and keep the inner component's styles static.
 
 ---
+
+## Design System, Theme & Feel
+
+All screens and UI components must strictly adhere to the following design system to maintain the app's premium, Dribbble-like frosted glass aesthetic. All colors, spacing, and styles should be imported from the central design token file: **[theme.ts](file:///d:/amit/sozo-rn-android/src/theme.ts)**.
+
+### 1. Color Palette (Design Tokens)
+- All design tokens are exported from `src/theme.ts` via the `theme` object.
+- **Main Background**: Pitch black (`theme.colors.background` / `#050505`) for absolute contrast.
+- **Accent Glow**: Subtle electric blue ambient linear gradient top glows (`theme.colors.accentGlow` / `rgba(0, 71, 255, 0.12)` to `transparent`) to add depth.
+- **Glass Cards**: Dark semi-transparent cards (`theme.colors.cardBg` / `rgba(20, 18, 24, 0.65)`) with thin borders (`theme.colors.cardBorder` / `rgba(255, 255, 255, 0.08)`) and `borderRadius: 20` (available as preset `theme.glass.card`).
+- **Text Primary**: Crisp white/light grey (`theme.colors.textPrimary` / `#ffffff` / `#E5E2E3`).
+- **Text Secondary**: Muted cool grey (`theme.colors.textSecondary` / `#A0A0A5` or `theme.colors.textMuted` / `#8E8D92`) for captions/descriptions.
+- **Accent Highlights**: Soft electric blue highlights (`theme.colors.accent` / `#0047FF` or `theme.colors.accentLight` / `#5580FF`) for selected states, tabs, or settings radio buttons.
+- **Rose/Red Accent**: Glowing rose/pink-red (`theme.colors.rose` / `#ff4a7d`) with matching light glass backgrounds (`theme.colors.roseBg` / `rgba(255, 74, 125, 0.08)` and border `theme.colors.roseBorder` / `rgba(255, 74, 125, 0.25)`) for destructive actions (e.g., Clear Cache) or active states (e.g., Favorites heart toggled active).
+
+### 2. Floating Capsule Headers
+- **Layout**: Float capsules at the top of screens (absolute position: `left: 20, right: 20, height: 48, borderRadius: 24`, completely borderless).
+- **Glass Backdrop**: Internal `<BlurView intensity={100} tint="dark" />` combined with a dark tint overlay (`rgba(15, 15, 20, 0.38)`) for maximum readability.
+- **Scroll Animation**: Interpolate `scrollY` on the ScrollView to fade in the capsule backdrop (`headerBgOpacity` from `0` to `1` over a scroll threshold of `40` to `180` pixels).
+- **Navigation Buttons**: Capsule buttons on left/right must be circular blurs (`width: 36, height: 36, borderRadius: 18`) with glass backdrops. Left button uses `arrow-back` if navigation can go back, or fallback icons like `settings-outline` or `person-circle-outline` if root tab.
+
+### 3. Glassmorphic Action Buttons
+- **Trailer/Action Buttons**: Minimalist, borderless circular glass buttons (`width: 60, height: 60, borderRadius: 30`, background `rgba(15, 15, 20, 0.45)`) featuring native `BlurView (intensity: 90)` and premium drop shadow (`elevation: 6, shadowOpacity: 0.3`).
+- **Labels**: High-contrast, letter-spaced, bold uppercase labels (e.g., `"TRAILER"`) positioned directly underneath the circle.
+
+### 4. Progressive Image Loading
+- **No Blank/Black Flashes**: Always wrap loading images with:
+  1. A solid base dark grey placeholder card (`#121214`).
+  2. A low-opacity (`0.45`), highly blurred (`blurRadius={25}`) version of the catalog's cached poster. This loads instantly, giving the screen a rich ambient glow matching the movie/show color scheme.
+  3. The high-resolution poster fades in on top of this layer.
+
+### 5. Native Blur vs. CSS Glass Shadows (Performance)
+- **Rule**: Native `BlurView` on Android performs real-time screen capture/render. Running multiple active native blurs concurrently in list items (such as episode row thumbnails) causes rendering thread saturation and severe scroll lag.
+- **Implementation**:
+  - Use native `BlurView` **ONLY** for static overlay panels, floating headers, bottom sheet bases, or details background images.
+  - Use high-performance CSS glass shadows (`backgroundColor: 'rgba(255, 255, 255, 0.85)'`, `borderWidth: 1.5`, `borderColor: 'rgba(255, 255, 255, 0.45)'`, `elevation: 3`) for play buttons or badges inside scrollable list rows to guarantee 60fps scrolling.
+
+---
+

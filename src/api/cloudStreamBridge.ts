@@ -60,6 +60,7 @@ export async function clearCache(): Promise<void> {
     if (cacheKeys.length > 0) {
       await AsyncStorage.multiRemove(cacheKeys);
     }
+    await CloudStreamModule.clearNativeCache();
   } catch (e) {
     console.warn('Failed to clear cache:', e);
   }

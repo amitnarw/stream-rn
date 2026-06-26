@@ -164,4 +164,49 @@ class CloudStreamModule(reactContext: ReactApplicationContext) :
             promise.resolve(false)
         }
     }
+
+    private fun deleteDirContents(dir: java.io.File?): Boolean {
+        if (dir == null || !dir.exists() || !dir.isDirectory) return false
+        val children = dir.listFiles() ?: return true
+        var success = true
+        for (child in children) {
+            if (child.isDirectory) {
+                success = success && deleteDirContents(child)
+            }
+            try {
+                val deleted = child.delete()
+                if (!deleted) success = false
+            } catch (e: Exception) {
+                success = false
+            }
+        }
+        return success
+    }
+
+    @ReactMethod
+    fun clearNativeCache(promise: Promise) {
+        val context = reactApplicationContext
+        Thread {
+            try {
+                // Clear Fresco image pipeline caches (in-memory & disk)
+                try {
+                    com.facebook.drawee.backends.pipeline.Fresco.getImagePipeline().clearCaches()
+                } catch (e: Exception) {
+                    Log.w("CloudStreamModule", "Failed to clear Fresco image caches: ${e.message}")
+                }
+
+                // Clear app cache directory contents safely (without deleting the directory itself)
+                try {
+                    val cacheDir = context.cacheDir
+                    deleteDirContents(cacheDir)
+                } catch (e: Exception) {
+                    Log.w("CloudStreamModule", "Failed to clear cache directory contents: ${e.message}")
+                }
+
+                promise.resolve(true)
+            } catch (e: Exception) {
+                promise.reject("CACHE_ERROR", e.message, e)
+            }
+        }.start()
+    }
 }

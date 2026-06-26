@@ -15,6 +15,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import type { MediaItem } from '../types/plugin';
 import * as bridge from '../api/cloudStreamBridge';
 import MediaCard from '../components/MediaCard';
+import { theme } from '../theme';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -60,7 +61,7 @@ export default function SearchScreen({ route, navigation }: Props) {
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       {/* Ambient Glow */}
       <LinearGradient
-        colors={['rgba(189, 92, 255, 0.12)', 'transparent']}
+        colors={[theme.colors.accentGlow, 'transparent']}
         style={styles.ambientGlow}
         pointerEvents="none"
       />
@@ -97,7 +98,7 @@ export default function SearchScreen({ route, navigation }: Props) {
 
       {loading ? (
         <View style={styles.centerState}>
-          <ActivityIndicator size="large" color="#bd5cff" />
+          <ActivityIndicator size="large" color={theme.colors.accentLight} />
         </View>
       ) : error ? (
         <View style={styles.centerState}>
@@ -191,7 +192,7 @@ const styles = StyleSheet.create({
   },
   grid: { 
     paddingHorizontal: 12,
-    paddingBottom: 40,
+    paddingBottom: 110,
   },
   empty: { 
     color: '#666', 
@@ -213,7 +214,7 @@ const styles = StyleSheet.create({
     lineHeight: 22 
   },
   retryBtn: {
-    backgroundColor: '#bd5cff',
+    backgroundColor: theme.colors.accent,
     paddingHorizontal: 32,
     paddingVertical: 12,
     borderRadius: 24,

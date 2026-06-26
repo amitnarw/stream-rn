@@ -4,10 +4,13 @@ import {
   ActivityIndicator, StyleSheet, FlatList,
   Alert, Animated, Dimensions, Pressable, Linking,
 } from "react-native";
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import YoutubeIframe from 'react-native-youtube-iframe';
+import { Ionicons, FontAwesome } from '@expo/vector-icons';
+import * as favoritesApi from '../api/favorites';
 import { BlurView, BlurTargetView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
+import { theme } from '../theme';
 import type { DetailResult, EpisodeItem, VideoSource, Trailer, Actor } from "../types/plugin";
 import * as bridge from "../api/cloudStreamBridge";
 
@@ -20,10 +23,147 @@ function extractYoutubeId(url: string): string | null {
   return m ? m[1] : null;
 }
 
+function getHighQualityImageUrl(url: string | null | undefined): string | undefined {
+  if (!url) return undefined;
+  
+  // 1. Metahub images - upgrade medium/small to large
+  if (url.includes("images.metahub.space")) {
+    return url.replace("/medium/", "/large/").replace("/small/", "/large/");
+  }
+  
+  // 2. TMDB images - upgrade any size (e.g. w500, w300_and_h450_bestv2) to w1280
+  if (url.includes("image.tmdb.org/t/p/")) {
+    return url.replace(/\/t\/p\/[^/]+\//, "/t/p/w1280/");
+  }
+  
+  // 3. IMDb / Amazon images - remove cropping and upgrade size
+  if (url.includes("media-amazon.com/images/") || url.includes("m.media-amazon.com/")) {
+    const index = url.indexOf("._V1_");
+    if (index !== -1) {
+      return url.substring(0, index) + "._V1_SX1080_.jpg";
+    }
+  }
+
+  // 4. YTS images - upgrade from medium to large cover
+  if (url.includes("yts.mx/assets/images/movies/")) {
+    return url.replace("medium-cover.jpg", "large-cover.jpg");
+  }
+
+  return url;
+}
+
+function SkeletonPlaceholder({ style }: { style: any }) {
+  const pulseAnim = React.useRef(new Animated.Value(0)).current;
+
+  React.useEffect(() => {
+    const sharedAnimation = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, {
+          toValue: 1,
+          duration: 1000,
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulseAnim, {
+          toValue: 0,
+          duration: 1000,
+          useNativeDriver: true,
+        }),
+      ])
+    );
+    sharedAnimation.start();
+    return () => sharedAnimation.stop();
+  }, [pulseAnim]);
+
+  const opacity = pulseAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.12, 0.28],
+  });
+
+  return (
+    <View style={[style, { backgroundColor: '#121214' }]}>
+      <Animated.View
+        style={[
+          StyleSheet.absoluteFillObject,
+          {
+            backgroundColor: '#ffffff',
+            opacity,
+          },
+        ]}
+      />
+    </View>
+  );
+}
+
 interface Props { route: any; navigation: any }
 
+interface EpisodeRowProps {
+  ep: EpisodeItem;
+  index: number;
+  originalIndex: number;
+  playingEpisode: number | null;
+  onEpisodePress: (ep: EpisodeItem, index: number) => void;
+  posterUrl: string | undefined;
+}
+
+function EpisodeRow({ ep, index, originalIndex, playingEpisode, onEpisodePress, posterUrl }: EpisodeRowProps) {
+  return (
+    <TouchableOpacity
+      style={[
+        styles.episodeRow,
+        playingEpisode === originalIndex && styles.episodePlaying
+      ]}
+      onPress={() => onEpisodePress(ep, originalIndex)}
+      disabled={playingEpisode !== null}
+    >
+      {/* Left: Thumbnail Layout */}
+      <View style={styles.episodeThumbnailContainer}>
+        <Image
+          source={{ uri: ep.image || posterUrl || undefined }}
+          style={styles.episodeThumbnail}
+          resizeMode="cover"
+        />
+        {/* Play overlay badge */}
+        <View style={styles.episodePlayOverlay}>
+          <View style={styles.episodePlayCircle}>
+            <FontAwesome name="play-circle" size={24} color="black" />
+          </View>
+        </View>
+      </View>
+
+      {/* Middle: Title, synopsis and metadata */}
+      <View style={styles.episodeInfo}>
+        <Text style={styles.episodeMeta}>Episode {ep.episode}</Text>
+        <Text style={styles.episodeTitle} numberOfLines={1}>{ep.label}</Text>
+        {ep.overview ? (
+          <Text style={styles.episodeDesc} numberOfLines={2}>{ep.overview}</Text>
+        ) : null}
+      </View>
+
+      {/* Right: Action Button */}
+      <View style={styles.episodeActionCol}>
+        {playingEpisode === originalIndex ? (
+          <ActivityIndicator size="small" color={theme.colors.accentLight} />
+        ) : (
+          <View style={styles.downloadIconCircle}>
+            <Ionicons name="play" size={14} color="rgba(255,255,255,0.85)" style={{ marginLeft: 1.5 }} />
+          </View>
+        )}
+      </View>
+    </TouchableOpacity>
+  );
+}
+
 export default function DetailScreen({ route, navigation }: Props) {
-  const blurTargetRef = useRef(null);
+  const insets = useSafeAreaInsets();
+  const [blurTarget, setBlurTarget] = useState<any>(null);
+  const blurTargetRef = useRef<any>(null);
+  const setBlurTargetRef = (val: any) => {
+    blurTargetRef.current = val;
+    if (val !== blurTarget) {
+      setBlurTarget(val);
+    }
+  };
+  const scrollY = useRef(new Animated.Value(0)).current;
   const { providerName, url } = route.params;
   const [detail, setDetail] = useState<DetailResult | null>(null);
   const [episodes, setEpisodes] = useState<EpisodeItem[]>([]);
@@ -37,6 +177,9 @@ export default function DetailScreen({ route, navigation }: Props) {
   const [linksError, setLinksError] = useState<string | null>(null);
   const sheetAnim = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
 
+  // Favorite state
+  const [isFav, setIsFav] = useState(false);
+
   // Trailer state
   const [activeTrailer, setActiveTrailer] = useState<Trailer | null>(null);
   const [trailerPlaying, setTrailerPlaying] = useState(false);
@@ -45,7 +188,42 @@ export default function DetailScreen({ route, navigation }: Props) {
   const [selectedSeason, setSelectedSeason] = useState<number>(1);
   const [showSeasonPicker, setShowSeasonPicker] = useState(false);
 
+  // Get unique seasons in episodes list
+  const seasons = Array.from(new Set(episodes.map(ep => ep.season || 1))).sort((a, b) => a - b);
+
   useEffect(() => { loadDetail(); }, []);
+
+  useEffect(() => {
+    async function checkFav() {
+      if (detail) {
+        const fav = await favoritesApi.isFavorite(detail.url);
+        setIsFav(fav);
+      }
+    }
+    checkFav();
+  }, [detail]);
+
+  async function toggleFavorite() {
+    if (!detail) return;
+    try {
+      if (isFav) {
+        await favoritesApi.removeFavorite(detail.url);
+        setIsFav(false);
+      } else {
+        const mediaItem = {
+          provider: detail.provider || providerName || 'Cinemeta',
+          url: detail.url,
+          title: detail.title,
+          posterUrl: detail.posterUrl,
+          type: detail.isSerial ? 'series' : 'movie',
+        };
+        await favoritesApi.addFavorite(mediaItem);
+        setIsFav(true);
+      }
+    } catch (e) {
+      console.warn('Failed to toggle favorite:', e);
+    }
+  }
 
   useEffect(() => {
     if (showSourcePicker) {
@@ -198,7 +376,7 @@ export default function DetailScreen({ route, navigation }: Props) {
               intensity={50} 
               tint="dark" 
               style={styles.closeTrailerBlur}
-              blurTarget={blurTargetRef}
+              blurTarget={{ current: blurTarget }}
               blurMethod="dimezisBlurView"
             >
               <Text style={styles.closeTrailerText}>✕</Text>
@@ -210,15 +388,28 @@ export default function DetailScreen({ route, navigation }: Props) {
 
     return (
       <View style={styles.bannerContainer}>
+        {/* Skeleton placeholder base (Breathing shimmer) */}
+        <SkeletonPlaceholder style={StyleSheet.absoluteFillObject} />
+        
+        {/* Blurred poster progressive placeholder */}
+        {detail?.posterUrl ? (
+          <Image
+            source={{ uri: detail.posterUrl }}
+            style={[StyleSheet.absoluteFillObject, { opacity: 0.45 }]}
+            resizeMode="cover"
+            blurRadius={25}
+          />
+        ) : null}
+
         {/* Ambient Gradient Glow */}
         <LinearGradient
-          colors={['rgba(189, 92, 255, 0.25)', 'transparent']}
+          colors={[theme.colors.accentGlow, 'transparent']}
           style={styles.ambientGlow}
           pointerEvents="none"
         />
 
         <Image
-          source={{ uri: detail?.banner || detail?.posterUrl || undefined }}
+          source={{ uri: getHighQualityImageUrl(detail?.posterUrl) }}
           style={styles.banner}
           resizeMode="cover"
         />
@@ -230,35 +421,20 @@ export default function DetailScreen({ route, navigation }: Props) {
           pointerEvents="none"
         />
 
-        {/* Custom Header Bar */}
-        <View style={styles.headerBar}>
-          <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-            <BlurView 
-              intensity={40} 
-              tint="dark" 
-              style={styles.backButtonBlur}
-              blurTarget={blurTargetRef}
-              blurMethod="dimezisBlurView"
-            >
-              <Text style={styles.backButtonText}>←</Text>
-            </BlurView>
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>TV Series Details</Text>
-          <View style={{ width: 40 }} />
-        </View>
-
         {/* Video Play Trailer Button overlay */}
         {detail?.trailers && detail.trailers.length > 0 && (
-          <TouchableOpacity style={styles.playTrailerBtn} onPress={onTrailerPress}>
-            <BlurView 
-              intensity={30} 
-              tint="light" 
-              style={styles.playTrailerBlur}
-              blurTarget={blurTargetRef}
-              blurMethod="dimezisBlurView"
-            >
-              <Text style={styles.playTrailerBtnText}>▶ Play Trailer</Text>
-            </BlurView>
+          <TouchableOpacity style={styles.playTrailerBtn} onPress={onTrailerPress} activeOpacity={0.8}>
+            <View style={styles.playTrailerCircle}>
+              <BlurView 
+                intensity={90} 
+                tint="dark" 
+                style={StyleSheet.absoluteFillObject}
+                blurTarget={{ current: blurTarget }}
+                blurMethod="dimezisBlurView"
+              />
+              <Ionicons name="play" size={24} color="#fff" style={{ marginLeft: 3 }} />
+            </View>
+            <Text style={styles.playTrailerLabel}>TRAILER</Text>
           </TouchableOpacity>
         )}
 
@@ -268,7 +444,7 @@ export default function DetailScreen({ route, navigation }: Props) {
             intensity={50} 
             tint="dark" 
             style={styles.metadataPill}
-            blurTarget={blurTargetRef}
+            blurTarget={{ current: blurTarget }}
             blurMethod="dimezisBlurView"
           >
             {/* Year */}
@@ -288,7 +464,7 @@ export default function DetailScreen({ route, navigation }: Props) {
             {/* Format/Length */}
             <Text style={styles.metadataText}>
               {detail?.isSerial 
-                ? `${detail.episodes.length} Episodes` 
+                ? `${seasons.length} Season${seasons.length !== 1 ? 's' : ''} • ${episodes.length} Episode${episodes.length !== 1 ? 's' : ''}` 
                 : detail?.duration 
                   ? `${Math.floor(detail.duration / 60)}h ${detail.duration % 60}m` 
                   : 'Movie'}
@@ -303,7 +479,7 @@ export default function DetailScreen({ route, navigation }: Props) {
     return (
       <SafeAreaView style={styles.loadingContainer}>
         <View style={styles.centerState}>
-          <ActivityIndicator size="large" color="#e3b5ff" />
+          <ActivityIndicator size="large" color={theme.colors.accentLight} />
           <Text style={styles.loadingText}>Loading Details...</Text>
         </View>
       </SafeAreaView>
@@ -323,223 +499,258 @@ export default function DetailScreen({ route, navigation }: Props) {
     );
   }
 
-  // Get unique seasons in episodes list
-  const seasons = Array.from(new Set(episodes.map(ep => ep.season || 1))).sort((a, b) => a - b);
   // Filter episodes based on selected season
   const filteredEpisodes = detail.isSerial 
     ? episodes.filter(ep => (ep.season || 1) === selectedSeason)
     : episodes;
 
+  const scrollThreshold = SCREEN_HEIGHT * 0.43 - 90;
+  const headerBgOpacity = scrollY.interpolate({
+    inputRange: [0, scrollThreshold],
+    outputRange: [0, 1],
+    extrapolate: 'clamp',
+  });
+
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
-      <BlurTargetView ref={blurTargetRef} style={styles.blurTarget}>
+      <BlurTargetView ref={setBlurTargetRef as any} style={styles.blurTarget}>
         {/* Top Section: Hero Banner / Trailer */}
         {renderTopArea()}
+      </BlurTargetView>
   
-        {/* Details Bottom Sheet (Frosted Glassmorphic) */}
-        <View style={styles.bottomSheet}>
-          <BlurView 
-            intensity={90} 
-            tint="dark" 
-            style={styles.blurSheet}
-            blurTarget={blurTargetRef}
-            blurMethod="dimezisBlurView"
-          >
-          <ScrollView 
+      {/* Details Bottom Sheet (Frosted Glassmorphic) */}
+        <View style={styles.bottomSheet} pointerEvents="box-none">
+          <Animated.ScrollView 
+            pointerEvents="box-none"
             showsVerticalScrollIndicator={false} 
-            contentContainerStyle={styles.scrollContent}
+            contentContainerStyle={{ paddingTop: SCREEN_HEIGHT * 0.43 }}
+            onScroll={Animated.event(
+              [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+              { useNativeDriver: true }
+            )}
+            scrollEventThrottle={16}
           >
-            {/* Title & Season Trigger */}
-            <Text style={styles.detailTitle}>{detail.title}</Text>
-            
-            {detail.isSerial && seasons.length > 1 && (
-              <View style={{ zIndex: 100, position: 'relative', alignSelf: 'center' }}>
-                <TouchableOpacity style={styles.seasonSelector} onPress={() => setShowSeasonPicker(!showSeasonPicker)}>
-                  <Text style={styles.seasonText}>Season {selectedSeason}</Text>
-                  <Text style={styles.chevron}>{showSeasonPicker ? '▲' : '▼'}</Text>
-                </TouchableOpacity>
-                {showSeasonPicker && (
-                  <View style={styles.seasonDropdown}>
-                    <BlurView 
-                      intensity={95} 
-                      tint="dark" 
-                      style={styles.seasonDropdownBlur}
-                      blurTarget={blurTargetRef}
-                      blurMethod="dimezisBlurView"
-                    >
-                      <ScrollView style={styles.seasonDropdownScroll} nestedScrollEnabled={true}>
-                        {seasons.map((s) => (
-                          <TouchableOpacity
-                            key={s}
-                            style={[
-                              styles.seasonDropdownRow,
-                              selectedSeason === s && styles.seasonDropdownRowActive
-                            ]}
-                            onPress={() => {
-                              setSelectedSeason(s);
-                              setShowSeasonPicker(false);
-                            }}
-                          >
-                            <Text style={[
-                              styles.seasonDropdownRowText,
-                              selectedSeason === s && styles.seasonDropdownRowTextActive
-                            ]}>
-                              Season {s}
-                            </Text>
-                          </TouchableOpacity>
-                        ))}
-                      </ScrollView>
-                    </BlurView>
-                  </View>
-                )}
-              </View>
-            )}
-
-            {/* Description */}
-            {detail.description ? (
-              <Text style={styles.description}>{detail.description}</Text>
-            ) : null}
-
-            {/* Genre & Rating Metadata */}
-            <View style={styles.genreRow}>
-              <Text style={styles.genres}>
-                {detail.tags && detail.tags.length > 0 ? detail.tags.join(', ') : 'Sci-Fi, Drama'}
-              </Text>
-              {detail.score ? (
-                <View style={styles.imdbRow}>
-                  <View style={styles.imdbBadge}>
-                    <Text style={styles.imdbText}>IMDb</Text>
-                  </View>
-                  <Text style={styles.scoreText}>{detail.score}</Text>
-                </View>
-              ) : null}
-            </View>
-
-            {/* Cast Section */}
-            {detail.cast && detail.cast.length > 0 && (
-              <View style={styles.section}>
-                <Text style={styles.sectionTitle}>Cast</Text>
-                <FlatList
-                  data={detail.cast}
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  keyExtractor={(_, i) => String(i)}
-                  contentContainerStyle={styles.castList}
-                  renderItem={renderCastItem}
-                />
-              </View>
-            )}
-
-            {/* Links Error */}
-            {linksError && (
-              <View style={styles.linksErrorContainer}>
-                <Text style={styles.linksErrorText}>{linksError}</Text>
-              </View>
-            )}
-
-            {/* Episodes List Section */}
-            <Text style={styles.sectionTitle}>
-              {detail.isSerial ? 'Episodes' : 'Play Video'}
-            </Text>
-
-            {filteredEpisodes.length === 0 ? (
-              <Text style={styles.empty}>No episodes available</Text>
-            ) : (
-              <View style={styles.episodesContainer}>
-                {filteredEpisodes.map((ep, index) => {
-                  const originalIndex = episodes.findIndex(e => e.mediaRef === ep.mediaRef);
-                  return (
-                    <TouchableOpacity
-                      key={ep.mediaRef + '-' + index}
-                      style={[
-                        styles.episodeRow,
-                        playingEpisode === originalIndex && styles.episodePlaying
-                      ]}
-                      onPress={() => onEpisodePress(ep, originalIndex)}
-                      disabled={playingEpisode !== null}
-                    >
-                      {/* Left: Thumbnail Layout */}
-                      <View style={styles.episodeThumbnailContainer}>
-                        <Image
-                          source={{ uri: ep.image || detail.posterUrl || undefined }}
-                          style={styles.episodeThumbnail}
-                          resizeMode="cover"
-                        />
-                        {/* Play overlay badge */}
-                        <View style={styles.episodePlayOverlay}>
+            <View style={styles.contentCard}>
+              <BlurView 
+                intensity={90} 
+                tint="dark" 
+                style={styles.blurSheetContent}
+                blurTarget={{ current: blurTarget }}
+                blurMethod="dimezisBlurView"
+              >
+                <View style={styles.scrollContent}>
+                  {/* Title & Season Trigger */}
+                  <Text style={styles.detailTitle}>{detail.title}</Text>
+                  
+                  {detail.isSerial && seasons.length > 1 && (
+                    <View style={{ zIndex: 100, position: 'relative', alignSelf: 'center' }}>
+                      <TouchableOpacity style={styles.seasonSelector} onPress={() => setShowSeasonPicker(!showSeasonPicker)}>
+                        <Text style={styles.seasonText}>Season {selectedSeason}</Text>
+                        <Text style={styles.chevron}>{showSeasonPicker ? '▲' : '▼'}</Text>
+                      </TouchableOpacity>
+                      {showSeasonPicker && (
+                        <View style={styles.seasonDropdown}>
                           <BlurView 
-                            intensity={30} 
-                            tint="light" 
-                            style={styles.episodePlayCircle}
+                            intensity={95} 
+                            tint="dark" 
+                            style={styles.seasonDropdownBlur}
                             blurTarget={blurTargetRef}
                             blurMethod="dimezisBlurView"
                           >
-                            <Text style={styles.playArrow}>▶</Text>
+                            <ScrollView style={styles.seasonDropdownScroll} nestedScrollEnabled={true}>
+                              {seasons.map((s) => (
+                                <TouchableOpacity
+                                  key={s}
+                                  style={[
+                                    styles.seasonDropdownRow,
+                                    selectedSeason === s && styles.seasonDropdownRowActive
+                                  ]}
+                                  onPress={() => {
+                                    setSelectedSeason(s);
+                                    setShowSeasonPicker(false);
+                                  }}
+                                >
+                                  <Text style={[
+                                    styles.seasonDropdownRowText,
+                                    selectedSeason === s && styles.seasonDropdownRowTextActive
+                                  ]}>
+                                    Season {s}
+                                  </Text>
+                                </TouchableOpacity>
+                              ))}
+                            </ScrollView>
                           </BlurView>
                         </View>
-                      </View>
-
-                      {/* Middle: Title, synopsis and metadata */}
-                      <View style={styles.episodeInfo}>
-                        <Text style={styles.episodeMeta}>Episode {ep.episode}</Text>
-                        <Text style={styles.episodeTitle} numberOfLines={1}>{ep.label}</Text>
-                        {ep.overview ? (
-                          <Text style={styles.episodeDesc} numberOfLines={2}>{ep.overview}</Text>
-                        ) : null}
-                      </View>
-
-                      {/* Right: Action Button */}
-                      <View style={styles.episodeActionCol}>
-                        {playingEpisode === originalIndex ? (
-                          <ActivityIndicator size="small" color="#e3b5ff" />
-                        ) : (
-                          <View style={styles.downloadIconCircle}>
-                            <Text style={styles.downloadIcon}>▶</Text>
-                          </View>
-                        )}
-                      </View>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-            )}
-
-            {/* Recommendations Section */}
-            {detail.recommendations && detail.recommendations.length > 0 && (
-              <View style={styles.section}>
-                <Text style={styles.sectionTitle}>More Like This</Text>
-                <FlatList
-                  data={detail.recommendations}
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  keyExtractor={(_, i) => String(i)}
-                  contentContainerStyle={styles.recList}
-                  renderItem={({ item }) => (
-                    <View style={styles.recCard}>
-                      <TouchableOpacity
-                        onPress={() => navigation.push('Detail', {
-                          providerName: item.provider,
-                          url: item.url,
-                        })}
-                      >
-                        {item.posterUrl ? (
-                          <Image source={{ uri: item.posterUrl }} style={styles.recPoster} resizeMode="cover" />
-                        ) : (
-                          <View style={[styles.recPoster, styles.recPlaceholder]}>
-                            <Text style={styles.recPlaceholderText}>?</Text>
-                          </View>
-                        )}
-                        <Text style={styles.recTitle} numberOfLines={2}>{item.title}</Text>
-                      </TouchableOpacity>
+                      )}
                     </View>
                   )}
-                />
-              </View>
-            )}
-          </ScrollView>
-        </BlurView>
-      </View>
-      </BlurTargetView>
+
+                  {/* Description */}
+                  {detail.description ? (
+                    <Text style={styles.description}>{detail.description}</Text>
+                  ) : null}
+
+                  {/* Genre & Rating Metadata */}
+                  <View style={styles.genreRow}>
+                    <Text style={styles.genres}>
+                      {detail.tags && detail.tags.length > 0 ? detail.tags.join(', ') : 'Sci-Fi, Drama'}
+                    </Text>
+                    {detail.score ? (
+                      <View style={styles.imdbRow}>
+                        <View style={styles.imdbBadge}>
+                          <Text style={styles.imdbText}>IMDb</Text>
+                        </View>
+                        <Text style={styles.scoreText}>{detail.score}</Text>
+                      </View>
+                    ) : null}
+                  </View>
+
+                  {/* Cast Section */}
+                  {detail.cast && detail.cast.length > 0 && (
+                    <View style={styles.section}>
+                      <Text style={styles.sectionTitle}>Cast</Text>
+                      <FlatList
+                        data={detail.cast}
+                        horizontal
+                        showsHorizontalScrollIndicator={false}
+                        keyExtractor={(_, i) => String(i)}
+                        contentContainerStyle={styles.castList}
+                        renderItem={renderCastItem}
+                      />
+                    </View>
+                  )}
+
+                  {/* Links Error */}
+                  {linksError && (
+                    <View style={styles.linksErrorContainer}>
+                      <Text style={styles.linksErrorText}>{linksError}</Text>
+                    </View>
+                  )}
+
+                  {/* Episodes List Section */}
+                  <Text style={styles.sectionTitle}>
+                    {detail.isSerial ? 'Episodes List' : 'Play Video'}
+                  </Text>
+                  {filteredEpisodes.length === 0 ? (
+                    <Text style={styles.empty}>No episodes available</Text>
+                  ) : (
+                    <View style={styles.episodesContainer}>
+                      {filteredEpisodes.map((ep, index) => {
+                        const originalIndex = episodes.findIndex(e => e.mediaRef === ep.mediaRef);
+                        return (
+                          <EpisodeRow
+                            key={ep.mediaRef + '-' + index}
+                            ep={ep}
+                            index={index}
+                            originalIndex={originalIndex}
+                            playingEpisode={playingEpisode}
+                            onEpisodePress={onEpisodePress}
+                            posterUrl={detail?.posterUrl || undefined}
+                          />
+                        );
+                      })}
+                    </View>
+                  )}
+
+                  {/* Recommendations Section */}
+                  {detail.recommendations && detail.recommendations.length > 0 && (
+                    <View style={styles.section}>
+                      <Text style={styles.sectionTitle}>More Like This</Text>
+                      <FlatList
+                        data={detail.recommendations}
+                        horizontal
+                        showsHorizontalScrollIndicator={false}
+                        keyExtractor={(_, i) => String(i)}
+                        contentContainerStyle={styles.recList}
+                        renderItem={({ item }) => (
+                          <View style={styles.recCard}>
+                            <TouchableOpacity
+                              onPress={() => navigation.push('Detail', {
+                                providerName: item.provider,
+                                url: item.url,
+                              })}
+                            >
+                              {item.posterUrl ? (
+                                <Image source={{ uri: item.posterUrl }} style={styles.recPoster} resizeMode="cover" />
+                              ) : (
+                                <View style={[styles.recPoster, styles.recPlaceholder]}>
+                                  <Text style={styles.recPlaceholderText}>?</Text>
+                                </View>
+                              )}
+                              <Text style={styles.recTitle} numberOfLines={2}>{item.title}</Text>
+                            </TouchableOpacity>
+                          </View>
+                        )}
+                      />
+                    </View>
+                  )}
+                </View>
+              </BlurView>
+            </View>
+          </Animated.ScrollView>
+        </View>
+
+        {/* Floating Custom Header Bar (Oval/Capsule) */}
+        <Animated.View style={[
+          styles.headerBar,
+          {
+            top: Math.max(insets.top - 4, 8),
+            shadowOpacity: headerBgOpacity,
+            elevation: scrollY.interpolate({
+              inputRange: [0, scrollThreshold],
+              outputRange: [0, 4],
+              extrapolate: 'clamp',
+            }),
+          }
+        ]}>
+          {/* Animated Background blur capsule */}
+          <Animated.View style={[
+            StyleSheet.absoluteFillObject,
+            {
+              opacity: headerBgOpacity,
+              borderRadius: 24,
+              overflow: 'hidden',
+            }
+          ]}>
+            <BlurView 
+              intensity={100} 
+              tint="dark" 
+              style={StyleSheet.absoluteFillObject}
+              blurTarget={{ current: blurTarget }}
+              blurMethod="dimezisBlurView"
+            />
+            <View style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(15, 15, 20, 0.38)' }]} />
+          </Animated.View>
+          
+          
+          <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+            <BlurView 
+              intensity={40} 
+              tint="dark" 
+              style={styles.backButtonBlur}
+            >
+              <Text style={styles.backButtonText}>←</Text>
+            </BlurView>
+          </TouchableOpacity>
+          
+          <Text style={styles.headerTitle}>
+            {detail?.isSerial ? 'TV Series Details' : 'Movie Details'}
+          </Text>
+          
+          <TouchableOpacity style={styles.backButton} onPress={toggleFavorite}>
+            <BlurView 
+              intensity={40} 
+              tint="dark" 
+              style={styles.backButtonBlur}
+            >
+              <Ionicons 
+                name={isFav ? "heart" : "heart-outline"} 
+                size={20} 
+                color={isFav ? "#ff4a7d" : "#ffffff"} 
+              />
+            </BlurView>
+          </TouchableOpacity>
+        </Animated.View>
 
       {/* Source Picker Overlay (Glassmorphic) */}
       {showSourcePicker && (
@@ -549,7 +760,7 @@ export default function DetailScreen({ route, navigation }: Props) {
               intensity={95} 
               tint="dark" 
               style={styles.sheetBlur}
-              blurTarget={blurTargetRef}
+              blurTarget={{ current: blurTarget }}
               blurMethod="dimezisBlurView"
             >
               <Pressable onPress={(e) => e.stopPropagation()}>
@@ -578,7 +789,7 @@ export default function DetailScreen({ route, navigation }: Props) {
                     )}
                   />
                 ) : (
-                  <ActivityIndicator size="large" color="#e3b5ff" style={{ marginVertical: 40 }} />
+                  <ActivityIndicator size="large" color={theme.colors.accentLight} style={{ marginVertical: 40 }} />
                 )}
                 {subtitles.length > 0 && (
                   <View style={styles.sheetSubRow}>
@@ -629,7 +840,7 @@ const styles = StyleSheet.create({
     lineHeight: 22 
   },
   retryBtn: { 
-    backgroundColor: "#bd5cff", 
+    backgroundColor: theme.colors.accent, 
     paddingHorizontal: 32, 
     paddingVertical: 12, 
     borderRadius: 24 
@@ -662,14 +873,20 @@ const styles = StyleSheet.create({
   },
   headerBar: {
     position: 'absolute',
-    top: 36,
-    left: 0,
-    right: 0,
+    left: 20,
+    right: 20,
+    height: 48,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    zIndex: 10,
+    paddingHorizontal: 16,
+    zIndex: 50,
+  },
+  headerBorder: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.12)',
   },
   backButton: {
     width: 36,
@@ -698,21 +915,35 @@ const styles = StyleSheet.create({
   },
   playTrailerBtn: {
     position: "absolute", 
-    top: "35%", 
+    top: "30%", 
     alignSelf: 'center',
-    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  playTrailerCircle: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: 'rgba(15, 15, 20, 0.45)',
     overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 6,
   },
-  playTrailerBlur: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-  },
-  playTrailerBtnText: { 
-    color: "#fff", 
-    fontSize: 14, 
-    fontWeight: '600'
+  playTrailerLabel: { 
+    color: "#ffffff", 
+    fontSize: 12, 
+    fontWeight: '700',
+    letterSpacing: 0.6,
+    marginTop: 8,
+    textTransform: 'uppercase',
+    textShadowColor: 'rgba(0, 0, 0, 0.6)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
   },
 
   // Metadata Pill
@@ -778,19 +1009,23 @@ const styles = StyleSheet.create({
   // Details Bottom Sheet
   bottomSheet: {
     position: 'absolute',
-    top: SCREEN_HEIGHT * 0.43,
+    top: 0,
     bottom: 0,
     left: 0,
     right: 0,
+    backgroundColor: 'transparent',
+  },
+  contentCard: {
     borderTopLeftRadius: 32,
     borderTopRightRadius: 32,
     overflow: 'hidden',
-    backgroundColor: 'transparent',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.08)',
     borderBottomWidth: 0,
+    backgroundColor: 'transparent',
+    minHeight: SCREEN_HEIGHT * 0.57,
   },
-  blurSheet: {
+  blurSheetContent: {
     flex: 1,
   },
   scrollContent: {
@@ -808,13 +1043,16 @@ const styles = StyleSheet.create({
   seasonSelector: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    alignSelf: 'center',
-    marginTop: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1.5,
+    borderColor: theme.colors.accent, 
+    backgroundColor: 'rgba(25, 25, 30, 0.5)',
+    gap: 6,
+  },
+  seasonSelectorActive: {
+    backgroundColor: theme.colors.accent 
   },
   seasonText: {
     color: 'rgba(255, 255, 255, 0.9)',
@@ -903,7 +1141,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.06)',
   },
   castInitials: { 
-    color: "#e3b5ff", 
+    color: theme.colors.accentLight, 
     fontSize: 14, 
     fontWeight: "bold" 
   },
@@ -937,7 +1175,7 @@ const styles = StyleSheet.create({
     alignItems: "center"
   },
   episodePlaying: { 
-    backgroundColor: "rgba(189, 92, 255, 0.08)" 
+    backgroundColor: theme.colors.roseBg 
   },
   episodeThumbnailContainer: {
     width: 120,
@@ -958,17 +1196,24 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   episodePlayCircle: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    overflow: 'hidden',
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: 'rgba(255, 255, 255, 0.85)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 255, 255, 0.45)',
     alignItems: 'center',
     justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 3,
   },
   playArrow: {
     color: '#fff',
-    fontSize: 10,
-    marginLeft: 2,
+    fontSize: 14,
+    marginLeft: 3,
   },
   episodeInfo: { 
     flex: 1,
@@ -978,6 +1223,10 @@ const styles = StyleSheet.create({
     color: '#A0A0A5',
     fontSize: 11,
     marginBottom: 2,
+  },
+  episodeLabelActive: { 
+    color: theme.colors.accentLight, 
+    fontWeight: "700" 
   },
   episodeTitle: { 
     color: "#fff", 
@@ -991,20 +1240,20 @@ const styles = StyleSheet.create({
     lineHeight: 14 
   },
   episodeActionCol: {
-    width: 32,
+    width: 38,
     alignItems: 'center',
     justifyContent: 'center',
   },
   downloadIconCircle: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.12)',
     alignItems: 'center',
     justifyContent: 'center',
   },
   downloadIcon: {
-    color: 'rgba(255,255,255,0.8)',
+    color: 'rgba(255,255,255,0.85)',
     fontSize: 10,
     fontWeight: 'bold',
     marginLeft: 2,
@@ -1074,7 +1323,7 @@ const styles = StyleSheet.create({
     height: 20, 
     borderRadius: 10, 
     borderWidth: 2, 
-    borderColor: "#bd5cff", 
+    borderColor: theme.colors.accent, 
     alignItems: "center", 
     justifyContent: "center", 
     marginRight: 14 
@@ -1083,7 +1332,7 @@ const styles = StyleSheet.create({
     width: 10, 
     height: 10, 
     borderRadius: 5, 
-    backgroundColor: "#bd5cff" 
+    backgroundColor: theme.colors.accent 
   },
   sheetRowInfo: { 
     flex: 1 
@@ -1099,7 +1348,7 @@ const styles = StyleSheet.create({
     marginRight: 8 
   },
   sheetBadge: { 
-    backgroundColor: "#bd5cff", 
+    backgroundColor: theme.colors.accent, 
     borderRadius: 4, 
     paddingHorizontal: 6, 
     paddingVertical: 1 
@@ -1124,7 +1373,7 @@ const styles = StyleSheet.create({
     fontSize: 13 
   },
   sheetSubLangs: { 
-    color: "#bd5cff", 
+    color: theme.colors.accentLight, 
     fontSize: 13, 
     fontWeight: "600" 
   },
@@ -1159,7 +1408,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   seasonDropdownRowActive: {
-    backgroundColor: 'rgba(189, 92, 255, 0.15)',
+    backgroundColor: theme.colors.accent,
   },
   seasonDropdownRowText: {
     color: '#A0A0A5',
@@ -1167,7 +1416,7 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   seasonDropdownRowTextActive: {
-    color: '#bd5cff',
+    color: '#fff',
     fontWeight: '700',
   },
 

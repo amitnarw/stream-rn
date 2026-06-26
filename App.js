@@ -9,9 +9,16 @@ import HomeScreen from './src/screens/HomeScreen';
 import SearchScreen from './src/screens/SearchScreen';
 import DetailScreen from './src/screens/DetailScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
+import FavoritesScreen from './src/screens/FavoritesScreen';
 import { TransitionProvider } from './src/context/TransitionContext';
 import HeroOverlay from './src/components/HeroOverlay';
+import { theme } from './src/theme';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import OnboardingScreen from './src/screens/OnboardingScreen';
+import * as Font from 'expo-font';
+import { BlurView } from 'expo-blur';
 
+const RootStack = createNativeStackNavigator();
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
 
@@ -27,7 +34,7 @@ function TabIcon({ label, icon, focused }) {
 function HomeStack() {
   return (
     <Stack.Navigator
-      screenOptions={{ headerShown: false, contentStyle: { backgroundColor: '#12093a' } }}
+      screenOptions={{ headerShown: false, contentStyle: { backgroundColor: theme.colors.background } }}
     >
       <Stack.Screen name="HomeMain" component={HomeScreen} />
     </Stack.Navigator>
@@ -37,7 +44,7 @@ function HomeStack() {
 function DiscoverStack() {
   return (
     <Stack.Navigator
-      screenOptions={{ headerShown: false, contentStyle: { backgroundColor: '#12093a' } }}
+      screenOptions={{ headerShown: false, contentStyle: { backgroundColor: theme.colors.background } }}
     >
       <Stack.Screen name="Search" component={SearchScreen} />
       <Stack.Screen name="Detail" component={DetailScreen} />
@@ -45,64 +52,144 @@ function DiscoverStack() {
   );
 }
 
-function SavedScreen() {
+function SavedStack() {
   return (
-    <View style={styles.emptyTab}>
-      <Text style={styles.emptyTabText}>No saved items yet</Text>
-    </View>
+    <Stack.Navigator
+      screenOptions={{ headerShown: false, contentStyle: { backgroundColor: theme.colors.background } }}
+    >
+      <Stack.Screen name="Favorites" component={FavoritesScreen} />
+      <Stack.Screen name="Detail" component={DetailScreen} />
+    </Stack.Navigator>
+  );
+}
+
+function TabNavigator() {
+  return (
+    <Tab.Navigator
+      screenOptions={{
+        headerShown: false,
+        tabBarStyle: tabStyles.tabBar,
+        tabBarShowLabel: false,
+        tabBarBackground: () => (
+          <View style={StyleSheet.absoluteFillObject}>
+            <BlurView 
+              intensity={100} 
+              tint="dark" 
+              style={StyleSheet.absoluteFillObject} 
+            />
+            <View style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(15, 15, 20, 0.38)' }]} />
+          </View>
+        ),
+      }}
+    >
+      <Tab.Screen
+        name="Home"
+        component={HomeStack}
+        options={{
+          tabBarIcon: ({ focused }) => (
+            <TabIcon label="Home" icon="H" focused={focused} />
+          ),
+        }}
+      />
+      <Tab.Screen
+        name="Discover"
+        component={DiscoverStack}
+        options={{
+          tabBarIcon: ({ focused }) => (
+            <TabIcon label="Discover" icon="D" focused={focused} />
+          ),
+        }}
+      />
+      <Tab.Screen
+        name="Saved"
+        component={SavedStack}
+        options={{
+          tabBarIcon: ({ focused }) => (
+            <TabIcon label="Saved" icon="S" focused={focused} />
+          ),
+        }}
+      />
+      <Tab.Screen
+        name="Profile"
+        component={SettingsScreen}
+        options={{
+          tabBarIcon: ({ focused }) => (
+            <TabIcon label="Profile" icon="P" focused={focused} />
+          ),
+        }}
+      />
+    </Tab.Navigator>
   );
 }
 
 export default function App() {
+  const [isFirstTime, setIsFirstTime] = React.useState(null);
+  const [fontsLoaded, setFontsLoaded] = React.useState(false);
+
+  React.useEffect(() => {
+    async function checkFirstTimeAndLoadFonts() {
+      const checkStoragePromise = AsyncStorage.getItem('@sozo_is_first_time');
+      const loadFontsPromise = Font.loadAsync({
+        'PlusJakartaSans-Regular': 'https://raw.githubusercontent.com/tokotype/PlusJakartaSans/master/fonts/ttf/PlusJakartaSans-Regular.ttf',
+        'PlusJakartaSans-Bold': 'https://raw.githubusercontent.com/tokotype/PlusJakartaSans/master/fonts/ttf/PlusJakartaSans-Bold.ttf',
+        'PlusJakartaSans-ExtraBold': 'https://raw.githubusercontent.com/tokotype/PlusJakartaSans/master/fonts/ttf/PlusJakartaSans-ExtraBold.ttf',
+        'PlusJakartaSans-Black': 'https://raw.githubusercontent.com/tokotype/PlusJakartaSans/master/fonts/ttf/PlusJakartaSans-ExtraBold.ttf',
+      });
+
+      try {
+        const val = await checkStoragePromise;
+        if (val === null) {
+          setIsFirstTime(true);
+        } else {
+          setIsFirstTime(false);
+        }
+      } catch (e) {
+        setIsFirstTime(false);
+      }
+
+      try {
+        await loadFontsPromise;
+        setFontsLoaded(true);
+      } catch (e) {
+        console.warn('Failed to load Plus Jakarta Sans remote fonts, falling back to system:', e);
+        setFontsLoaded(true);
+      }
+    }
+
+    checkFirstTimeAndLoadFonts();
+  }, []);
+
+  const handleFinishOnboarding = async () => {
+    try {
+      await AsyncStorage.setItem('@sozo_is_first_time', 'false');
+    } catch (e) {
+      console.warn(e);
+    }
+    setIsFirstTime(false);
+  };
+
+  if (isFirstTime === null || !fontsLoaded) {
+    return (
+      <View style={{ flex: 1, backgroundColor: theme.colors.background, justifyContent: 'center', alignItems: 'center' }}>
+        <StatusBar style="light" />
+      </View>
+    );
+  }
+
   return (
     <SafeAreaProvider>
       <TransitionProvider>
         <NavigationContainer>
           <StatusBar style="light" />
-          <Tab.Navigator
-            screenOptions={{
-              headerShown: false,
-              tabBarStyle: tabStyles.tabBar,
-              tabBarShowLabel: false,
-            }}
-          >
-            <Tab.Screen
-              name="Home"
-              component={HomeStack}
-              options={{
-                tabBarIcon: ({ focused }) => (
-                  <TabIcon label="Home" icon="H" focused={focused} />
-                ),
-              }}
-            />
-            <Tab.Screen
-              name="Discover"
-              component={DiscoverStack}
-              options={{
-                tabBarIcon: ({ focused }) => (
-                  <TabIcon label="Discover" icon="D" focused={focused} />
-                ),
-              }}
-            />
-            <Tab.Screen
-              name="Saved"
-              component={SavedScreen}
-              options={{
-                tabBarIcon: ({ focused }) => (
-                  <TabIcon label="Saved" icon="S" focused={focused} />
-                ),
-              }}
-            />
-            <Tab.Screen
-              name="Profile"
-              component={SettingsScreen}
-              options={{
-                tabBarIcon: ({ focused }) => (
-                  <TabIcon label="Profile" icon="P" focused={focused} />
-                ),
-              }}
-            />
-          </Tab.Navigator>
+          <RootStack.Navigator screenOptions={{ headerShown: false, contentStyle: { backgroundColor: theme.colors.background } }}>
+            {isFirstTime ? (
+              <RootStack.Screen name="Onboarding">
+                {props => <OnboardingScreen {...props} onFinish={handleFinishOnboarding} />}
+              </RootStack.Screen>
+            ) : (
+              <RootStack.Screen name="Main" component={TabNavigator} />
+            )}
+          </RootStack.Navigator>
         </NavigationContainer>
         <HeroOverlay />
       </TransitionProvider>
@@ -113,7 +200,7 @@ export default function App() {
 const styles = StyleSheet.create({
   emptyTab: {
     flex: 1,
-    backgroundColor: '#12093a',
+    backgroundColor: theme.colors.background,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -125,12 +212,21 @@ const styles = StyleSheet.create({
 
 const tabStyles = StyleSheet.create({
   tabBar: {
-    backgroundColor: '#1a1035',
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.08)',
-    height: 60,
-    paddingBottom: 6,
-    paddingTop: 6,
+    position: 'absolute',
+    left: 20,
+    right: 20,
+    bottom: 24,
+    height: 58,
+    borderRadius: 29,
+    borderTopWidth: 0,
+    backgroundColor: 'transparent',
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    overflow: 'hidden',
+    paddingBottom: 0,
   },
   iconWrap: {
     alignItems: 'center',

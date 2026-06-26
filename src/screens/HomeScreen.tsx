@@ -18,6 +18,8 @@ import * as bridge from '../api/cloudStreamBridge';
 import { useTransitionActions } from '../context/TransitionContext';
 import type { CardLayout } from '../context/TransitionContext';
 
+import { theme } from '../theme';
+
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 // Hero carousel dimensions — center card large, side cards peek ~18%
@@ -60,7 +62,7 @@ function SkeletonBox({
   }, []);
   return (
     <Animated.View
-      style={{ width, height, borderRadius, backgroundColor: '#3a2e5a', opacity }}
+      style={{ width, height, borderRadius, backgroundColor: theme.colors.placeholder, opacity }}
     />
   );
 }
@@ -370,7 +372,7 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
         {/* ── Content ── */}
         {loading ? (
           <View style={styles.center}>
-            <ActivityIndicator size="large" color="#a78bfa" />
+            <ActivityIndicator size="large" color={theme.colors.accent} />
           </View>
         ) : error ? (
           <View style={styles.center}>
@@ -382,7 +384,7 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
         ) : (
           <ScrollView
             showsVerticalScrollIndicator={false}
-            contentContainerStyle={{ paddingBottom: 24 }}
+            contentContainerStyle={{ paddingBottom: 110 }}
           >
             {/* Hero carousel */}
             {sectionsLoading || heroItems.length === 0 ? (
@@ -506,7 +508,7 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#12093a' },
+  root: { flex: 1, backgroundColor: theme.colors.background },
 
   // category tabs — plain text, active is white + 2px underline
   tabRowWrap: { flexGrow: 0 },
@@ -519,11 +521,11 @@ const styles = StyleSheet.create({
   },
   tabItem: { alignItems: 'center' },
   tabText: { color: 'rgba(255,255,255,0.45)', fontSize: 14, fontWeight: '500' },
-  tabTextActive: { color: '#ffffff', fontWeight: '700' },
+  tabTextActive: { color: theme.colors.accentLight, fontWeight: '700' },
   tabUnderline: {
     height: 2,
     width: '100%',
-    backgroundColor: '#ffffff',
+    backgroundColor: theme.colors.accent,
     borderRadius: 2,
     marginTop: 3,
   },
@@ -534,10 +536,10 @@ const styles = StyleSheet.create({
     height: HERO_CARD_HEIGHT,
     borderRadius: 18,
     overflow: 'hidden',
-    backgroundColor: '#2a1f5a',
+    backgroundColor: theme.colors.placeholder,
   },
   heroPosterImg: { width: '100%', height: '100%' },
-  heroPosterFallback: { flex: 1, backgroundColor: '#2a1f5a' },
+  heroPosterFallback: { flex: 1, backgroundColor: theme.colors.placeholder },
 
   // info below carousel: year → bold title → chips → dots
   heroMeta: {
@@ -598,23 +600,23 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   sectionTitle: { color: '#ffffff', fontSize: 16, fontWeight: '700' },
-  seeAll: { color: '#a78bfa', fontSize: 13 },
+  seeAll: { color: theme.colors.accentLight, fontSize: 13 },
 
   // small card
   smallCardImg: {
     width: S_CARD_W,
     height: S_CARD_H,
     borderRadius: 12,
-    backgroundColor: '#2a1f5a',
+    backgroundColor: theme.colors.placeholder,
   },
-  cardFallback: { backgroundColor: '#2a1f5a' },
+  cardFallback: { backgroundColor: theme.colors.placeholder },
 
   // continue watching card
   cwCardImg: {
     width: CW_CARD_W,
     height: CW_CARD_W * 1.5,
     borderRadius: 12,
-    backgroundColor: '#2a1f5a',
+    backgroundColor: theme.colors.placeholder,
   },
   cwProgressBg: {
     position: 'absolute',
@@ -628,14 +630,14 @@ const styles = StyleSheet.create({
   },
   cwProgressFill: {
     height: '100%',
-    backgroundColor: '#a78bfa',
+    backgroundColor: theme.colors.accent,
     borderBottomLeftRadius: 12,
   },
   cwBadge: {
     position: 'absolute',
     top: 6,
     left: 6,
-    backgroundColor: 'rgba(109,40,217,0.85)',
+    backgroundColor: 'rgba(255, 74, 125, 0.85)',
     borderRadius: 5,
     paddingHorizontal: 5,
     paddingVertical: 2,
@@ -652,7 +654,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   retryBtn: {
-    backgroundColor: '#6d28d9',
+    backgroundColor: theme.colors.accent,
     paddingHorizontal: 28,
     paddingVertical: 10,
     borderRadius: 20,

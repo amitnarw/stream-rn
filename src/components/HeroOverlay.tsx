@@ -11,6 +11,7 @@ import {
   TouchableOpacity,
   View,
   Pressable,
+  Animated as RNAnimated,
 } from 'react-native';
 import Animated, {
   Extrapolation,
@@ -27,17 +28,148 @@ import Animated, {
   withSequence,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { BlurView } from 'expo-blur';
+import { BlurView, BlurTargetView } from 'expo-blur';
+import { Ionicons, FontAwesome } from '@expo/vector-icons';
+import * as favoritesApi from '../api/favorites';
 import { LinearGradient } from 'expo-linear-gradient';
 import type { EpisodeItem, VideoSource, MediaItem } from '../types/plugin';
 import * as bridge from '../api/cloudStreamBridge';
 import { useTransition } from '../context/TransitionContext';
 import type { CardLayout } from '../context/TransitionContext';
 
+function getHighQualityImageUrl(url: string | null | undefined): string | undefined {
+  if (!url) return undefined;
+  
+  // 1. Metahub images - upgrade medium/small to large
+  if (url.includes("images.metahub.space")) {
+    return url.replace("/medium/", "/large/").replace("/small/", "/large/");
+  }
+  
+  // 2. TMDB images - upgrade any size (e.g. w500, w300_and_h450_bestv2) to w1280
+  if (url.includes("image.tmdb.org/t/p/")) {
+    return url.replace(/\/t\/p\/[^/]+\//, "/t/p/w1280/");
+  }
+  
+  // 3. IMDb / Amazon images - remove cropping and upgrade size
+  if (url.includes("media-amazon.com/images/") || url.includes("m.media-amazon.com/")) {
+    const index = url.indexOf("._V1_");
+    if (index !== -1) {
+      return url.substring(0, index) + "._V1_SX1080_.jpg";
+    }
+  }
+
+  // 4. YTS images - upgrade from medium to large cover
+  if (url.includes("yts.mx/assets/images/movies/")) {
+    return url.replace("medium-cover.jpg", "large-cover.jpg");
+  }
+
+  return url;
+}
+
+function SkeletonPlaceholder({ style }: { style: any }) {
+  const pulseAnim = React.useRef(new RNAnimated.Value(0)).current;
+
+  React.useEffect(() => {
+    const sharedAnimation = RNAnimated.loop(
+      RNAnimated.sequence([
+        RNAnimated.timing(pulseAnim, {
+          toValue: 1,
+          duration: 1000,
+          useNativeDriver: true,
+        }),
+        RNAnimated.timing(pulseAnim, {
+          toValue: 0,
+          duration: 1000,
+          useNativeDriver: true,
+        }),
+      ])
+    );
+    sharedAnimation.start();
+    return () => sharedAnimation.stop();
+  }, [pulseAnim]);
+
+  const opacity = pulseAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.12, 0.28],
+  });
+
+  return (
+    <View style={[style, { backgroundColor: '#121214' }]}>
+      <RNAnimated.View
+        style={[
+          StyleSheet.absoluteFillObject,
+          {
+            backgroundColor: '#ffffff',
+            opacity,
+          },
+        ]}
+      />
+    </View>
+  );
+}
+
+
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 const HERO_HEIGHT = SCREEN_HEIGHT * 0.50; // 50% for hero, overlaps with sheet
 
+interface HeroEpisodeRowProps {
+  ep: EpisodeItem;
+  index: number;
+  playingEpisode: number | null;
+  playEpisode: (ep: EpisodeItem, index: number) => void;
+  posterUrl: string | undefined;
+  isSerial: boolean;
+  title: string;
+}
+
+function HeroEpisodeRow({ ep, index, playingEpisode, playEpisode, posterUrl, isSerial, title }: HeroEpisodeRowProps) {
+  return (
+    <TouchableOpacity
+      style={styles.episodeRow}
+      disabled={playingEpisode !== null}
+      onPress={() => playEpisode(ep, index)}
+      activeOpacity={0.8}
+    >
+      <View style={styles.episodeThumbContainer}>
+        <Image
+          source={{ uri: ep.image || posterUrl || undefined }}
+          style={styles.episodeThumb}
+          resizeMode="cover"
+        />
+        <View style={styles.playIconOverlay}>
+          {playingEpisode === index ? (
+            <View style={styles.playIconGlass}>
+              <ActivityIndicator color="#fff" size="small" />
+            </View>
+          ) : (
+            <View style={styles.playIconGlass}>
+              <FontAwesome name="play-circle" size={24} color="black" />
+            </View>
+          )}
+        </View>
+      </View>
+
+      <View style={styles.episodeInfo}>
+        {isSerial && (
+          <Text style={styles.episodeMeta}>Episode {String(ep.episode).padStart(2, '0')}</Text>
+        )}
+        <Text style={styles.episodeTitle} numberOfLines={2}>
+          {ep.label || (isSerial ? `Episode ${ep.episode}` : title)}
+        </Text>
+      </View>
+    </TouchableOpacity>
+  );
+}
+
 export default function HeroOverlay() {
+  const [blurTarget, setBlurTarget] = useState<any>(null);
+  const blurTargetRef = useRef<any>(null);
+  const setBlurTargetRef = (val: any) => {
+    blurTargetRef.current = val;
+    if (val !== blurTarget) {
+      setBlurTarget(val);
+    }
+  };
   const insets = useSafeAreaInsets();
   const {
     phase,
@@ -66,6 +198,45 @@ export default function HeroOverlay() {
   const [subtitles, setSubtitles] = useState<{ lang: string; url: string }[]>([]);
   const [showSourcePicker, setShowSourcePicker] = useState(false);
   const [selectedSourceIndex, setSelectedSourceIndex] = useState(0);
+
+  // Favorite state
+  const [isFav, setIsFav] = useState(false);
+
+  useEffect(() => {
+    async function checkFav() {
+      if (detail) {
+        const fav = await favoritesApi.isFavorite(detail.url);
+        setIsFav(fav);
+      } else if (item) {
+        const fav = await favoritesApi.isFavorite(item.url);
+        setIsFav(fav);
+      }
+    }
+    checkFav();
+  }, [detail, item]);
+
+  async function toggleFavorite() {
+    const currentMediaItem = detail || item;
+    if (!currentMediaItem) return;
+    try {
+      if (isFav) {
+        await favoritesApi.removeFavorite(currentMediaItem.url);
+        setIsFav(false);
+      } else {
+        const mediaItem = {
+          provider: currentMediaItem.provider || 'Cinemeta',
+          url: currentMediaItem.url,
+          title: currentMediaItem.title,
+          posterUrl: currentMediaItem.posterUrl,
+          type: (currentMediaItem as any).isSerial ? 'series' : (currentMediaItem as any).type || 'movie',
+        };
+        await favoritesApi.addFavorite(mediaItem);
+        setIsFav(true);
+      }
+    } catch (e) {
+      console.warn('Failed to toggle favorite:', e);
+    }
+  }
 
   const sheetTranslateY = useSharedValue(SCREEN_HEIGHT);
 
@@ -129,7 +300,7 @@ export default function HeroOverlay() {
     opacity: contentProgress.value,
   }));
 
-  const posterUrl = item?.posterUrl || detail?.posterUrl || detail?.banner || undefined;
+  const posterUrl = getHighQualityImageUrl(detail?.posterUrl || item?.posterUrl);
   const title = detail?.title || item?.title || '';
   const providerName = detail?.provider || item?.provider || 'Cinemeta';
   const allEpisodes = useMemo(() => detail?.episodes ?? [], [detail?.episodes]);
@@ -223,6 +394,20 @@ export default function HeroOverlay() {
     };
   });
 
+  const scrollThreshold = SCREEN_HEIGHT * 0.45 - 90;
+
+  const headerBgStyle = useAnimatedStyle(() => {
+    const opacity = interpolate(
+      scrollY.value,
+      [0, scrollThreshold],
+      [0, 1],
+      Extrapolation.CLAMP
+    );
+    return {
+      opacity,
+    };
+  });
+
   const touchCatcherAnimatedStyle = useAnimatedStyle(() => {
     const translateY = interpolate(scrollY.value, [0, SCREEN_HEIGHT * 0.45], [0, -SCREEN_HEIGHT * 0.45], Extrapolation.CLAMP);
     return {
@@ -303,292 +488,334 @@ export default function HeroOverlay() {
     <View style={styles.root} pointerEvents="box-none">
       <Animated.View style={[styles.shadowWrap, shadowStyle]}>
         <Animated.View style={[styles.surface, surfaceStyle]}>
-          
-          {/* Background Hero Image */}
-          <Animated.View style={[styles.imageWrap, imageStyle]}>
-            {posterUrl ? (
-              <Image source={{ uri: posterUrl }} style={styles.image} resizeMode="cover" />
-            ) : (
-              <View style={styles.imageFallback} />
-            )}
+          <BlurTargetView ref={setBlurTargetRef as any} style={StyleSheet.absoluteFillObject}>
             
-            {/* Blend Overlay (Cinematic Shading) */}
-            <Animated.View style={[StyleSheet.absoluteFillObject, fadeStyle]} pointerEvents="none">
-              <LinearGradient
-                colors={['rgba(0,0,0,0.5)', 'rgba(0,0,0,0.15)', 'rgba(0,0,0,0.85)']}
-                style={StyleSheet.absoluteFillObject}
-                locations={[0, 0.4, 1]}
-                pointerEvents="none"
-              />
-            </Animated.View>
-          </Animated.View>
-
-          {/* Top Navigation Bar */}
-          <Animated.View style={[styles.headerControls, { paddingTop: insets.top + 10 }, headerControlsStyle]} pointerEvents="box-none">
-            <View style={styles.headerSpacer} />
-            <Text style={styles.headerTitle}>TV Series Details</Text>
-            <TouchableOpacity style={styles.closeButton} onPress={closeToCard} activeOpacity={0.8}>
-              <View style={styles.closeButtonInner}>
-                <Text style={styles.closeButtonText}>✕</Text>
-              </View>
-            </TouchableOpacity>
-          </Animated.View>
-
-          {/* Fixed Header Content (Rendered OUTSIDE ScrollView to prevent jitter/glitching) */}
-          <Animated.View style={[styles.fixedHeaderContainer, fixedHeaderAnimatedStyle]} pointerEvents="box-none">
-            {/* Watch Trailer Button in Center */}
-            {detail?.trailers && detail.trailers.length > 0 && (
-              <TouchableOpacity 
-                style={styles.trailerButton} 
-                activeOpacity={0.8} 
-                onPress={playTrailer}
-                disabled={scrollYRef.current > 100}
-              >
-                <View style={styles.trailerBlur}>
-                  <Text style={styles.trailerIcon}>▶</Text>
-                  <Text style={styles.trailerText}>Watch Trailer</Text>
-                </View>
-              </TouchableOpacity>
-            )}
-            
-            {/* Video Metadata Pill at Bottom */}
-            <View style={styles.pillBottom} pointerEvents="none">
-              <View style={styles.pillBackground}>
-                {detail?.year ? (
-                  <>
-                    <Text style={styles.pillText}>{detail.year}</Text>
-                    <View style={styles.pillDot} />
-                  </>
-                ) : null}
-                <Text style={styles.pillText}>{detail?.isSerial ? `${allEpisodes.length} Episodes` : 'Movie'}</Text>
-                <View style={styles.pillDot} />
-                <Text style={styles.pillText}>HD</Text>
-              </View>
-            </View>
-          </Animated.View>
-
-          {/* Swipe Touch Catcher (covers top 45%, outside ScrollView, animated) */}
-          <Animated.View 
-            style={[styles.touchCatcher, touchCatcherAnimatedStyle]} 
-            {...panResponder.panHandlers}
-            pointerEvents={showSeasonDropdown ? 'none' : 'auto'}
-          />
-
-          {/* Scrollable Details */}
-          <Animated.ScrollView
-            ref={scrollViewRef as any}
-            style={[styles.fullScreenScroll, contentStyle]}
-            contentContainerStyle={{ flexGrow: 1 }}
-            showsVerticalScrollIndicator={false}
-            onScroll={scrollHandler}
-            scrollEventThrottle={16}
-          >
-            <Pressable
-              style={{ flexGrow: 1 }}
-              onPress={() => {
-                if (showSeasonDropdown) {
-                  setShowSeasonDropdown(false);
-                }
-              }}
-            >
-              {/* Spacer for Fixed Header Content */}
-              <View 
-                style={{ height: SCREEN_HEIGHT * 0.45 }} 
-                pointerEvents="none"
-              />
-
-              {/* Bottom Sheet Content */}
-              <View style={styles.sheetContentWrap}>
-                <View style={styles.bottomSheetBackground}>
-                <View style={styles.blurContainer}>
-                  {posterUrl ? (
-                    <Image 
-                      source={{ uri: posterUrl }} 
-                      style={StyleSheet.absoluteFillObject}
-                      blurRadius={35}
-                      resizeMode="cover"
-                    />
-                  ) : null}
-                  <LinearGradient 
-                    colors={['rgba(15,15,20,0.55)', 'rgba(5,5,10,0.9)']} 
-                    style={StyleSheet.absoluteFillObject} 
-                  />
-                </View>
-              </View>
+            <Animated.View style={[styles.imageWrap, imageStyle]}>
+              {/* Skeleton placeholder base (Breathing shimmer) */}
+              <SkeletonPlaceholder style={StyleSheet.absoluteFillObject} />
               
-              {loading ? (
-                <DetailsSkeleton />
-              ) : error ? (
-                <View style={styles.centerState}>
-                  <Text style={styles.errorText}>{error}</Text>
-                  <TouchableOpacity style={styles.primaryButton} onPress={reloadDetail}>
-                    <Text style={styles.primaryButtonText}>Retry</Text>
-                  </TouchableOpacity>
-                </View>
+              {/* Blurred poster progressive placeholder */}
+              {(item?.posterUrl || detail?.posterUrl) ? (
+                <Image 
+                  source={{ uri: item?.posterUrl || detail?.posterUrl || undefined }} 
+                  style={[StyleSheet.absoluteFillObject, { opacity: 0.45 }]} 
+                  resizeMode="cover"
+                  blurRadius={25}
+                />
+              ) : null}
+              
+              {posterUrl ? (
+                <Image source={{ uri: posterUrl }} style={styles.image} resizeMode="cover" />
               ) : (
-                <Animated.View 
-                  entering={FadeIn.duration(350)}
-                  style={[styles.scrollContent, { paddingBottom: insets.bottom + 100 }]}
-                >
-                  {/* Title & Season */}
-                  <View style={[styles.titleContainer, { zIndex: 100 }]}>
-                    <Text style={styles.mainTitle} numberOfLines={2}>{title}</Text>
-                    {detail?.isSerial && availableSeasons.length > 0 ? (
-                      <View style={{ position: 'relative', alignItems: 'center' }}>
-                        <TouchableOpacity 
-                          style={styles.seasonSelector} 
-                          activeOpacity={0.7}
-                          onPress={() => setShowSeasonDropdown(!showSeasonDropdown)}
-                        >
-                          <Text style={styles.seasonText}>
-                            {selectedSeason ? `Season ${selectedSeason}` : 'Episodes'}
-                          </Text>
-                          <Text style={styles.seasonIcon}>▼</Text>
-                        </TouchableOpacity>
+                <View style={styles.imageFallback} />
+              )}
+              
+              {/* Blend Overlay (Cinematic Shading) */}
+              <Animated.View style={[StyleSheet.absoluteFillObject, fadeStyle]} pointerEvents="none">
+                <LinearGradient
+                  colors={['rgba(0,0,0,0.5)', 'rgba(0,0,0,0.15)', 'rgba(0,0,0,0.85)']}
+                  style={StyleSheet.absoluteFillObject}
+                  locations={[0, 0.4, 1]}
+                  pointerEvents="none"
+                />
+              </Animated.View>
+            </Animated.View>
+          </BlurTargetView>
 
-                        {/* Floating Modern Dropdown */}
-                        {showSeasonDropdown && (
-                          <Animated.View 
-                            entering={FadeIn.duration(200)} 
-                            exiting={FadeOut.duration(150)} 
-                            style={styles.floatingDropdown}
-                          >
-                            <LinearGradient 
-                              colors={['#1c1c22', '#0f0f12']}
-                              style={StyleSheet.absoluteFillObject}
+          {/* Top Navigation Bar (Oval/Capsule) */}
+            <View style={[styles.headerControls, { top: Math.max(insets.top - 4, 8) }]} pointerEvents="box-none">
+              {/* Animated Background blur capsule */}
+              <Animated.View style={[
+                StyleSheet.absoluteFillObject,
+                headerBgStyle,
+                {
+                  borderRadius: 24,
+                  overflow: 'hidden',
+                }
+              ]}>
+                <BlurView 
+                  intensity={100} 
+                  tint="dark" 
+                  style={StyleSheet.absoluteFillObject}
+                  blurTarget={{ current: blurTarget }}
+                  blurMethod="dimezisBlurView"
+                />
+                <View style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(15, 15, 20, 0.38)' }]} />
+              </Animated.View>
+              
+
+
+              {/* Header controls content (fades in with zoom transition) */}
+              <Animated.View style={[styles.headerControlsContent, headerControlsStyle]} pointerEvents="box-none">
+                <TouchableOpacity style={styles.closeButton} onPress={closeToCard} activeOpacity={0.8}>
+                  <View style={styles.closeButtonInner}>
+                    <Text style={styles.closeButtonText}>←</Text>
+                  </View>
+                </TouchableOpacity>
+
+                <Text style={styles.headerTitle}>
+                  {detail?.isSerial ? 'TV Series Details' : 'Movie Details'}
+                </Text>
+
+                <TouchableOpacity style={styles.closeButton} onPress={toggleFavorite} activeOpacity={0.8}>
+                  <View style={styles.closeButtonInner}>
+                    <Ionicons 
+                      name={isFav ? "heart" : "heart-outline"} 
+                      size={20} 
+                      color={isFav ? "#ff4a7d" : "#ffffff"} 
+                    />
+                  </View>
+                </TouchableOpacity>
+              </Animated.View>
+            </View>
+
+            {/* Fixed Header Content (Rendered OUTSIDE ScrollView to prevent jitter/glitching) */}
+            <Animated.View style={[styles.fixedHeaderContainer, fixedHeaderAnimatedStyle]} pointerEvents="box-none">
+              {/* Watch Trailer Button in Center */}
+              {detail?.trailers && detail.trailers.length > 0 && (
+                <TouchableOpacity 
+                  style={styles.trailerButton} 
+                  activeOpacity={0.8} 
+                  onPress={playTrailer}
+                  disabled={scrollYRef.current > 100}
+                >
+                  <View style={styles.trailerCircle}>
+                    <BlurView 
+                      intensity={90} 
+                      tint="dark" 
+                      style={StyleSheet.absoluteFillObject}
+                      blurTarget={{ current: blurTarget }}
+                      blurMethod="dimezisBlurView"
+                    />
+                    <Ionicons name="play" size={24} color="#fff" style={{ marginLeft: 3 }} />
+                  </View>
+                  <Text style={styles.trailerLabel}>TRAILER</Text>
+                </TouchableOpacity>
+              )}
+              
+              {/* Video Metadata Pill at Bottom */}
+              <View style={styles.pillBottom} pointerEvents="none">
+                <View style={styles.pillBackground}>
+                  {detail?.year ? (
+                    <>
+                      <Text style={styles.pillText}>{detail.year}</Text>
+                      <View style={styles.pillDot} />
+                    </>
+                  ) : null}
+                  <Text style={styles.pillText}>
+                    {detail?.isSerial 
+                      ? `${availableSeasons.length} Season${availableSeasons.length !== 1 ? 's' : ''} • ${allEpisodes.length} Episode${allEpisodes.length !== 1 ? 's' : ''}` 
+                      : 'Movie'}
+                  </Text>
+                  <View style={styles.pillDot} />
+                  <Text style={styles.pillText}>HD</Text>
+                </View>
+              </View>
+            </Animated.View>
+
+            {/* Swipe Touch Catcher (covers top 45%, outside ScrollView, animated) */}
+            <Animated.View 
+              style={[styles.touchCatcher, touchCatcherAnimatedStyle]} 
+              {...panResponder.panHandlers}
+              pointerEvents={showSeasonDropdown ? 'none' : 'auto'}
+            />
+
+            {/* Scrollable Details */}
+            <Animated.ScrollView
+              ref={scrollViewRef as any}
+              style={[styles.fullScreenScroll, contentStyle]}
+              contentContainerStyle={{ flexGrow: 1 }}
+              showsVerticalScrollIndicator={false}
+              onScroll={scrollHandler}
+              scrollEventThrottle={16}
+            >
+              <Pressable
+                style={{ flexGrow: 1 }}
+                onPress={() => {
+                  if (showSeasonDropdown) {
+                    setShowSeasonDropdown(false);
+                  }
+                }}
+              >
+                {/* Spacer for Fixed Header Content */}
+                <View 
+                  style={{ height: SCREEN_HEIGHT * 0.45 }} 
+                  pointerEvents="none"
+                />
+
+                {/* Bottom Sheet Content */}
+                <View style={styles.sheetContentWrap}>
+                  <View style={styles.bottomSheetBackground}>
+                    <View style={styles.blurContainer}>
+                      {posterUrl ? (
+                        <Image 
+                          source={{ uri: posterUrl }} 
+                          style={StyleSheet.absoluteFillObject}
+                          blurRadius={35}
+                          resizeMode="cover"
+                        />
+                      ) : null}
+                      <LinearGradient 
+                        colors={['rgba(15,15,20,0.55)', 'rgba(5,5,10,0.9)']} 
+                        style={StyleSheet.absoluteFillObject} 
+                      />
+                    </View>
+                  </View>
+                  
+                  {loading ? (
+                    <DetailsSkeleton />
+                  ) : error ? (
+                    <View style={styles.centerState}>
+                      <Text style={styles.errorText}>{error}</Text>
+                      <TouchableOpacity style={styles.primaryButton} onPress={reloadDetail}>
+                        <Text style={styles.primaryButtonText}>Retry</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ) : (
+                    <Animated.View 
+                      entering={FadeIn.duration(350)}
+                      style={[styles.scrollContent, { paddingBottom: insets.bottom + 100 }]}
+                    >
+                      {/* Title & Season */}
+                      <View style={[styles.titleContainer, { zIndex: 100 }]}>
+                        <Text style={styles.mainTitle} numberOfLines={2}>{title}</Text>
+                        {detail?.isSerial && availableSeasons.length > 0 ? (
+                          <View style={{ position: 'relative', alignItems: 'center' }}>
+                            <TouchableOpacity 
+                              style={styles.seasonSelector} 
+                              activeOpacity={0.7}
+                              onPress={() => setShowSeasonDropdown(!showSeasonDropdown)}
+                            >
+                              <Text style={styles.seasonText}>
+                                {selectedSeason ? `Season ${selectedSeason}` : 'Episodes'}
+                              </Text>
+                              <Text style={styles.seasonIcon}>▼</Text>
+                            </TouchableOpacity>
+
+                            {/* Floating Modern Dropdown */}
+                            {showSeasonDropdown && (
+                              <Animated.View 
+                                entering={FadeIn.duration(200)} 
+                                exiting={FadeOut.duration(150)} 
+                                style={styles.floatingDropdown}
+                              >
+                                <LinearGradient 
+                                  colors={['#1c1c22', '#0f0f12']}
+                                  style={StyleSheet.absoluteFillObject}
+                                />
+                                <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 220 }}>
+                                  {availableSeasons.map((season) => (
+                                    <TouchableOpacity
+                                      key={`season-${season}`}
+                                      style={[styles.dropdownItem, selectedSeason === season && styles.dropdownItemSelected]}
+                                      onPress={() => {
+                                        setSelectedSeason(season);
+                                        setShowSeasonDropdown(false);
+                                      }}
+                                    >
+                                      <View style={styles.dropdownItemLeft}>
+                                        <View style={[
+                                          styles.seasonNumberBox,
+                                          selectedSeason === season && styles.seasonNumberBoxSelected
+                                        ]}>
+                                          <Text style={[
+                                            styles.seasonNumberText,
+                                            selectedSeason === season && styles.seasonNumberTextSelected
+                                          ]}>
+                                            {String(season).padStart(2, '0')}
+                                          </Text>
+                                        </View>
+                                        <Text style={[
+                                          styles.dropdownItemText,
+                                          selectedSeason === season && styles.dropdownItemTextSelected
+                                        ]}>
+                                          Season {season}
+                                        </Text>
+                                      </View>
+                                      {selectedSeason === season && (
+                                        <Text style={styles.checkmark}>✓</Text>
+                                      )}
+                                    </TouchableOpacity>
+                                  ))}
+                                </ScrollView>
+                              </Animated.View>
+                            )}
+                          </View>
+                        ) : null}
+                      </View>
+
+                      {/* Description */}
+                      {detail?.description ? (
+                        <Text style={styles.descriptionText}>{detail.description}</Text>
+                      ) : null}
+
+                      {/* Genre & Rating */}
+                      <View style={styles.genreRatingRow}>
+                        {detail?.tags && detail.tags.length > 0 ? (
+                          <Text style={styles.genreText}>{detail.tags.slice(0, 3).join(', ')}</Text>
+                        ) : null}
+                        {detail?.score ? (
+                          <View style={styles.imdbBadgeContainer}>
+                            <View style={styles.imdbBadge}>
+                              <Text style={styles.imdbText}>IMDb</Text>
+                            </View>
+                            <Text style={styles.ratingText}>{detail.score}</Text>
+                          </View>
+                        ) : null}
+                      </View>
+
+                      {linksError ? <Text style={styles.linksError}>{linksError}</Text> : null}
+
+                      {/* Episodes List Title */}
+                      <Text style={styles.sectionTitle}>
+                        {detail?.isSerial ? 'Episodes List' : 'Play Video'}
+                      </Text>
+
+                      {/* Episodes */}
+                      <View style={styles.episodesList}>
+                        {displayedEpisodes.length === 0 ? (
+                          <Text style={styles.empty}>No episodes available</Text>
+                        ) : (
+                          displayedEpisodes.map((ep, index) => (
+                            <HeroEpisodeRow
+                              key={`${ep.mediaRef}-${index}`}
+                              ep={ep}
+                              index={index}
+                              playingEpisode={playingEpisode}
+                              playEpisode={playEpisode}
+                              posterUrl={detail?.posterUrl || item.posterUrl || undefined}
+                              isSerial={!!detail?.isSerial}
+                              title={title}
                             />
-                            <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 220 }}>
-                              {availableSeasons.map((season) => (
-                                <TouchableOpacity
-                                  key={`season-${season}`}
-                                  style={[styles.dropdownItem, selectedSeason === season && styles.dropdownItemSelected]}
-                                  onPress={() => {
-                                    setSelectedSeason(season);
-                                    setShowSeasonDropdown(false);
-                                  }}
-                                >
-                                  <View style={styles.dropdownItemLeft}>
-                                    <View style={[
-                                      styles.seasonNumberBox,
-                                      selectedSeason === season && styles.seasonNumberBoxSelected
-                                    ]}>
-                                      <Text style={[
-                                        styles.seasonNumberText,
-                                        selectedSeason === season && styles.seasonNumberTextSelected
-                                      ]}>
-                                        {String(season).padStart(2, '0')}
-                                      </Text>
-                                    </View>
-                                    <Text style={[
-                                      styles.dropdownItemText,
-                                      selectedSeason === season && styles.dropdownItemTextSelected
-                                    ]}>
-                                      Season {season}
-                                    </Text>
-                                  </View>
-                                  {selectedSeason === season && (
-                                    <Text style={styles.checkmark}>✓</Text>
-                                  )}
-                                </TouchableOpacity>
-                              ))}
-                            </ScrollView>
-                          </Animated.View>
+                          ))
                         )}
                       </View>
-                    ) : null}
-                  </View>
 
-                  {/* Description */}
-                  {detail?.description ? (
-                    <Text style={styles.descriptionText}>{detail.description}</Text>
-                  ) : null}
-
-                  {/* Genre & Rating */}
-                  <View style={styles.genreRatingRow}>
-                    {detail?.tags && detail.tags.length > 0 ? (
-                      <Text style={styles.genreText}>{detail.tags.slice(0, 3).join(', ')}</Text>
-                    ) : null}
-                    {detail?.score ? (
-                      <View style={styles.imdbBadgeContainer}>
-                        <View style={styles.imdbBadge}>
-                          <Text style={styles.imdbText}>IMDb</Text>
-                        </View>
-                        <Text style={styles.ratingText}>{detail.score}</Text>
-                      </View>
-                    ) : null}
-                  </View>
-
-                  {linksError ? <Text style={styles.linksError}>{linksError}</Text> : null}
-
-                  {/* Episodes */}
-                  <View style={styles.episodesList}>
-                    {displayedEpisodes.length === 0 ? (
-                      <Text style={styles.empty}>No episodes available</Text>
-                    ) : (
-                      displayedEpisodes.map((ep, index) => (
-                        <View key={`${ep.mediaRef}-${index}`} style={styles.episodeRow}>
-                          <TouchableOpacity
-                            style={styles.episodeThumbContainer}
-                            disabled={playingEpisode !== null}
-                            onPress={() => playEpisode(ep, index)}
-                            activeOpacity={0.8}
+                      {/* Recommendations Row */}
+                      {recommendations.length > 0 && (
+                        <View style={styles.recommendationsSection}>
+                          <Text style={styles.recommendationsTitle}>More Like This</Text>
+                          <ScrollView 
+                            horizontal 
+                            showsHorizontalScrollIndicator={false}
+                            contentContainerStyle={styles.recommendationsList}
                           >
-                            <Image
-                              source={{ uri: ep.image || detail?.posterUrl || item.posterUrl || undefined }}
-                              style={styles.episodeThumb}
-                              resizeMode="cover"
-                            />
-                            <View style={styles.playIconOverlay}>
-                              {playingEpisode === index ? (
-                                <View style={styles.playIconGlass}>
-                                  <ActivityIndicator color="#fff" size="small" />
-                                </View>
-                              ) : (
-                                <View style={styles.playIconGlass}>
-                                  <Text style={styles.playIconText}>▶</Text>
-                                </View>
-                              )}
-                            </View>
-                          </TouchableOpacity>
-
-                          <View style={styles.episodeInfo}>
-                            {detail?.isSerial && (
-                              <Text style={styles.episodeMeta}>Episode {String(ep.episode).padStart(2, '0')}</Text>
-                            )}
-                            <Text style={styles.episodeTitle} numberOfLines={2}>
-                              {ep.label || (detail?.isSerial ? `Episode ${ep.episode}` : title)}
-                            </Text>
-                          </View>
+                            {recommendations.map((recItem, idx) => (
+                              <RecommendationCard 
+                                key={`rec-${idx}-${recItem.url}`} 
+                                item={recItem} 
+                                onPress={(clickedItem) => updateDetailInPlace(clickedItem)}
+                              />
+                            ))}
+                          </ScrollView>
                         </View>
-                      ))
-                    )}
-                  </View>
+                      )}
 
-                  {/* Recommendations Row */}
-                  {recommendations.length > 0 && (
-                    <View style={styles.recommendationsSection}>
-                      <Text style={styles.recommendationsTitle}>More Like This</Text>
-                      <ScrollView 
-                        horizontal 
-                        showsHorizontalScrollIndicator={false}
-                        contentContainerStyle={styles.recommendationsList}
-                      >
-                        {recommendations.map((recItem, idx) => (
-                          <RecommendationCard 
-                            key={`rec-${idx}-${recItem.url}`} 
-                            item={recItem} 
-                            onPress={(clickedItem) => updateDetailInPlace(clickedItem)}
-                          />
-                        ))}
-                      </ScrollView>
-                    </View>
+                    </Animated.View>
                   )}
-
-                </Animated.View>
-              )}
-            </View>
-            </Pressable>
-          </Animated.ScrollView>
+                </View>
+              </Pressable>
+            </Animated.ScrollView>
         </Animated.View>
       </Animated.View>
 
@@ -787,14 +1014,23 @@ const styles = StyleSheet.create({
   },
   headerControls: {
     position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
+    left: 20,
+    right: 20,
+    height: 48,
     zIndex: 50,
-    paddingHorizontal: 24,
+  },
+  headerControlsContent: {
+    flex: 1,
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+  },
+  headerBorder: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.12)',
   },
   headerSpacer: {
     width: 32,
@@ -873,26 +1109,33 @@ const styles = StyleSheet.create({
   },
   trailerButton: {
     marginBottom: 12,
-    borderRadius: 20,
-    overflow: 'hidden',
-  },
-  trailerBlur: {
-    flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    gap: 6,
+    justifyContent: 'center',
   },
-  trailerIcon: {
-    color: '#fff',
-    fontSize: 10,
+  trailerCircle: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: 'rgba(15, 15, 20, 0.45)',
+    overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 6,
   },
-  trailerText: {
-    color: '#fff',
-    fontSize: 13,
-    fontWeight: '600',
-    letterSpacing: 0.5,
+  trailerLabel: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.6,
+    marginTop: 8,
+    textTransform: 'uppercase',
+    textShadowColor: 'rgba(0, 0, 0, 0.6)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
   },
   pillText: {
     color: 'rgba(255,255,255,0.9)',
@@ -1061,18 +1304,32 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   playIconGlass: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: 'rgba(255,255,255,0.2)',
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: 'rgba(255, 255, 255, 0.85)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 255, 255, 0.45)',
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 3,
   },
   playIconText: {
     color: '#fff',
-    fontSize: 12,
-    marginLeft: 2,
+    fontSize: 14,
+    marginLeft: 3,
+  },
+  sectionTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 16,
+    letterSpacing: -0.2,
   },
   episodeInfo: {
     flex: 1,
