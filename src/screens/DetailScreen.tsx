@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef, useCallback } from "react";
 import {
   View, Text, Image, ScrollView, TouchableOpacity,
   ActivityIndicator, StyleSheet, FlatList,
@@ -13,6 +13,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { theme } from '../theme';
 import type { DetailResult, EpisodeItem, VideoSource, Trailer, Actor } from "../types/plugin";
 import * as bridge from "../api/cloudStreamBridge";
+import { useTransitionActions } from '../context/TransitionContext';
 
 const { height: SCREEN_HEIGHT, width: SCREEN_WIDTH } = Dimensions.get("window");
 
@@ -155,14 +156,16 @@ function EpisodeRow({ ep, index, originalIndex, playingEpisode, onEpisodePress, 
 
 export default function DetailScreen({ route, navigation }: Props) {
   const insets = useSafeAreaInsets();
+  const { setGlobalBlurTarget } = useTransitionActions();
   const [blurTarget, setBlurTarget] = useState<any>(null);
   const blurTargetRef = useRef<any>(null);
-  const setBlurTargetRef = (val: any) => {
-    blurTargetRef.current = val;
-    if (val !== blurTarget) {
+  const setBlurTargetRef = useCallback((val: any) => {
+    if (val !== blurTargetRef.current) {
+      blurTargetRef.current = val;
       setBlurTarget(val);
+      setGlobalBlurTarget(val);
     }
-  };
+  }, [setGlobalBlurTarget]);
   const scrollY = useRef(new Animated.Value(0)).current;
   const { providerName, url } = route.params;
   const [detail, setDetail] = useState<DetailResult | null>(null);
@@ -191,7 +194,13 @@ export default function DetailScreen({ route, navigation }: Props) {
   // Get unique seasons in episodes list
   const seasons = Array.from(new Set(episodes.map(ep => ep.season || 1))).sort((a, b) => a - b);
 
-  useEffect(() => { loadDetail(); }, []);
+  useEffect(() => {
+    loadDetail();
+    const unsub = navigation.addListener('focus', () => {
+      setGlobalBlurTarget(blurTargetRef.current);
+    });
+    return unsub;
+  }, [navigation, setGlobalBlurTarget]);
 
   useEffect(() => {
     async function checkFav() {

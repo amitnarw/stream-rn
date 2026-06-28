@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -16,6 +16,7 @@ import type { MediaItem } from '../types/plugin';
 import * as bridge from '../api/cloudStreamBridge';
 import MediaCard from '../components/MediaCard';
 import { theme } from '../theme';
+import { useTransitionActions } from '../context/TransitionContext';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -25,10 +26,18 @@ interface Props {
 }
 
 export default function SearchScreen({ route, navigation }: Props) {
+  const { setGlobalBlurTarget } = useTransitionActions();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<MediaItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const unsub = navigation.addListener('focus', () => {
+      setGlobalBlurTarget(null);
+    });
+    return unsub;
+  }, [navigation, setGlobalBlurTarget]);
 
   async function doSearch(q: string) {
     if (!q.trim()) return;

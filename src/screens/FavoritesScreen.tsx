@@ -17,6 +17,7 @@ import type { MediaItem } from '../types/plugin';
 import { getFavorites } from '../api/favorites';
 import MediaCard from '../components/MediaCard';
 import { theme } from '../theme';
+import { useTransitionActions } from '../context/TransitionContext';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -26,15 +27,17 @@ interface Props {
 
 export default function FavoritesScreen({ navigation }: Props) {
   const insets = useSafeAreaInsets();
+  const { setGlobalBlurTarget } = useTransitionActions();
   const [favorites, setFavorites] = useState<MediaItem[]>([]);
   const [blurTarget, setBlurTarget] = useState<any>(null);
   const blurTargetRef = useRef<any>(null);
-  const setBlurTargetRef = (val: any) => {
-    blurTargetRef.current = val;
-    if (val !== blurTarget) {
+  const setBlurTargetRef = useCallback((val: any) => {
+    if (val !== blurTargetRef.current) {
+      blurTargetRef.current = val;
       setBlurTarget(val);
+      setGlobalBlurTarget(val);
     }
-  };
+  }, [setGlobalBlurTarget]);
   
   const scrollY = useRef(new Animated.Value(0)).current;
 
@@ -46,7 +49,8 @@ export default function FavoritesScreen({ navigation }: Props) {
         setFavorites(list);
       }
       loadFavorites();
-    }, [])
+      setGlobalBlurTarget(blurTargetRef.current);
+    }, [setGlobalBlurTarget])
   );
 
   function onMediaPress(item: MediaItem) {

@@ -168,9 +168,10 @@ export async function getProviders(): Promise<PluginProvider[]> {
 export async function getMainPage(
   providerName: string,
   page: number = 1,
-  forceRefresh: boolean = false
+  forceRefresh: boolean = false,
+  category: string = 'Trending'
 ): Promise<HomeSection[]> {
-  const cacheKey = `@sozo_cache_main_cinemeta_page_${page}`;
+  const cacheKey = `@sozo_cache_main_cinemeta_cat_${category}_page_${page}`;
 
   if (!forceRefresh) {
     const settings = await getSettings();
@@ -190,12 +191,60 @@ export async function getMainPage(
     throw err;
   }
 
-  const urls = [
-    { name: 'Trending Movies', url: 'https://v3-cinemeta.strem.io/catalog/movie/top.json' },
-    { name: 'Trending TV Shows', url: 'https://v3-cinemeta.strem.io/catalog/series/top.json' },
-    { name: 'Action & Adventure', url: 'https://v3-cinemeta.strem.io/catalog/movie/top/genre=Action.json' },
-    { name: 'Drama TV Series', url: 'https://v3-cinemeta.strem.io/catalog/series/top/genre=Drama.json' },
-  ];
+  let urls: { name: string; url: string }[] = [];
+  switch (category) {
+    case 'Trending':
+      urls = [
+        { name: 'Trending Movies', url: 'https://v3-cinemeta.strem.io/catalog/movie/top.json' },
+        { name: 'Trending TV Shows', url: 'https://v3-cinemeta.strem.io/catalog/series/top.json' },
+        { name: 'Action & Adventure', url: 'https://v3-cinemeta.strem.io/catalog/movie/top/genre=Action.json' },
+        { name: 'Drama TV Series', url: 'https://v3-cinemeta.strem.io/catalog/series/top/genre=Drama.json' },
+      ];
+      break;
+    case 'New':
+      urls = [
+        { name: 'Highly Rated Movies', url: 'https://v3-cinemeta.strem.io/catalog/movie/imdbRating.json' },
+        { name: 'Highly Rated Series', url: 'https://v3-cinemeta.strem.io/catalog/series/imdbRating.json' },
+        { name: 'New Actions', url: 'https://v3-cinemeta.strem.io/catalog/movie/imdbRating/genre=Action.json' },
+        { name: 'New Sci-Fi', url: 'https://v3-cinemeta.strem.io/catalog/movie/imdbRating/genre=Sci-Fi.json' },
+      ];
+      break;
+    case 'Movies':
+      urls = [
+        { name: 'Popular Movies', url: 'https://v3-cinemeta.strem.io/catalog/movie/top.json' },
+        { name: 'Action Movies', url: 'https://v3-cinemeta.strem.io/catalog/movie/top/genre=Action.json' },
+        { name: 'Comedy Movies', url: 'https://v3-cinemeta.strem.io/catalog/movie/top/genre=Comedy.json' },
+        { name: 'Sci-Fi & Fantasy', url: 'https://v3-cinemeta.strem.io/catalog/movie/top/genre=Sci-Fi.json' },
+      ];
+      break;
+    case 'Series':
+      urls = [
+        { name: 'Popular Series', url: 'https://v3-cinemeta.strem.io/catalog/series/top.json' },
+        { name: 'Drama Series', url: 'https://v3-cinemeta.strem.io/catalog/series/top/genre=Drama.json' },
+        { name: 'Action & Adventure Series', url: 'https://v3-cinemeta.strem.io/catalog/series/top/genre=Action.json' },
+        { name: 'Sci-Fi Series', url: 'https://v3-cinemeta.strem.io/catalog/series/top/genre=Sci-Fi.json' },
+      ];
+      break;
+    case 'TV Show':
+      urls = [
+        { name: 'Top TV Shows', url: 'https://v3-cinemeta.strem.io/catalog/series/top.json' },
+        { name: 'Reality & Talk Shows', url: 'https://v3-cinemeta.strem.io/catalog/series/top/genre=Documentary.json' },
+        { name: 'Comedy Shows', url: 'https://v3-cinemeta.strem.io/catalog/series/top/genre=Comedy.json' },
+      ];
+      break;
+    case 'Cartoon':
+      urls = [
+        { name: 'Animated Movies', url: 'https://v3-cinemeta.strem.io/catalog/movie/top/genre=Animation.json' },
+        { name: 'Animated Series', url: 'https://v3-cinemeta.strem.io/catalog/series/top/genre=Animation.json' },
+        { name: 'Kids & Family', url: 'https://v3-cinemeta.strem.io/catalog/movie/top/genre=Family.json' },
+      ];
+      break;
+    default:
+      urls = [
+        { name: 'Trending Movies', url: 'https://v3-cinemeta.strem.io/catalog/movie/top.json' },
+        { name: 'Trending TV Shows', url: 'https://v3-cinemeta.strem.io/catalog/series/top.json' },
+      ];
+  }
 
   const results = await Promise.all(
     urls.map(async (u) => {

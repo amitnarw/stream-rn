@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -11,8 +11,11 @@ import {
   Dimensions,
   Image,
   Pressable,
+  Easing,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { BlurView, BlurTargetView } from 'expo-blur';
+import { LinearGradient } from 'expo-linear-gradient';
 import type { HomeSection, MediaItem } from '../types/plugin';
 import * as bridge from '../api/cloudStreamBridge';
 import { useTransitionActions } from '../context/TransitionContext';
@@ -20,12 +23,12 @@ import type { CardLayout } from '../context/TransitionContext';
 
 import { theme } from '../theme';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 // Hero carousel dimensions — center card large, side cards peek ~18%
-const HERO_CARD_WIDTH = SCREEN_WIDTH * 0.64;
-const HERO_CARD_HEIGHT = HERO_CARD_WIDTH * 1.48;
-const HERO_SIDE_PAD = 14;
+const HERO_CARD_WIDTH = SCREEN_WIDTH * 0.6;
+const HERO_CARD_HEIGHT = HERO_CARD_WIDTH * 1.45;
+const HERO_SIDE_PAD = 16;
 const HERO_SNAP = HERO_CARD_WIDTH + HERO_SIDE_PAD * 2;
 const HERO_OFFSET = (SCREEN_WIDTH - HERO_CARD_WIDTH) / 2 - HERO_SIDE_PAD;
 
@@ -37,7 +40,25 @@ const GENRE_SETS = [
   ['Action', '1h 58min', '7.2'],
   ['Drama', '2h 14min', '6.8'],
   ['Comedy', '1h 45min', '7.5'],
-];
+];function getLowQualityImageUrl(url: string | null | undefined): string | undefined {
+  if (!url) return undefined;
+  if (url.includes("images.metahub.space")) {
+    return url.replace("/medium/", "/small/").replace("/large/", "/small/");
+  }
+  if (url.includes("image.tmdb.org/t/p/")) {
+    return url.replace(/\/t\/p\/[^/]+\//, "/t/p/w185/");
+  }
+  if (url.includes("media-amazon.com/images/") || url.includes("m.media-amazon.com/")) {
+    const index = url.indexOf("._V1_");
+    if (index !== -1) {
+      return url.substring(0, index) + "._V1_SX100_.jpg";
+    }
+  }
+  if (url.includes("yts.mx/assets/images/movies/")) {
+    return url.replace("large-cover.jpg", "medium-cover.jpg");
+  }
+  return url;
+}
 
 // ── Skeleton ────────────────────────────────────────────────────────────────
 function SkeletonBox({
@@ -45,30 +66,47 @@ function SkeletonBox({
   height,
   borderRadius = 6,
 }: {
-  width: number;
+  width: number | string;
   height: number;
   borderRadius?: number;
 }) {
-  const opacity = useRef(new Animated.Value(0.2)).current;
+  const opacity = useRef(new Animated.Value(0.35)).current;
   useEffect(() => {
     const a = Animated.loop(
       Animated.sequence([
-        Animated.timing(opacity, { toValue: 0.55, duration: 800, useNativeDriver: true }),
-        Animated.timing(opacity, { toValue: 0.2, duration: 800, useNativeDriver: true }),
+        Animated.timing(opacity, {
+          toValue: 0.85,
+          duration: 900,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
+        Animated.timing(opacity, {
+          toValue: 0.35,
+          duration: 900,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
       ])
     );
     a.start();
     return () => a.stop();
   }, []);
+
   return (
     <Animated.View
-      style={{ width, height, borderRadius, backgroundColor: theme.colors.placeholder, opacity }}
+      style={{
+        width,
+        height,
+        borderRadius,
+        backgroundColor: 'rgba(255, 255, 255, 0.12)',
+        opacity,
+      }}
     />
   );
 }
 
 // ── Hero card (large carousel item) ─────────────────────────────────────────
-function HeroCard({
+const HeroCard = React.memo(function HeroCard({
   item,
   index,
   scrollX,
@@ -80,6 +118,7 @@ function HeroCard({
   onPress: (item: MediaItem, layout: CardLayout) => void;
 }) {
   const viewRef = useRef<any>(null);
+  const pressScale = useRef(new Animated.Value(1)).current;
 
   const inputRange = [
     (index - 1) * HERO_SNAP,
@@ -88,20 +127,27 @@ function HeroCard({
   ];
   const scale = scrollX.interpolate({
     inputRange,
-    outputRange: [0.9, 1, 0.9],
+    outputRange: [0.9, 1.2, 0.9],
     extrapolate: 'clamp',
   });
   const fadeOpacity = scrollX.interpolate({
     inputRange,
-    outputRange: [0.5, 1, 0.5],
+    outputRange: [0.4, 1.0, 0.4],
     extrapolate: 'clamp',
   });
 
+  const combinedScale = Animated.multiply(scale, pressScale);
+
   function handlePress() {
-    // Measure the card's absolute screen position, then fire transition
     viewRef.current?.measure(
       (_fx: number, _fy: number, width: number, height: number, px: number, py: number) => {
-        onPress(item, { x: px, y: py, width, height, borderRadius: 18 });
+        const isActive = index === heroIdx;
+        const S = isActive ? 1.12 : 0.84; // 1.2 * 0.93 or 0.9 * 0.93 combined scale factor
+        const sWidth = width * S;
+        const sHeight = height * S;
+        const sX = px + (width - sWidth) / 2;
+        const sY = py + (height - sHeight) / 2;
+        onPress(item, { x: sX, y: sY, width: sWidth, height: sHeight, borderRadius: 18 });
       }
     );
   }
@@ -109,6 +155,12 @@ function HeroCard({
   return (
     <Pressable
       onPress={handlePress}
+      onPressIn={() =>
+        Animated.spring(pressScale, { toValue: 0.94, useNativeDriver: true, speed: 50, bounciness: 0 }).start()
+      }
+      onPressOut={() =>
+        Animated.spring(pressScale, { toValue: 1, useNativeDriver: true, speed: 50, bounciness: 0 }).start()
+      }
       style={{
         width: HERO_CARD_WIDTH + HERO_SIDE_PAD * 2,
         paddingHorizontal: HERO_SIDE_PAD,
@@ -117,7 +169,7 @@ function HeroCard({
     >
       <View ref={viewRef}>
         <Animated.View
-          style={[styles.heroCard, { transform: [{ scale }], opacity: fadeOpacity }]}
+          style={[styles.heroCard, { transform: [{ scale: combinedScale }], opacity: fadeOpacity }]}
         >
           {item.posterUrl ? (
             <Image
@@ -132,13 +184,13 @@ function HeroCard({
       </View>
     </Pressable>
   );
-}
+});
 
 // ── Small section card ───────────────────────────────────────────────────────
 const S_CARD_W = (SCREEN_WIDTH - 40 - 16) / 3;
 const S_CARD_H = S_CARD_W * 1.5;
 
-function SmallCard({
+const SmallCard = React.memo(function SmallCard({
   item,
   onPress,
 }: {
@@ -151,7 +203,12 @@ function SmallCard({
   function handlePress() {
     viewRef.current?.measure(
       (_fx: number, _fy: number, width: number, height: number, px: number, py: number) => {
-        onPress(item, { x: px, y: py, width, height, borderRadius: 12 });
+        const S = 0.93; // Small card press scale
+        const sWidth = width * S;
+        const sHeight = height * S;
+        const sX = px + (width - sWidth) / 2;
+        const sY = py + (height - sHeight) / 2;
+        onPress(item, { x: sX, y: sY, width: sWidth, height: sHeight, borderRadius: 12 });
       }
     );
   }
@@ -178,12 +235,12 @@ function SmallCard({
       </View>
     </Pressable>
   );
-}
+});
 
 // ── Continue Watching card ───────────────────────────────────────────────────
 const CW_CARD_W = S_CARD_W * 1.2;
 
-function ContinueCard({
+const ContinueCard = React.memo(function ContinueCard({
   item,
   onPress,
 }: {
@@ -197,7 +254,12 @@ function ContinueCard({
   function handlePress() {
     viewRef.current?.measure(
       (_fx: number, _fy: number, width: number, height: number, px: number, py: number) => {
-        onPress(item as MediaItem, { x: px, y: py, width, height, borderRadius: 12 });
+        const S = 0.93; // Continue card press scale
+        const sWidth = width * S;
+        const sHeight = height * S;
+        const sX = px + (width - sWidth) / 2;
+        const sY = py + (height - sHeight) / 2;
+        onPress(item as MediaItem, { x: sX, y: sY, width: sWidth, height: sHeight, borderRadius: 12 });
       }
     );
   }
@@ -237,12 +299,86 @@ function ContinueCard({
       </Text>
     </Pressable>
   );
+});
+
+// ── Premium Skeleton Loading Screen ──────────────────────────────────────────
+function HomeSkeletonScreen() {
+  const insets = useSafeAreaInsets();
+  return (
+    <View style={[styles.root, { backgroundColor: theme.colors.background }]}>
+      {/* Category header capsule skeleton */}
+      <View style={[styles.headerContainer, { top: insets.top + 4, backgroundColor: 'rgba(255, 255, 255, 0.05)', borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.08)' }]}>
+        <View style={{ flexDirection: 'row', paddingHorizontal: 20, alignItems: 'center', gap: 12, height: '100%' }}>
+          <SkeletonBox width={70} height={26} borderRadius={13} />
+          <SkeletonBox width={50} height={26} borderRadius={13} />
+          <SkeletonBox width={65} height={26} borderRadius={13} />
+          <SkeletonBox width={55} height={26} borderRadius={13} />
+          <SkeletonBox width={80} height={26} borderRadius={13} />
+        </View>
+      </View>
+
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingTop: insets.top + 60, paddingBottom: 110 }}>
+        {/* Carousel layout skeleton (matching peak side cards) */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: 16, gap: 14 }}>
+          {/* Left peek card */}
+          <View style={{ opacity: 0.35 }}>
+            <SkeletonBox width={SCREEN_WIDTH * 0.15} height={HERO_CARD_HEIGHT * 0.9} borderRadius={18} />
+          </View>
+          {/* Active center card */}
+          <SkeletonBox width={HERO_CARD_WIDTH} height={HERO_CARD_HEIGHT} borderRadius={18} />
+          {/* Right peek card */}
+          <View style={{ opacity: 0.35 }}>
+            <SkeletonBox width={SCREEN_WIDTH * 0.15} height={HERO_CARD_HEIGHT * 0.9} borderRadius={18} />
+          </View>
+        </View>
+
+        {/* Hero meta skeleton */}
+        <View style={{ alignItems: 'center', marginVertical: 20, gap: 10 }}>
+          <SkeletonBox width={50} height={12} borderRadius={6} />
+          <SkeletonBox width={220} height={22} borderRadius={11} />
+          <View style={{ flexDirection: 'row', gap: 8, marginTop: 4 }}>
+            <SkeletonBox width={60} height={20} borderRadius={10} />
+            <SkeletonBox width={80} height={20} borderRadius={10} />
+            <SkeletonBox width={55} height={20} borderRadius={10} />
+          </View>
+          {/* Static dots */}
+          <View style={{ flexDirection: 'row', gap: 6, marginTop: 8 }}>
+            <View style={{ width: 14, height: 6, borderRadius: 3, backgroundColor: 'rgba(255, 255, 255, 0.25)' }} />
+            <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: 'rgba(255, 255, 255, 0.08)' }} />
+            <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: 'rgba(255, 255, 255, 0.08)' }} />
+            <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: 'rgba(255, 255, 255, 0.08)' }} />
+            <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: 'rgba(255, 255, 255, 0.08)' }} />
+          </View>
+        </View>
+
+        {/* Sections skeleton */}
+        <View style={{ paddingHorizontal: 20, marginTop: 10, gap: 28 }}>
+          <View style={{ gap: 12 }}>
+            <SkeletonBox width={130} height={16} borderRadius={8} />
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              <SkeletonBox width={S_CARD_W} height={S_CARD_H} borderRadius={12} />
+              <SkeletonBox width={S_CARD_W} height={S_CARD_H} borderRadius={12} />
+              <SkeletonBox width={S_CARD_W} height={S_CARD_H} borderRadius={12} />
+            </View>
+          </View>
+          <View style={{ gap: 12 }}>
+            <SkeletonBox width={100} height={16} borderRadius={8} />
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              <SkeletonBox width={S_CARD_W} height={S_CARD_H} borderRadius={12} />
+              <SkeletonBox width={S_CARD_W} height={S_CARD_H} borderRadius={12} />
+              <SkeletonBox width={S_CARD_W} height={S_CARD_H} borderRadius={12} />
+            </View>
+          </View>
+        </View>
+      </ScrollView>
+    </View>
+  );
 }
 
 // ── Main Screen ──────────────────────────────────────────────────────────────
 export default function HomeScreen({ navigation }: { navigation: any }) {
   const insets = useSafeAreaInsets();
-  const { openFromCard, setFallbackRecommendations } = useTransitionActions();
+  const { openFromCard, setFallbackRecommendations, setGlobalBlurTarget } = useTransitionActions();
 
   const [sections, setSections] = useState<HomeSection[]>([]);
   const [loading, setLoading] = useState(true);
@@ -252,14 +388,95 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
   const [activeTab, setActiveTab] = useState(0);
   const [heroIdx, setHeroIdx] = useState(0);
   const scrollX = useRef(new Animated.Value(0)).current;
+  const scrollY = useRef(new Animated.Value(0)).current;
+
+  const [blurTarget, setBlurTarget] = useState<any>(null);
+  const blurTargetRef = useRef<any>(null);
+  const setBlurTargetRef = useCallback((val: any) => {
+    if (val !== blurTargetRef.current) {
+      blurTargetRef.current = val;
+      setBlurTarget(val);
+      setGlobalBlurTarget(val);
+    }
+  }, [setGlobalBlurTarget]);
+
+  const [currentBg, setCurrentBg] = useState<string | null>(null);
+  const [prevBg, setPrevBg] = useState<string | null>(null);
+  const bgFadeAnim = useRef(new Animated.Value(0)).current;
+
+  // Premium Crossfade Skeleton Loading States
+  const [showSkeleton, setShowSkeleton] = useState(true);
+  const skeletonOpacity = useRef(new Animated.Value(1)).current;
+
+  // Active Hero Declarations (hoisted for scope safety inside hooks)
+  const heroSection = sections.find(
+    (s) => s.name !== 'Continue Watching' && s.items?.length > 0
+  );
+  const heroItems = heroSection?.items?.slice(0, 10) ?? [];
+  const hero = heroItems[heroIdx] ?? null;
+  const tags = GENRE_SETS[heroIdx % GENRE_SETS.length];
+  const heroSectionIdx = sections.indexOf(heroSection as HomeSection);
+
+  // Synchronize active hero index with scroll position in real-time
+  useEffect(() => {
+    if (heroItems.length === 0) return;
+    const listenerId = scrollX.addListener(({ value }) => {
+      const index = Math.max(0, Math.min(Math.round(value / HERO_SNAP), heroItems.length - 1));
+      if (index !== heroIdx) {
+        setHeroIdx(index);
+      }
+    });
+    return () => {
+      scrollX.removeListener(listenerId);
+    };
+  }, [heroIdx, heroItems.length]);
+
+  // Reset active hero index when sections/tabs change
+  useEffect(() => {
+    setHeroIdx(0);
+  }, [sections]);
+
+  useEffect(() => {
+    if (hero?.posterUrl) {
+      const newUrl = getLowQualityImageUrl(hero.posterUrl) || null;
+      if (newUrl !== currentBg) {
+        setPrevBg(currentBg);
+        setCurrentBg(newUrl);
+        bgFadeAnim.setValue(0);
+        Animated.timing(bgFadeAnim, {
+          toValue: 0.45,
+          duration: 350,
+          useNativeDriver: true,
+        }).start((finished) => {
+          if (finished) {
+            setPrevBg(null);
+          }
+        });
+      }
+    } else if (!hero) {
+      setCurrentBg(null);
+      setPrevBg(null);
+    }
+  }, [hero]);
+
+  const headerBgOpacity = scrollY.interpolate({
+    inputRange: [40, 180],
+    outputRange: [0, 1],
+    extrapolate: 'clamp',
+  });
 
   useEffect(() => {
     init();
-    const unsub = navigation.addListener('focus', () => loadSections());
+    const unsub = navigation.addListener('focus', () => {
+      loadSections(false, CATEGORY_TABS[activeTab]);
+      setGlobalBlurTarget(blurTargetRef.current);
+    });
     return unsub;
-  }, [navigation]);
+  }, [navigation, activeTab]);
 
   async function init() {
+    setShowSkeleton(true);
+    skeletonOpacity.setValue(1);
     setLoading(true);
     setError(null);
     try {
@@ -272,15 +489,23 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
           : e.message || 'Failed to load.'
       );
     } finally {
+      // Premium Fade out of skeleton loading overlay
+      Animated.timing(skeletonOpacity, {
+        toValue: 0,
+        duration: 400,
+        useNativeDriver: true,
+      }).start(() => {
+        setShowSkeleton(false);
+      });
       setLoading(false);
     }
   }
 
-  async function loadSections(force: boolean = false) {
+  async function loadSections(force: boolean = false, categoryName: string = CATEGORY_TABS[activeTab]) {
     if (!force) setSectionsLoading(true);
     setSectionError(null);
     try {
-      const secs: HomeSection[] = await bridge.getMainPage('', 1, force);
+      const secs: HomeSection[] = await bridge.getMainPage('', 1, force, categoryName);
       try {
         const hist = await bridge.getPlaybackHistory();
         if (hist && hist.length > 0) {
@@ -327,54 +552,145 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
     }
   }
 
-  function goDetail(item: MediaItem, layout: CardLayout) {
+  const handleTabPress = (index: number) => {
+    setActiveTab(index);
+    loadSections(false, CATEGORY_TABS[index]);
+  };
+
+  const goDetail = useCallback((item: MediaItem, layout: CardLayout) => {
     openFromCard(item, layout);
-  }
+  }, [openFromCard]);
 
-  const heroSection = sections.find(
-    (s) => s.name !== 'Continue Watching' && s.items?.length > 0
-  );
-  const heroItems = heroSection?.items?.slice(0, 10) ?? [];
-  const hero = heroItems[heroIdx] ?? null;
-  const tags = GENRE_SETS[heroIdx % GENRE_SETS.length];
-  const heroSectionIdx = sections.indexOf(heroSection as HomeSection);
-
-  function onHeroScroll(e: any) {
-    const x = e.nativeEvent.contentOffset.x;
-    setHeroIdx(Math.max(0, Math.min(Math.round(x / HERO_SNAP), heroItems.length - 1)));
-  }
+  const renderedSections = useMemo(() => {
+    if (sectionError) {
+      return (
+        <View style={styles.center}>
+          <Text style={styles.errText}>{sectionError}</Text>
+          <TouchableOpacity style={styles.retryBtn} onPress={() => loadSections()}>
+            <Text style={styles.retryTxt}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+    if (sectionsLoading) {
+      return (
+        <View style={{ paddingHorizontal: 20, marginTop: 24, gap: 10 }}>
+          <SkeletonBox width={80} height={16} />
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            <SkeletonBox width={S_CARD_W} height={S_CARD_H} borderRadius={12} />
+            <SkeletonBox width={S_CARD_W} height={S_CARD_H} borderRadius={12} />
+            <SkeletonBox width={S_CARD_W} height={S_CARD_H} borderRadius={12} />
+          </View>
+        </View>
+      );
+    }
+    return sections
+      .filter((_: HomeSection, i: number) => i !== heroSectionIdx)
+      .map((section: HomeSection, idx: number) => {
+        const isCW = section.name === 'Continue Watching';
+        return (
+          <View key={section.name + idx} style={styles.section}>
+            <View style={styles.sectionHdr}>
+              <Text style={styles.sectionTitle}>{section.name}</Text>
+              <TouchableOpacity
+                activeOpacity={0.7}
+                onPress={() => navigation.navigate('SeeAll', { title: section.name, items: section.items })}
+              >
+                <Text style={styles.seeAll}>See all</Text>
+              </TouchableOpacity>
+            </View>
+            <FlatList
+              horizontal
+              data={section.items}
+              keyExtractor={(_: any, i: number) => String(i)}
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ paddingHorizontal: 20 }}
+              renderItem={({ item }: { item: any }) =>
+                isCW ? (
+                  <ContinueCard item={item} onPress={goDetail} />
+                ) : (
+                  <SmallCard item={item as MediaItem} onPress={goDetail} />
+                )
+              }
+            />
+          </View>
+        );
+      });
+  }, [sections, sectionsLoading, sectionError, heroSectionIdx, navigation, goDetail]);
 
   return (
-    <View style={[styles.root, { paddingTop: insets.top }]}>
-      <Animated.View style={{ flex: 1 }}>
-        {/* ── Category tab row ── */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.tabRow}
-          style={styles.tabRowWrap}
-        >
-          {CATEGORY_TABS.map((tab, i) => (
-            <TouchableOpacity
-              key={tab}
-              onPress={() => setActiveTab(i)}
-              activeOpacity={0.75}
-              style={styles.tabItem}
-            >
-              <Text style={[styles.tabText, i === activeTab && styles.tabTextActive]}>
-                {tab}
-              </Text>
-              {i === activeTab && <View style={styles.tabUnderline} />}
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
+    <View style={styles.root}>
+      <View style={{ flex: 1 }}>
+        {/* Background Ambient Poster Glow */}
+        <BlurTargetView ref={setBlurTargetRef as any} style={[styles.backgroundContainer, { zIndex: 0 }]} pointerEvents="none">
+          {prevBg ? (
+            <Image
+              source={{ uri: prevBg }}
+              style={styles.backgroundImage}
+              resizeMode="cover"
+              blurRadius={20}
+            />
+          ) : null}
+          {currentBg ? (
+            <Animated.Image
+              source={{ uri: currentBg }}
+              style={[styles.backgroundImage, { opacity: bgFadeAnim }]}
+              resizeMode="cover"
+              blurRadius={20}
+            />
+          ) : null}
+          <LinearGradient
+            colors={['rgba(5, 5, 5, 0.1)', 'rgba(5, 5, 5, 0.5)', '#050505']}
+            style={styles.gradientOverlay}
+          />
+        </BlurTargetView>
+
+        <Animated.View style={{ flex: 1, zIndex: 1 }}>
+          {/* ── Category tab row ── */}
+          <Animated.View style={[styles.headerContainer, { top: insets.top + 4 }]}>
+            <Animated.View style={[StyleSheet.absoluteFillObject, { opacity: headerBgOpacity }]}>
+              <View style={styles.blurBackdrop}>
+                {blurTarget && !showSkeleton ? (
+                  <BlurView
+                    intensity={100}
+                    tint="dark"
+                    style={StyleSheet.absoluteFillObject}
+                    blurMethod="dimezisBlurView"
+                    blurTarget={{ current: blurTarget }}
+                  />
+                ) : (
+                  <View style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(20, 18, 24, 0.95)' }]} />
+                )}
+              <View style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(15, 15, 20, 0.38)' }]} />
+            </View>
+          </Animated.View>
+
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.tabRow}
+            style={styles.tabRowWrap}
+          >
+            {CATEGORY_TABS.map((tab, i) => {
+              const isActive = i === activeTab;
+              return (
+                <TouchableOpacity
+                  key={tab}
+                  onPress={() => handleTabPress(i)}
+                  activeOpacity={0.75}
+                  style={[styles.tabItem, isActive && styles.tabItemActive]}
+                >
+                  <Text style={[styles.tabText, isActive && styles.tabTextActive]}>
+                    {tab}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        </Animated.View>
 
         {/* ── Content ── */}
-        {loading ? (
-          <View style={styles.center}>
-            <ActivityIndicator size="large" color={theme.colors.accent} />
-          </View>
-        ) : error ? (
+        {error ? (
           <View style={styles.center}>
             <Text style={styles.errText}>{error}</Text>
             <TouchableOpacity style={styles.retryBtn} onPress={init}>
@@ -382,10 +698,17 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
             </TouchableOpacity>
           </View>
         ) : (
-          <ScrollView
-            showsVerticalScrollIndicator={false}
-            contentContainerStyle={{ paddingBottom: 110 }}
-          >
+          sections.length > 0 && (
+            <Animated.ScrollView
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={{ paddingTop: insets.top + 60, paddingBottom: 110 }}
+              style={{ flex: 1, overflow: 'visible' }}
+              onScroll={Animated.event(
+                [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+                { useNativeDriver: true }
+              )}
+              scrollEventThrottle={16}
+            >
             {/* Hero carousel */}
             {sectionsLoading || heroItems.length === 0 ? (
               <View style={{ alignItems: 'center', marginTop: 16 }}>
@@ -397,16 +720,29 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
               </View>
             ) : (
               <Animated.FlatList
+                key={`hero-list-${activeTab}`}
                 data={heroItems}
                 keyExtractor={(_: any, i: number) => String(i)}
                 horizontal
                 showsHorizontalScrollIndicator={false}
                 snapToInterval={HERO_SNAP}
+                snapToAlignment="center"
                 decelerationRate="fast"
-                contentContainerStyle={{ paddingHorizontal: HERO_OFFSET }}
+                disableIntervalMomentum={true}
+                style={{ overflow: 'visible' }}
+                getItemLayout={(_, index) => ({
+                  length: HERO_SNAP,
+                  offset: HERO_SNAP * index,
+                  index,
+                })}
+                contentContainerStyle={{ 
+                  paddingHorizontal: HERO_OFFSET,
+                  paddingVertical: 35, // Safety padding for 1.2x scale overflow
+                  overflow: 'visible',
+                }}
                 onScroll={Animated.event(
                   [{ nativeEvent: { contentOffset: { x: scrollX } } }],
-                  { useNativeDriver: true, listener: onHeroScroll }
+                  { useNativeDriver: true }
                 )}
                 scrollEventThrottle={16}
                 renderItem={({ item, index }: { item: MediaItem; index: number }) => (
@@ -450,59 +786,22 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
             )}
 
             {/* Section rows (skip the hero source section) */}
-            {sectionError ? (
-              <View style={styles.center}>
-                <Text style={styles.errText}>{sectionError}</Text>
-                <TouchableOpacity
-                  style={styles.retryBtn}
-                  onPress={() => loadSections()}
-                >
-                  <Text style={styles.retryTxt}>Retry</Text>
-                </TouchableOpacity>
-              </View>
-            ) : sectionsLoading ? (
-              <View style={{ paddingHorizontal: 20, marginTop: 24, gap: 10 }}>
-                <SkeletonBox width={80} height={16} />
-                <View style={{ flexDirection: 'row', gap: 8 }}>
-                  <SkeletonBox width={S_CARD_W} height={S_CARD_H} borderRadius={12} />
-                  <SkeletonBox width={S_CARD_W} height={S_CARD_H} borderRadius={12} />
-                  <SkeletonBox width={S_CARD_W} height={S_CARD_H} borderRadius={12} />
-                </View>
-              </View>
-            ) : (
-              sections
-                .filter((_: HomeSection, i: number) => i !== heroSectionIdx)
-                .map((section: HomeSection, idx: number) => {
-                  const isCW = section.name === 'Continue Watching';
-                  return (
-                    <View key={section.name + idx} style={styles.section}>
-                      <View style={styles.sectionHdr}>
-                        <Text style={styles.sectionTitle}>{section.name}</Text>
-                        <TouchableOpacity activeOpacity={0.7}>
-                          <Text style={styles.seeAll}>See all</Text>
-                        </TouchableOpacity>
-                      </View>
-                      <FlatList
-                        horizontal
-                        data={section.items}
-                        keyExtractor={(_: any, i: number) => String(i)}
-                        showsHorizontalScrollIndicator={false}
-                        contentContainerStyle={{ paddingHorizontal: 20 }}
-                        renderItem={({ item }: { item: any }) =>
-                          isCW ? (
-                            <ContinueCard item={item} onPress={goDetail} />
-                          ) : (
-                            <SmallCard item={item as MediaItem} onPress={goDetail} />
-                          )
-                        }
-                      />
-                    </View>
-                  );
-                })
-            )}
-          </ScrollView>
+            {renderedSections}
+          </Animated.ScrollView>
+          )
         )}
       </Animated.View>
+      </View>
+
+      {/* Premium Fade-Out Skeleton Loader Overlay */}
+      {showSkeleton && (
+        <Animated.View 
+          style={[StyleSheet.absoluteFillObject, { opacity: skeletonOpacity, zIndex: 100, backgroundColor: theme.colors.background }]} 
+          pointerEvents={loading ? "auto" : "none"}
+        >
+          <HomeSkeletonScreen />
+        </Animated.View>
+      )}
     </View>
   );
 }
@@ -510,25 +809,66 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: theme.colors.background },
 
-  // category tabs — plain text, active is white + 2px underline
-  tabRowWrap: { flexGrow: 0 },
+  backgroundContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    width: '100%',
+    height: SCREEN_HEIGHT * 0.65,
+  },
+  backgroundImage: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    width: '100%',
+    height: '100%',
+  },
+  gradientOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    width: '100%',
+    height: '100%',
+  },
+
+  // category tabs — floating capsule with animated glass background
+  headerContainer: {
+    position: 'absolute',
+    left: 20,
+    right: 20,
+    height: 48,
+    borderRadius: 24,
+    overflow: 'hidden',
+    zIndex: 50,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  blurBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 24,
+    overflow: 'hidden',
+  },
+  tabRowWrap: {
+    flex: 1,
+  },
   tabRow: {
-    paddingHorizontal: 16,
-    paddingTop: 10,
-    paddingBottom: 8,
-    gap: 20,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+    gap: 8,
+    height: '100%',
+  },
+  tabItem: {
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 16,
+    justifyContent: 'center',
     alignItems: 'center',
   },
-  tabItem: { alignItems: 'center' },
-  tabText: { color: 'rgba(255,255,255,0.45)', fontSize: 14, fontWeight: '500' },
-  tabTextActive: { color: theme.colors.accentLight, fontWeight: '700' },
-  tabUnderline: {
-    height: 2,
-    width: '100%',
-    backgroundColor: theme.colors.accent,
-    borderRadius: 2,
-    marginTop: 3,
+  tabItemActive: {
+    backgroundColor: theme.colors.accent, // Primary color
   },
+  tabText: { color: 'rgba(255,255,255,0.5)', fontSize: 13, fontWeight: '600' },
+  tabTextActive: { color: '#ffffff', fontWeight: '700' },
 
   // hero card — poster only, scale+opacity animated by parent FlatList
   heroCard: {

@@ -50,6 +50,8 @@ interface TransitionCtx {
   fallbackRecommendations: MediaItem[];
   setFallbackRecommendations: (items: MediaItem[]) => void;
   updateDetailInPlace: (item: MediaItem) => void;
+  globalBlurTarget: any;
+  setGlobalBlurTarget: (val: any) => void;
 }
 
 interface TransitionActionsCtxType {
@@ -58,6 +60,7 @@ interface TransitionActionsCtxType {
   reloadDetail: () => void;
   setFallbackRecommendations: (items: MediaItem[]) => void;
   updateDetailInPlace: (item: MediaItem) => void;
+  setGlobalBlurTarget: (val: any) => void;
 }
 
 const Ctx = createContext<TransitionCtx | null>(null);
@@ -81,6 +84,7 @@ export function TransitionProvider({ children }: { children: React.ReactNode }) 
   const [error, setError] = useState<string | null>(null);
   const [origin, setOrigin] = useState<CardLayout | null>(null);
   const [fallbackRecommendations, setFallbackRecommendations] = useState<MediaItem[]>([]);
+  const [globalBlurTarget, setGlobalBlurTarget] = useState<any>(null);
 
   const requestIdRef = useRef(0);
   const backSubscriptionRef = useRef<{ remove: () => void } | null>(null);
@@ -272,6 +276,8 @@ export function TransitionProvider({ children }: { children: React.ReactNode }) 
       fallbackRecommendations,
       setFallbackRecommendations,
       updateDetailInPlace,
+      globalBlurTarget,
+      setGlobalBlurTarget,
     }),
     [
       phase,
@@ -293,6 +299,8 @@ export function TransitionProvider({ children }: { children: React.ReactNode }) 
       fallbackRecommendations,
       setFallbackRecommendations,
       updateDetailInPlace,
+      globalBlurTarget,
+      setGlobalBlurTarget,
     ]
   );
 
@@ -303,8 +311,16 @@ export function TransitionProvider({ children }: { children: React.ReactNode }) 
       reloadDetail,
       setFallbackRecommendations,
       updateDetailInPlace,
+      setGlobalBlurTarget,
     }),
-    [openFromCard, closeToCard, reloadDetail, setFallbackRecommendations, updateDetailInPlace]
+    [
+      openFromCard,
+      closeToCard,
+      reloadDetail,
+      setFallbackRecommendations,
+      updateDetailInPlace,
+      setGlobalBlurTarget,
+    ]
   );
 
   return (

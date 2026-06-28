@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -15,6 +15,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import * as bridge from '../api/cloudStreamBridge';
 import { theme } from '../theme';
+import { useTransitionActions } from '../context/TransitionContext';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -40,6 +41,7 @@ const detailOptions = [
 
 export default function SettingsScreen({ navigation }: Props) {
   const insets = useSafeAreaInsets();
+  const { setGlobalBlurTarget } = useTransitionActions();
   const [loading, setLoading] = useState(true);
   const [selectedHomeTtl, setSelectedHomeTtl] = useState(12 * 60 * 60 * 1000);
   const [selectedDetailTtl, setSelectedDetailTtl] = useState(24 * 60 * 60 * 1000);
@@ -47,18 +49,23 @@ export default function SettingsScreen({ navigation }: Props) {
 
   const [blurTarget, setBlurTarget] = useState<any>(null);
   const blurTargetRef = useRef<any>(null);
-  const setBlurTargetRef = (val: any) => {
-    blurTargetRef.current = val;
-    if (val !== blurTarget) {
+  const setBlurTargetRef = useCallback((val: any) => {
+    if (val !== blurTargetRef.current) {
+      blurTargetRef.current = val;
       setBlurTarget(val);
+      setGlobalBlurTarget(val);
     }
-  };
+  }, [setGlobalBlurTarget]);
 
   const scrollY = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     loadCurrentSettings();
-  }, []);
+    const unsub = navigation.addListener('focus', () => {
+      setGlobalBlurTarget(blurTargetRef.current);
+    });
+    return unsub;
+  }, [navigation, setGlobalBlurTarget]);
 
   async function loadCurrentSettings() {
     try {
