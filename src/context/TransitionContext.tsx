@@ -169,20 +169,25 @@ export function TransitionProvider({ children }: { children: React.ReactNode }) 
   }, [contentProgress, surfaceProgress]);
 
   const closeToCard = useCallback(() => {
-    const currentOrigin = originRef.current;
-    if (!currentOrigin || phaseRef.current === 'idle' || phaseRef.current === 'closing') return;
+    // The "timeout thingy": delay the heavy animation by 150ms to allow native 
+    // interactions (touch ripples, OS back gestures) to finish, preventing lag.
+    setTimeout(() => {
+      const currentOrigin = originRef.current;
+      if (!currentOrigin || phaseRef.current === 'idle' || phaseRef.current === 'closing') return;
 
-    phaseRef.current = 'closing';
-    setPhase('closing');
-    contentProgress.value = withTiming(0, { duration: 160, easing: Easing.out(Easing.quad) });
-    surfaceProgress.value = withTiming(0, EXIT);
-    x.value = withTiming(currentOrigin.x, EXIT);
-    y.value = withTiming(currentOrigin.y, EXIT);
-    width.value = withTiming(currentOrigin.width, EXIT);
-    height.value = withTiming(currentOrigin.height, EXIT);
-    borderRadius.value = withTiming(currentOrigin.borderRadius ?? 18, EXIT, (finished) => {
-      if (finished) runOnJS(finishClose)();
-    });
+      phaseRef.current = 'closing';
+      setPhase('closing');
+      
+      contentProgress.value = withTiming(0, { duration: 160, easing: Easing.out(Easing.quad) });
+      surfaceProgress.value = withTiming(0, EXIT);
+      x.value = withTiming(currentOrigin.x, EXIT);
+      y.value = withTiming(currentOrigin.y, EXIT);
+      width.value = withTiming(currentOrigin.width, EXIT);
+      height.value = withTiming(currentOrigin.height, EXIT);
+      borderRadius.value = withTiming(currentOrigin.borderRadius ?? 18, EXIT, (finished) => {
+        if (finished) runOnJS(finishClose)();
+      });
+    }, 150);
   }, [borderRadius, contentProgress, finishClose, height, surfaceProgress, width, x, y]);
 
   const openFromCard = useCallback(
@@ -214,23 +219,27 @@ export function TransitionProvider({ children }: { children: React.ReactNode }) 
         phaseRef.current = 'opening';
         setPhase('opening');
         
-        x.value = withTiming(0, ENTER);
-        y.value = withTiming(0, ENTER);
-        width.value = withTiming(SCREEN_WIDTH, ENTER);
-        height.value = withTiming(SCREEN_HEIGHT, ENTER);
-        
-        borderRadius.value = withDelay(
-          200,
-          withTiming(0, { duration: 360, easing: Easing.out(Easing.quad) }, (finished) => {
-            if (finished) runOnJS(finishOpen)();
-          })
-        );
-        
-        surfaceProgress.value = withTiming(1, ENTER);
-        contentProgress.value = withDelay(
-          250,
-          withTiming(1, { duration: 280, easing: Easing.out(Easing.cubic) })
-        );
+        // Give React ~16ms (1 frame) to flush the mount and layout to the native UI thread
+        // This ensures the GPU animation doesn't compete with JS bridge traffic
+        setTimeout(() => {
+          x.value = withTiming(0, ENTER);
+          y.value = withTiming(0, ENTER);
+          width.value = withTiming(SCREEN_WIDTH, ENTER);
+          height.value = withTiming(SCREEN_HEIGHT, ENTER);
+          
+          borderRadius.value = withDelay(
+            200,
+            withTiming(0, { duration: 360, easing: Easing.out(Easing.quad) }, (finished) => {
+              if (finished) runOnJS(finishOpen)();
+            })
+          );
+          
+          surfaceProgress.value = withTiming(1, ENTER);
+          contentProgress.value = withDelay(
+            250,
+            withTiming(1, { duration: 280, easing: Easing.out(Easing.cubic) })
+          );
+        }, 16);
       });
     },
     [borderRadius, closeToCard, contentProgress, finishOpen, height, loadDetailFor, surfaceProgress, width, x, y]

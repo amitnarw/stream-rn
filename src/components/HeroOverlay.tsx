@@ -23,6 +23,8 @@ import Animated, {
   runOnJS,
   FadeIn,
   FadeOut,
+  FadeInUp,
+  FadeInDown,
   withTiming,
   withRepeat,
   withSequence,
@@ -109,7 +111,7 @@ function SkeletonPlaceholder({ style }: { style: any }) {
 }
 
 
-const { height: SCREEN_HEIGHT } = Dimensions.get('window');
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const HERO_HEIGHT = SCREEN_HEIGHT * 0.50; // 50% for hero, overlaps with sheet
 
 interface HeroEpisodeRowProps {
@@ -252,48 +254,50 @@ export default function HeroOverlay() {
     transform: [{ translateY: sheetTranslateY.value }],
   }));
 
-  const shadowStyle = useAnimatedStyle(() => ({
-    left: x.value,
-    top: y.value,
-    width: width.value,
-    height: height.value,
-    borderRadius: borderRadius.value,
-    shadowOpacity: interpolate(surfaceProgress.value, [0, 1], [0.25, 0.55]),
-    shadowRadius: interpolate(surfaceProgress.value, [0, 1], [12, 28]),
-    elevation: interpolate(surfaceProgress.value, [0, 1], [8, 18]),
-  }));
+  const shadowStyle = useAnimatedStyle(() => {
+    return {
+      transform: [
+        { translateX: x.value },
+        { translateY: y.value },
+      ],
+      width: width.value,
+      height: height.value,
+      borderRadius: borderRadius.value,
+      shadowOpacity: interpolate(surfaceProgress.value, [0, 1], [0.25, 0.55]),
+      shadowRadius: interpolate(surfaceProgress.value, [0, 1], [12, 28]),
+      elevation: interpolate(surfaceProgress.value, [0, 1], [8, 18]),
+    };
+  });
 
-  const surfaceStyle = useAnimatedStyle(() => ({
-    width: '100%',
-    height: '100%',
-    borderRadius: borderRadius.value,
-    backgroundColor: interpolateColor(
-      surfaceProgress.value,
-      [0, 0.05, 1],
-      ['rgba(28,27,28,0)', 'rgba(28,27,28,1)', 'rgba(0,0,0,1)']
-    ),
-  }));
-
-  const imageStyle = useAnimatedStyle(() => ({
-    height: interpolate(
-      surfaceProgress.value,
-      [0, 1],
-      [height.value, SCREEN_HEIGHT],
-      Extrapolation.CLAMP
-    ),
-  }));
+  const surfaceStyle = useAnimatedStyle(() => {
+    return {
+      width: '100%',
+      height: '100%',
+      borderRadius: borderRadius.value,
+      backgroundColor: interpolateColor(
+        surfaceProgress.value,
+        [0, 0.05, 1],
+        ['rgba(28,27,28,0)', 'rgba(28,27,28,1)', 'rgba(0,0,0,1)']
+      ),
+    };
+  });
 
   const contentStyle = useAnimatedStyle(() => ({
     opacity: contentProgress.value,
     transform: [
       {
-        translateY: interpolate(contentProgress.value, [0, 1], [60, 0]),
+        translateY: interpolate(contentProgress.value, [0, 1], [150, 0]),
       },
     ],
   }));
 
   const headerControlsStyle = useAnimatedStyle(() => ({
     opacity: interpolate(surfaceProgress.value, [0.55, 1], [0, 1], Extrapolation.CLAMP),
+    transform: [
+      {
+        translateY: interpolate(surfaceProgress.value, [0.55, 1], [-20, 0], Extrapolation.CLAMP),
+      }
+    ]
   }));
 
   const fadeStyle = useAnimatedStyle(() => ({
@@ -389,7 +393,7 @@ export default function HeroOverlay() {
     const opacity = interpolate(scrollY.value, [0, 150], [1, 0], Extrapolation.CLAMP);
     const translateY = interpolate(scrollY.value, [0, 150], [0, -80], Extrapolation.CLAMP);
     return {
-      opacity,
+      opacity: opacity * contentProgress.value, // Fade out instantly when details close
       transform: [{ translateY }],
     };
   });
@@ -490,12 +494,12 @@ export default function HeroOverlay() {
         <Animated.View style={[styles.surface, surfaceStyle]}>
           <BlurTargetView ref={setBlurTargetRef as any} style={StyleSheet.absoluteFillObject}>
             
-            <Animated.View style={[styles.imageWrap, imageStyle]}>
+            <View style={[styles.imageWrap, { bottom: 0 }]}>
               {/* Skeleton placeholder base (Breathing shimmer) */}
               <SkeletonPlaceholder style={StyleSheet.absoluteFillObject} />
               
               {/* Blurred poster progressive placeholder */}
-              {(item?.posterUrl || detail?.posterUrl) ? (
+              {(phase === 'open' || phase === 'closing') && (item?.posterUrl || detail?.posterUrl) ? (
                 <Image 
                   source={{ uri: item?.posterUrl || detail?.posterUrl || undefined }} 
                   style={[StyleSheet.absoluteFillObject, { opacity: 0.45 }]} 
@@ -519,9 +523,9 @@ export default function HeroOverlay() {
                   pointerEvents="none"
                 />
               </Animated.View>
-            </Animated.View>
+            </View>
           </BlurTargetView>
-
+ 
           {/* Top Navigation Bar (Oval/Capsule) */}
             <View style={[styles.headerControls, { top: Math.max(insets.top - 4, 8) }]} pointerEvents="box-none">
               {/* Animated Background blur capsule */}
@@ -533,18 +537,22 @@ export default function HeroOverlay() {
                   overflow: 'hidden',
                 }
               ]}>
-                <BlurView 
-                  intensity={100} 
-                  tint="dark" 
-                  style={StyleSheet.absoluteFillObject}
-                  blurTarget={{ current: blurTarget }}
-                  blurMethod="dimezisBlurView"
-                />
+                {(phase === 'open' || phase === 'closing') ? (
+                  <BlurView 
+                    intensity={100} 
+                    tint="dark" 
+                    style={StyleSheet.absoluteFillObject}
+                    blurTarget={{ current: blurTarget }}
+                    blurMethod="dimezisBlurView"
+                  />
+                ) : (
+                  <View style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(20, 18, 24, 0.95)' }]} />
+                )}
                 <View style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(15, 15, 20, 0.38)' }]} />
               </Animated.View>
               
-
-
+ 
+ 
               {/* Header controls content (fades in with zoom transition) */}
               <Animated.View style={[styles.headerControlsContent, headerControlsStyle]} pointerEvents="box-none">
                 <TouchableOpacity style={styles.closeButton} onPress={closeToCard} activeOpacity={0.8}>
@@ -552,11 +560,11 @@ export default function HeroOverlay() {
                     <Text style={styles.closeButtonText}>←</Text>
                   </View>
                 </TouchableOpacity>
-
+ 
                 <Text style={styles.headerTitle}>
                   {detail?.isSerial ? 'TV Series Details' : 'Movie Details'}
                 </Text>
-
+ 
                 <TouchableOpacity style={styles.closeButton} onPress={toggleFavorite} activeOpacity={0.8}>
                   <View style={styles.closeButtonInner}>
                     <Ionicons 
@@ -568,7 +576,7 @@ export default function HeroOverlay() {
                 </TouchableOpacity>
               </Animated.View>
             </View>
-
+ 
             {/* Fixed Header Content (Rendered OUTSIDE ScrollView to prevent jitter/glitching) */}
             <Animated.View style={[styles.fixedHeaderContainer, fixedHeaderAnimatedStyle]} pointerEvents="box-none">
               {/* Watch Trailer Button in Center */}
@@ -580,13 +588,17 @@ export default function HeroOverlay() {
                   disabled={scrollYRef.current > 100}
                 >
                   <View style={styles.trailerCircle}>
-                    <BlurView 
-                      intensity={90} 
-                      tint="dark" 
-                      style={StyleSheet.absoluteFillObject}
-                      blurTarget={{ current: blurTarget }}
-                      blurMethod="dimezisBlurView"
-                    />
+                    {(phase === 'open' || phase === 'closing') ? (
+                      <BlurView 
+                        intensity={90} 
+                        tint="dark" 
+                        style={StyleSheet.absoluteFillObject}
+                        blurTarget={{ current: blurTarget }}
+                        blurMethod="dimezisBlurView"
+                      />
+                    ) : (
+                      <View style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(15, 15, 20, 0.85)' }]} />
+                    )}
                     <Ionicons name="play" size={24} color="#fff" style={{ marginLeft: 3 }} />
                   </View>
                   <Text style={styles.trailerLabel}>TRAILER</Text>
@@ -596,6 +608,17 @@ export default function HeroOverlay() {
               {/* Video Metadata Pill at Bottom */}
               <View style={styles.pillBottom} pointerEvents="none">
                 <View style={styles.pillBackground}>
+                  {(phase === 'open' || phase === 'closing') ? (
+                    <BlurView 
+                      intensity={90} 
+                      tint="dark" 
+                      style={StyleSheet.absoluteFillObject}
+                      blurTarget={{ current: blurTarget }}
+                      blurMethod="dimezisBlurView"
+                    />
+                  ) : (
+                    <View style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(15, 15, 20, 0.85)' }]} />
+                  )}
                   {detail?.year ? (
                     <>
                       <Text style={styles.pillText}>{detail.year}</Text>
@@ -644,176 +667,178 @@ export default function HeroOverlay() {
                 />
 
                 {/* Bottom Sheet Content */}
-                <View style={styles.sheetContentWrap}>
-                  <View style={styles.bottomSheetBackground}>
-                    <View style={styles.blurContainer}>
-                      {posterUrl ? (
-                        <Image 
-                          source={{ uri: posterUrl }} 
-                          style={StyleSheet.absoluteFillObject}
-                          blurRadius={35}
-                          resizeMode="cover"
+                {(phase === 'opening' || phase === 'open' || phase === 'closing') && (
+                  <Animated.View style={styles.sheetContentWrap}>
+                    <View style={styles.bottomSheetBackground}>
+                      <View style={styles.blurContainer}>
+                        {posterUrl ? (
+                          <Image 
+                            source={{ uri: posterUrl }} 
+                            style={StyleSheet.absoluteFillObject}
+                            blurRadius={35}
+                            resizeMode="cover"
+                          />
+                        ) : null}
+                        <LinearGradient 
+                          colors={['rgba(15,15,20,0.55)', 'rgba(5,5,10,0.9)']} 
+                          style={StyleSheet.absoluteFillObject} 
                         />
-                      ) : null}
-                      <LinearGradient 
-                        colors={['rgba(15,15,20,0.55)', 'rgba(5,5,10,0.9)']} 
-                        style={StyleSheet.absoluteFillObject} 
-                      />
+                      </View>
                     </View>
-                  </View>
-                  
-                  {loading ? (
-                    <DetailsSkeleton />
-                  ) : error ? (
-                    <View style={styles.centerState}>
-                      <Text style={styles.errorText}>{error}</Text>
-                      <TouchableOpacity style={styles.primaryButton} onPress={reloadDetail}>
-                        <Text style={styles.primaryButtonText}>Retry</Text>
-                      </TouchableOpacity>
-                    </View>
-                  ) : (
-                    <Animated.View 
-                      entering={FadeIn.duration(350)}
-                      style={[styles.scrollContent, { paddingBottom: insets.bottom + 100 }]}
-                    >
-                      {/* Title & Season */}
-                      <View style={[styles.titleContainer, { zIndex: 100 }]}>
-                        <Text style={styles.mainTitle} numberOfLines={2}>{title}</Text>
-                        {detail?.isSerial && availableSeasons.length > 0 ? (
-                          <View style={{ position: 'relative', alignItems: 'center' }}>
-                            <TouchableOpacity 
-                              style={styles.seasonSelector} 
-                              activeOpacity={0.7}
-                              onPress={() => setShowSeasonDropdown(!showSeasonDropdown)}
-                            >
-                              <Text style={styles.seasonText}>
-                                {selectedSeason ? `Season ${selectedSeason}` : 'Episodes'}
-                              </Text>
-                              <Text style={styles.seasonIcon}>▼</Text>
-                            </TouchableOpacity>
-
-                            {/* Floating Modern Dropdown */}
-                            {showSeasonDropdown && (
-                              <Animated.View 
-                                entering={FadeIn.duration(200)} 
-                                exiting={FadeOut.duration(150)} 
-                                style={styles.floatingDropdown}
+                    
+                    {loading ? (
+                      phase === 'open' ? <DetailsSkeleton /> : null
+                    ) : error ? (
+                      <View style={styles.centerState}>
+                        <Text style={styles.errorText}>{error}</Text>
+                        <TouchableOpacity style={styles.primaryButton} onPress={reloadDetail}>
+                          <Text style={styles.primaryButtonText}>Retry</Text>
+                        </TouchableOpacity>
+                      </View>
+                    ) : (
+                      <Animated.View 
+                        entering={FadeInUp.duration(450)}
+                        style={[styles.scrollContent, { paddingBottom: insets.bottom + 100 }]}
+                      >
+                        {/* Title & Season */}
+                        <View style={[styles.titleContainer, { zIndex: 100 }]}>
+                          <Text style={styles.mainTitle} numberOfLines={2}>{title}</Text>
+                          {detail?.isSerial && availableSeasons.length > 0 ? (
+                            <View style={{ position: 'relative', alignItems: 'center' }}>
+                              <TouchableOpacity 
+                                style={styles.seasonSelector} 
+                                activeOpacity={0.7}
+                                onPress={() => setShowSeasonDropdown(!showSeasonDropdown)}
                               >
-                                <LinearGradient 
-                                  colors={['#1c1c22', '#0f0f12']}
-                                  style={StyleSheet.absoluteFillObject}
-                                />
-                                <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 220 }}>
-                                  {availableSeasons.map((season) => (
-                                    <TouchableOpacity
-                                      key={`season-${season}`}
-                                      style={[styles.dropdownItem, selectedSeason === season && styles.dropdownItemSelected]}
-                                      onPress={() => {
-                                        setSelectedSeason(season);
-                                        setShowSeasonDropdown(false);
-                                      }}
-                                    >
-                                      <View style={styles.dropdownItemLeft}>
-                                        <View style={[
-                                          styles.seasonNumberBox,
-                                          selectedSeason === season && styles.seasonNumberBoxSelected
-                                        ]}>
-                                          <Text style={[
-                                            styles.seasonNumberText,
-                                            selectedSeason === season && styles.seasonNumberTextSelected
+                                <Text style={styles.seasonText}>
+                                  {selectedSeason ? `Season ${selectedSeason}` : 'Episodes'}
+                                </Text>
+                                <Text style={styles.seasonIcon}>▼</Text>
+                              </TouchableOpacity>
+
+                              {/* Floating Modern Dropdown */}
+                              {showSeasonDropdown && (
+                                <Animated.View 
+                                  entering={FadeIn.duration(200)} 
+                                  exiting={FadeOut.duration(150)} 
+                                  style={styles.floatingDropdown}
+                                >
+                                  <LinearGradient 
+                                    colors={['#1c1c22', '#0f0f12']}
+                                    style={StyleSheet.absoluteFillObject}
+                                  />
+                                  <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 220 }}>
+                                    {availableSeasons.map((season) => (
+                                      <TouchableOpacity
+                                        key={`season-${season}`}
+                                        style={[styles.dropdownItem, selectedSeason === season && styles.dropdownItemSelected]}
+                                        onPress={() => {
+                                          setSelectedSeason(season);
+                                          setShowSeasonDropdown(false);
+                                        }}
+                                      >
+                                        <View style={styles.dropdownItemLeft}>
+                                          <View style={[
+                                            styles.seasonNumberBox,
+                                            selectedSeason === season && styles.seasonNumberBoxSelected
                                           ]}>
-                                            {String(season).padStart(2, '0')}
+                                            <Text style={[
+                                              styles.seasonNumberText,
+                                              selectedSeason === season && styles.seasonNumberTextSelected
+                                            ]}>
+                                              {String(season).padStart(2, '0')}
+                                            </Text>
+                                          </View>
+                                          <Text style={[
+                                            styles.dropdownItemText,
+                                            selectedSeason === season && styles.dropdownItemTextSelected
+                                          ]}>
+                                            Season {season}
                                           </Text>
                                         </View>
-                                        <Text style={[
-                                          styles.dropdownItemText,
-                                          selectedSeason === season && styles.dropdownItemTextSelected
-                                        ]}>
-                                          Season {season}
-                                        </Text>
-                                      </View>
-                                      {selectedSeason === season && (
-                                        <Text style={styles.checkmark}>✓</Text>
-                                      )}
-                                    </TouchableOpacity>
-                                  ))}
-                                </ScrollView>
-                              </Animated.View>
-                            )}
-                          </View>
-                        ) : null}
-                      </View>
-
-                      {/* Description */}
-                      {detail?.description ? (
-                        <Text style={styles.descriptionText}>{detail.description}</Text>
-                      ) : null}
-
-                      {/* Genre & Rating */}
-                      <View style={styles.genreRatingRow}>
-                        {detail?.tags && detail.tags.length > 0 ? (
-                          <Text style={styles.genreText}>{detail.tags.slice(0, 3).join(', ')}</Text>
-                        ) : null}
-                        {detail?.score ? (
-                          <View style={styles.imdbBadgeContainer}>
-                            <View style={styles.imdbBadge}>
-                              <Text style={styles.imdbText}>IMDb</Text>
+                                        {selectedSeason === season && (
+                                          <Text style={styles.checkmark}>✓</Text>
+                                        )}
+                                      </TouchableOpacity>
+                                    ))}
+                                  </ScrollView>
+                                </Animated.View>
+                              )}
                             </View>
-                            <Text style={styles.ratingText}>{detail.score}</Text>
-                          </View>
-                        ) : null}
-                      </View>
-
-                      {linksError ? <Text style={styles.linksError}>{linksError}</Text> : null}
-
-                      {/* Episodes List Title */}
-                      <Text style={styles.sectionTitle}>
-                        {detail?.isSerial ? 'Episodes List' : 'Play Video'}
-                      </Text>
-
-                      {/* Episodes */}
-                      <View style={styles.episodesList}>
-                        {displayedEpisodes.length === 0 ? (
-                          <Text style={styles.empty}>No episodes available</Text>
-                        ) : (
-                          displayedEpisodes.map((ep, index) => (
-                            <HeroEpisodeRow
-                              key={`${ep.mediaRef}-${index}`}
-                              ep={ep}
-                              index={index}
-                              playingEpisode={playingEpisode}
-                              playEpisode={playEpisode}
-                              posterUrl={detail?.posterUrl || item.posterUrl || undefined}
-                              isSerial={!!detail?.isSerial}
-                              title={title}
-                            />
-                          ))
-                        )}
-                      </View>
-
-                      {/* Recommendations Row */}
-                      {recommendations.length > 0 && (
-                        <View style={styles.recommendationsSection}>
-                          <Text style={styles.recommendationsTitle}>More Like This</Text>
-                          <ScrollView 
-                            horizontal 
-                            showsHorizontalScrollIndicator={false}
-                            contentContainerStyle={styles.recommendationsList}
-                          >
-                            {recommendations.map((recItem, idx) => (
-                              <RecommendationCard 
-                                key={`rec-${idx}-${recItem.url}`} 
-                                item={recItem} 
-                                onPress={(clickedItem) => updateDetailInPlace(clickedItem)}
-                              />
-                            ))}
-                          </ScrollView>
+                          ) : null}
                         </View>
-                      )}
 
-                    </Animated.View>
-                  )}
-                </View>
+                        {/* Description */}
+                        {detail?.description ? (
+                          <Text style={styles.descriptionText}>{detail.description}</Text>
+                        ) : null}
+
+                        {/* Genre & Rating */}
+                        <View style={styles.genreRatingRow}>
+                          {detail?.tags && detail.tags.length > 0 ? (
+                            <Text style={styles.genreText}>{detail.tags.slice(0, 3).join(', ')}</Text>
+                          ) : null}
+                          {detail?.score ? (
+                            <View style={styles.imdbBadgeContainer}>
+                              <View style={styles.imdbBadge}>
+                                <Text style={styles.imdbText}>IMDb</Text>
+                              </View>
+                              <Text style={styles.ratingText}>{detail.score}</Text>
+                            </View>
+                          ) : null}
+                        </View>
+
+                        {linksError ? <Text style={styles.linksError}>{linksError}</Text> : null}
+
+                        {/* Episodes List Title */}
+                        <Text style={styles.sectionTitle}>
+                          {detail?.isSerial ? 'Episodes List' : 'Play Video'}
+                        </Text>
+
+                        {/* Episodes */}
+                        <View style={styles.episodesList}>
+                          {displayedEpisodes.length === 0 ? (
+                            <Text style={styles.empty}>No episodes available</Text>
+                          ) : (
+                            displayedEpisodes.map((ep, index) => (
+                              <HeroEpisodeRow
+                                key={`${ep.mediaRef}-${index}`}
+                                ep={ep}
+                                index={index}
+                                playingEpisode={playingEpisode}
+                                playEpisode={playEpisode}
+                                posterUrl={detail?.posterUrl || item.posterUrl || undefined}
+                                isSerial={!!detail?.isSerial}
+                                title={title}
+                              />
+                            ))
+                          )}
+                        </View>
+
+                        {/* Recommendations Row */}
+                        {recommendations.length > 0 && (
+                          <View style={styles.recommendationsSection}>
+                            <Text style={styles.recommendationsTitle}>More Like This</Text>
+                            <ScrollView 
+                              horizontal 
+                              showsHorizontalScrollIndicator={false}
+                              contentContainerStyle={styles.recommendationsList}
+                            >
+                              {recommendations.map((recItem, idx) => (
+                                <RecommendationCard 
+                                  key={`rec-${idx}-${recItem.url}`} 
+                                  item={recItem} 
+                                  onPress={(clickedItem) => updateDetailInPlace(clickedItem)}
+                                />
+                              ))}
+                            </ScrollView>
+                          </View>
+                        )}
+
+                      </Animated.View>
+                    )}
+                  </Animated.View>
+                )}
               </Pressable>
             </Animated.ScrollView>
         </Animated.View>
@@ -988,6 +1013,8 @@ const styles = StyleSheet.create({
   },
   shadowWrap: {
     position: 'absolute',
+    top: 0,
+    left: 0,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 18 },
   },
@@ -1101,10 +1128,11 @@ const styles = StyleSheet.create({
   pillBackground: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.6)',
+    backgroundColor: 'rgba(15, 15, 20, 0.45)', // matching trailer button background
     paddingHorizontal: 20,
     paddingVertical: 8,
     borderRadius: 20,
+    overflow: 'hidden', // clips the BlurView properly
     gap: 10,
   },
   trailerButton: {

@@ -105,6 +105,7 @@ function TabNavigator({ navigation }) {
         ref={pagerRef}
         horizontal
         pagingEnabled
+        scrollEnabled={false}
         showsHorizontalScrollIndicator={false}
         onScroll={onScroll}
         scrollEventThrottle={16}

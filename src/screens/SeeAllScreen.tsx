@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -6,9 +6,10 @@ import {
   TouchableOpacity,
   StyleSheet,
   Dimensions,
+  InteractionManager,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import type { MediaItem } from '../types/plugin';
 import MediaCard from '../components/MediaCard';
@@ -26,6 +27,14 @@ interface Props {
 export default function SeeAllScreen({ route, navigation }: Props) {
   const { title, items } = route.params || { title: 'Collection', items: [] };
   const { openFromCard } = useTransitionActions();
+  const [isReady, setIsReady] = useState(false);
+
+  useEffect(() => {
+    const task = InteractionManager.runAfterInteractions(() => {
+      setIsReady(true);
+    });
+    return () => task.cancel();
+  }, []);
 
   const handleMediaPress = (item: MediaItem) => {
     openFromCard(item, {
@@ -33,7 +42,7 @@ export default function SeeAllScreen({ route, navigation }: Props) {
       y: SCREEN_HEIGHT / 2 - (CARD_WIDTH * 1.5) / 2,
       width: CARD_WIDTH,
       height: CARD_WIDTH * 1.5,
-      borderRadius: 16,
+      borderRadius: 20, // updated to match new card border radius
     });
   };
 
@@ -49,9 +58,9 @@ export default function SeeAllScreen({ route, navigation }: Props) {
       {/* Header Bar */}
       <View style={styles.headerBar}>
         <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-          <BlurView intensity={35} tint="dark" style={styles.backButtonBlur}>
+          <View style={styles.backButtonGlass}>
             <Text style={styles.backButtonText}>←</Text>
-          </BlurView>
+          </View>
         </TouchableOpacity>
         <Text style={styles.headerTitle} numberOfLines={1}>
           {title}
@@ -60,20 +69,26 @@ export default function SeeAllScreen({ route, navigation }: Props) {
       </View>
 
       {/* Grid of items */}
-      <FlatList
-        data={items}
-        keyExtractor={(_, i) => String(i)}
-        contentContainerStyle={styles.grid}
-        numColumns={3}
-        renderItem={({ item }) => (
-          <MediaCard item={item} onPress={handleMediaPress} />
-        )}
-        ListEmptyComponent={
-          <View style={styles.emptyContainer}>
-            <Text style={styles.emptyText}>No items found in this section.</Text>
-          </View>
-        }
-      />
+      {!isReady ? (
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+          <ActivityIndicator size="large" color={theme.colors.accent} />
+        </View>
+      ) : (
+        <FlatList
+          data={items}
+          keyExtractor={(_, i) => String(i)}
+          contentContainerStyle={styles.grid}
+          numColumns={3}
+          renderItem={({ item }) => (
+            <MediaCard item={item} onPress={handleMediaPress} />
+          )}
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+              <Text style={styles.emptyText}>No items found in this section.</Text>
+            </View>
+          }
+        />
+      )}
     </SafeAreaView>
   );
 }
@@ -105,10 +120,14 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     overflow: 'hidden',
   },
-  backButtonBlur: {
+  backButtonGlass: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderRadius: 18,
   },
   backButtonText: {
     color: '#fff',

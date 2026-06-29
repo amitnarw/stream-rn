@@ -78,7 +78,7 @@ const styles = StyleSheet.create({
   poster: {
     width: CARD_WIDTH,
     height: CARD_WIDTH * 1.5,
-    borderRadius: 16,
+    borderRadius: 22, // increased to 22
     backgroundColor: '#1c1b1c',
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.08)',

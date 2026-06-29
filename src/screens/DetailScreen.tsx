@@ -3,6 +3,7 @@ import {
   View, Text, Image, ScrollView, TouchableOpacity,
   ActivityIndicator, StyleSheet, FlatList,
   Alert, Animated, Dimensions, Pressable, Linking,
+  BackHandler,
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import YoutubeIframe from 'react-native-youtube-iframe';
@@ -179,6 +180,41 @@ export default function DetailScreen({ route, navigation }: Props) {
   const [selectedSourceIndex, setSelectedSourceIndex] = useState(0);
   const [linksError, setLinksError] = useState<string | null>(null);
   const sheetAnim = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
+  const mountAnim = useRef(new Animated.Value(0)).current;
+
+  const handleBack = useCallback(() => {
+    // The user-requested timeout to prevent lag
+    setTimeout(() => {
+      Animated.timing(mountAnim, {
+        toValue: 0,
+        duration: 300,
+        useNativeDriver: true,
+      }).start(() => {
+        navigation.goBack();
+      });
+    }, 150);
+  }, [navigation, mountAnim]);
+
+  useEffect(() => {
+    const backAction = () => {
+      handleBack();
+      return true;
+    };
+    const backHandler = BackHandler.addEventListener(
+      'hardwareBackPress',
+      backAction
+    );
+    return () => backHandler.remove();
+  }, [handleBack]);
+
+  useEffect(() => {
+    // Run mount slide-up animation
+    Animated.timing(mountAnim, {
+      toValue: 1,
+      duration: 450,
+      useNativeDriver: true,
+    }).start();
+  }, []);
 
   // Favorite state
   const [isFav, setIsFav] = useState(false);
@@ -450,7 +486,7 @@ export default function DetailScreen({ route, navigation }: Props) {
         {/* Metadata Pill */}
         <View style={styles.metadataPillContainer}>
           <BlurView 
-            intensity={50} 
+            intensity={90} 
             tint="dark" 
             style={styles.metadataPill}
             blurTarget={{ current: blurTarget }}
@@ -539,7 +575,23 @@ export default function DetailScreen({ route, navigation }: Props) {
             )}
             scrollEventThrottle={16}
           >
-            <View style={styles.contentCard}>
+            <Animated.View style={[
+              styles.contentCard,
+              {
+                opacity: mountAnim.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [0, 1],
+                }),
+                transform: [
+                  {
+                    translateY: mountAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [180, 0],
+                    }),
+                  },
+                ],
+              }
+            ]}>
               <BlurView 
                 intensity={90} 
                 tint="dark" 
@@ -695,7 +747,7 @@ export default function DetailScreen({ route, navigation }: Props) {
                   )}
                 </View>
               </BlurView>
-            </View>
+            </Animated.View>
           </Animated.ScrollView>
         </View>
 
@@ -731,8 +783,7 @@ export default function DetailScreen({ route, navigation }: Props) {
             <View style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(15, 15, 20, 0.38)' }]} />
           </Animated.View>
           
-          
-          <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+          <TouchableOpacity style={styles.backButton} onPress={handleBack}>
             <BlurView 
               intensity={40} 
               tint="dark" 
@@ -970,9 +1021,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 8,
     borderRadius: 20,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: 'rgba(15, 15, 20, 0.45)', // matched trailer button
+    overflow: 'hidden', // clips the BlurView
   },
   metadataText: {
     color: '#e5e2e3',
