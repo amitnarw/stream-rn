@@ -39,7 +39,33 @@ export const HeroCard = React.memo(function HeroCard({
   const overlayOpacity = useRef(new Animated.Value(1)).current;
 
   const { phase, item: activeItem } = useTransition();
+  const wasTargetRef = useRef(false);
   const isTarget = activeItem !== null && activeItem.url === item.url;
+
+  useEffect(() => {
+    if (isTarget) {
+      wasTargetRef.current = true;
+    }
+    
+    if (phase === 'closing' && wasTargetRef.current) {
+      wasTargetRef.current = false;
+      Animated.sequence([
+        Animated.delay(320),
+        Animated.spring(pressScale, {
+          toValue: 0.95,
+          useNativeDriver: true,
+          speed: 50,
+          bounciness: 0,
+        }),
+        Animated.spring(pressScale, {
+          toValue: 1.0,
+          useNativeDriver: true,
+          speed: 35,
+          bounciness: 8,
+        }),
+      ]).start();
+    }
+  }, [phase, isTarget]);
 
   useEffect(() => {
     if (isTarget) {
@@ -56,9 +82,18 @@ export const HeroCard = React.memo(function HeroCard({
           useNativeDriver: true,
         }).start();
       }
-    } else {
-      overlayOpacity.setValue(1);
+    } else if (phase === 'idle') {
+      // Animate non-target cards back to full opacity — never hard-snap.
+      // setValue(1) on the same frame React commits the phase change caused
+      // a visible 1-frame flash for all surrounding carousel cards.
+      Animated.timing(overlayOpacity, {
+        toValue: 1,
+        duration: 250,
+        useNativeDriver: true,
+      }).start();
     }
+    // During opening/open/closing phases, non-target cards keep their current
+    // overlay state — no change needed.
   }, [phase, isTarget]);
 
   const inputRange = [
@@ -91,7 +126,24 @@ export const HeroCard = React.memo(function HeroCard({
         px: number,
         py: number,
       ) => {
-        onPress(item, { x: px, y: py, width, height, borderRadius: 28 }, index);
+        // Strip out the press scale (0.95) to get the resting layout bounds
+        const pressScaleVal = 0.95;
+        const wResting = width / pressScaleVal;
+        const hResting = height / pressScaleVal;
+        const xResting = px - (wResting - width) / 2;
+        const yResting = py - (hResting - height) / 2;
+        
+        onPress(
+          item, 
+          { 
+            x: xResting, 
+            y: yResting, 
+            width: wResting, 
+            height: hResting, 
+            borderRadius: 28 
+          }, 
+          index
+        );
       },
     );
   }

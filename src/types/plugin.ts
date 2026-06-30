@@ -54,10 +54,13 @@ export interface DetailResult {
   contentRating: string | null;
   logoUrl: string | null;
   imdbId: string | null;
-  tmdbId: string | null;
+
   cast: Actor[];
   recommendations: MediaItem[];
   trailers: Trailer[];
+  director?: string[] | null;
+  writer?: string[] | null;
+  awards?: string | null;
 }
 
 export interface VideoSource {
@@ -66,6 +69,7 @@ export interface VideoSource {
   type: string;
   headers: Record<string, string>;
   provider?: string;
+  host?: string;
 }
 
 export interface LinksResult {

@@ -39,13 +39,23 @@ const detailOptions = [
   { label: '7 Days (Offline Mode)', value: 7 * 24 * 60 * 60 * 1000, desc: 'Best for saving internet data. Updates weekly.' },
 ];
 
+const linksOptions = [
+  { label: 'Always Scrape (No Cache)', value: 0, desc: 'Always search for live playback links from all providers.' },
+  { label: '10 Minutes (Quick sessions)', value: 10 * 60 * 1000, desc: 'Saves links for short player sessions.' },
+  { label: '30 Minutes (Recommended)', value: 30 * 60 * 1000, desc: 'Best balance of link freshness and speed.' },
+  { label: '2 Hours (Long watching)', value: 2 * 60 * 60 * 1000, desc: 'Great for binge watching multiple episodes.' },
+  { label: '12 Hours (Maximum Speed)', value: 12 * 60 * 60 * 1000, desc: 'Loads playing links instantly if previously loaded.' },
+];
+
 export default function SettingsScreen({ navigation }: Props) {
   const insets = useSafeAreaInsets();
   const { setGlobalBlurTarget } = useTransitionActions();
   const [loading, setLoading] = useState(true);
   const [selectedHomeTtl, setSelectedHomeTtl] = useState(12 * 60 * 60 * 1000);
   const [selectedDetailTtl, setSelectedDetailTtl] = useState(24 * 60 * 60 * 1000);
+  const [selectedLinksTtl, setSelectedLinksTtl] = useState(30 * 60 * 1000);
   const [clearing, setClearing] = useState(false);
+  const [clearingLinks, setClearingLinks] = useState(false);
 
   const [blurTarget, setBlurTarget] = useState<any>(null);
   const blurTargetRef = useRef<any>(null);
@@ -72,6 +82,7 @@ export default function SettingsScreen({ navigation }: Props) {
       const settings = await bridge.getSettings();
       setSelectedHomeTtl(settings.mainPageTtl);
       setSelectedDetailTtl(settings.detailsTtl);
+      setSelectedLinksTtl(settings.linksTtl);
     } catch (e) {
       console.warn('Failed to load settings:', e);
     } finally {
@@ -82,7 +93,7 @@ export default function SettingsScreen({ navigation }: Props) {
   async function handleHomeTtlChange(value: number) {
     setSelectedHomeTtl(value);
     try {
-      await bridge.saveSettings(value, selectedDetailTtl);
+      await bridge.saveSettings(value, selectedDetailTtl, selectedLinksTtl);
     } catch (e) {
       console.warn('Failed to save settings:', e);
     }
@@ -91,7 +102,16 @@ export default function SettingsScreen({ navigation }: Props) {
   async function handleDetailTtlChange(value: number) {
     setSelectedDetailTtl(value);
     try {
-      await bridge.saveSettings(selectedHomeTtl, value);
+      await bridge.saveSettings(selectedHomeTtl, value, selectedLinksTtl);
+    } catch (e) {
+      console.warn('Failed to save settings:', e);
+    }
+  }
+
+  async function handleLinksTtlChange(value: number) {
+    setSelectedLinksTtl(value);
+    try {
+      await bridge.saveSettings(selectedHomeTtl, selectedDetailTtl, value);
     } catch (e) {
       console.warn('Failed to save settings:', e);
     }
@@ -115,6 +135,31 @@ export default function SettingsScreen({ navigation }: Props) {
               Alert.alert('Error', 'Failed to clear cache.');
             } finally {
               setClearing(false);
+            }
+          },
+        },
+      ]
+    );
+  }
+
+  function handleClearLinksCache() {
+    Alert.alert(
+      'Clear Playback Links Cache',
+      'Are you sure you want to clear all cached play links? This will force the app to scrape all providers fresh next time you click play.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Clear Links',
+          style: 'destructive',
+          onPress: async () => {
+            setClearingLinks(true);
+            try {
+              bridge.clearLinksCache();
+              Alert.alert('Success', 'Playback links cache has been cleared successfully.');
+            } catch (e) {
+              Alert.alert('Error', 'Failed to clear playback links cache.');
+            } finally {
+              setClearingLinks(false);
             }
           },
         },
@@ -230,24 +275,70 @@ export default function SettingsScreen({ navigation }: Props) {
             </View>
           </View>
 
+          {/* Playback Links Cache Settings Card */}
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>Playback Links Cache</Text>
+            <Text style={styles.cardDescription}>
+              Controls how long the app remembers resolved streaming sources and play links. A longer cache skips scraping and plays videos instantly, while a shorter cache refreshes expiring source links.
+            </Text>
+            <View style={styles.optionsList}>
+              {linksOptions.map((opt) => {
+                const isSelected = selectedLinksTtl === opt.value;
+                return (
+                  <TouchableOpacity
+                    key={opt.value}
+                    style={[styles.optionRow, isSelected && styles.optionRowActive]}
+                    onPress={() => handleLinksTtlChange(opt.value)}
+                    activeOpacity={0.7}
+                  >
+                    <View style={[styles.radioCircle, isSelected && styles.radioCircleActive]}>
+                      {isSelected && <View style={styles.radioDot} />}
+                    </View>
+                    <View style={styles.optionTextContainer}>
+                      <Text style={[styles.optionLabel, isSelected && styles.optionLabelActive]}>
+                        {opt.label}
+                      </Text>
+                      <Text style={styles.optionDesc}>{opt.desc}</Text>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+
           {/* Storage Management Card */}
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Storage & Cleanup</Text>
             <Text style={styles.cardDescription}>
               Free up storage space on your device. Clearing cached data will force the app to fetch fresh listings and show details next time you browse, without deleting your preferences.
             </Text>
-            <TouchableOpacity
-              style={styles.clearBtn}
-              onPress={handleClearCache}
-              disabled={clearing}
-              activeOpacity={0.8}
-            >
-              {clearing ? (
-                <ActivityIndicator size="small" color={theme.colors.rose} />
-              ) : (
-                <Text style={styles.clearBtnText}>Clear Cached Data</Text>
-              )}
-            </TouchableOpacity>
+            <View style={{ gap: 12 }}>
+              <TouchableOpacity
+                style={styles.clearBtn}
+                onPress={handleClearCache}
+                disabled={clearing}
+                activeOpacity={0.8}
+              >
+                {clearing ? (
+                  <ActivityIndicator size="small" color={theme.colors.rose} />
+                ) : (
+                  <Text style={styles.clearBtnText}>Clear Cached Metadata</Text>
+                )}
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.clearBtn, { backgroundColor: 'rgba(255, 255, 255, 0.05)', borderColor: 'rgba(255, 255, 255, 0.12)' }]}
+                onPress={handleClearLinksCache}
+                disabled={clearingLinks}
+                activeOpacity={0.8}
+              >
+                {clearingLinks ? (
+                  <ActivityIndicator size="small" color={theme.colors.textPrimary} />
+                ) : (
+                  <Text style={[styles.clearBtnText, { color: theme.colors.textPrimary }]}>Clear Cached Playback Links</Text>
+                )}
+              </TouchableOpacity>
+            </View>
           </View>
         </Animated.ScrollView>
       </BlurTargetView>

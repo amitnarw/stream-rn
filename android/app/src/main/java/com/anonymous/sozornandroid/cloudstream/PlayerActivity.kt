@@ -12,6 +12,7 @@ import android.media.AudioManager
 import android.media.session.MediaSession
 import android.media.session.PlaybackState
 import android.net.Uri
+import android.util.Log
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -81,6 +82,11 @@ class PlayerActivity : AppCompatActivity() {
     private lateinit var errorRetryBtn: TextView
     private lateinit var errorBackBtn: TextView
 
+    private lateinit var logoContainer: FrameLayout
+    private var clipDrawable: android.graphics.drawable.ClipDrawable? = null
+    private var logoUrl: String = ""
+    private var currentProgressPercentage = 0
+
     private var mediaSession: MediaSession? = null
     private var audioManager: AudioManager? = null
     private var isControlsVisible = true
@@ -135,6 +141,8 @@ class PlayerActivity : AppCompatActivity() {
         val subtitlesJsonStr = intent.getStringExtra("subtitlesJson") ?: ""
         val episodesJsonStr = intent.getStringExtra("episodesJson") ?: ""
         currentEpisodeIndex = intent.getIntExtra("currentEpisodeIndex", -1)
+        logoUrl = intent.getStringExtra("logoUrl") ?: ""
+        val posterUrl = intent.getStringExtra("posterUrl") ?: ""
 
         allSources = try { JSONArray(sourcesJsonStr) } catch (_: Exception) { null }
         allSubtitles = try { JSONArray(subtitlesJsonStr) } catch (_: Exception) { null }
@@ -193,10 +201,43 @@ class PlayerActivity : AppCompatActivity() {
             true
         }
 
+        if (logoUrl.isNotEmpty() || posterUrl.isNotEmpty()) {
+            CoroutineScope(Dispatchers.IO).launch {
+                var bitmap: android.graphics.Bitmap? = null
+                if (logoUrl.isNotEmpty() && !logoUrl.endsWith(".svg")) {
+                    try {
+                        val urlConnection = java.net.URL(logoUrl).openConnection()
+                        urlConnection.connect()
+                        val input = urlConnection.getInputStream()
+                        bitmap = android.graphics.BitmapFactory.decodeStream(input)
+                    } catch (e: Exception) {
+                        Log.e("PlayerActivity", "Failed to load logo image: ${e.message}")
+                    }
+                }
+                if (bitmap == null && posterUrl.isNotEmpty()) {
+                    try {
+                        val urlConnection = java.net.URL(posterUrl).openConnection()
+                        urlConnection.connect()
+                        val input = urlConnection.getInputStream()
+                        bitmap = android.graphics.BitmapFactory.decodeStream(input)
+                    } catch (e: Exception) {
+                        Log.e("PlayerActivity", "Failed to load fallback poster: ${e.message}")
+                    }
+                }
+                bitmap?.let { b ->
+                    withContext(Dispatchers.Main) {
+                        setupLogoOverlay(b)
+                    }
+                }
+            }
+        }
+
         if (providerName != null && mediaRef != null) {
             resolveAndPlay(providerName!!, mediaRef)
         } else if (currentUrl.isNotEmpty()) {
-            loadingGroup.visibility = View.GONE
+            loadingGroup.visibility = View.VISIBLE
+            loadingText.text = "Preparing player..."
+            updateLoadingProgress(10)
             showControlsAfterLoad()
             setupExoPlayer(currentUrl, currentHeadersJson, getCurrentSubtitleUrl())
         }
@@ -588,6 +629,16 @@ class PlayerActivity : AppCompatActivity() {
                             seekBar.secondaryProgress = ((p.bufferedPosition.toFloat() / dur) * 1000).toInt()
                         }
                     }
+
+                    if (loadingGroup.visibility == View.VISIBLE) {
+                        val buffered = p.bufferedPercentage
+                        if (providerName != null && intent.getStringExtra("data") != null) {
+                            updateLoadingProgress(50 + (buffered / 2))
+                        } else {
+                            updateLoadingProgress(buffered)
+                        }
+                    }
+
                     Handler(Looper.getMainLooper()).postDelayed(this, 250)
                 }
             }
@@ -662,18 +713,26 @@ class PlayerActivity : AppCompatActivity() {
 
     private fun createLoadingOverlay(): View {
         val container = FrameLayout(this)
-        container.setBackgroundColor(Color.parseColor("#DD000000"))
+        container.setBackgroundColor(Color.parseColor("#EE050505"))
 
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
         }
         val params = FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.WRAP_CONTENT,
+            FrameLayout.LayoutParams.MATCH_PARENT,
             FrameLayout.LayoutParams.WRAP_CONTENT
         )
         params.gravity = Gravity.CENTER
         container.addView(content, params)
+
+        logoContainer = FrameLayout(this).apply {
+            val lp = LinearLayout.LayoutParams(dp(240), dp(120))
+            lp.gravity = Gravity.CENTER_HORIZONTAL
+            lp.bottomMargin = dp(24)
+            layoutParams = lp
+        }
+        content.addView(logoContainer)
 
         loadingSpinner = ProgressBar(this, null, android.R.attr.progressBarStyleLarge).apply {
             isIndeterminate = true
@@ -698,6 +757,45 @@ class PlayerActivity : AppCompatActivity() {
         content.addView(loadingText, lp)
 
         return container
+    }
+
+    private fun setupLogoOverlay(bitmap: android.graphics.Bitmap) {
+        if (!::logoContainer.isInitialized) return
+        logoContainer.removeAllViews()
+
+        val logoBackground = ImageView(this).apply {
+            setImageBitmap(bitmap)
+            alpha = 0.25f
+            scaleType = ImageView.ScaleType.FIT_CENTER
+        }
+        logoContainer.addView(logoBackground, matchParent())
+
+        val logoForegroundDrawable = android.graphics.drawable.BitmapDrawable(resources, bitmap)
+        clipDrawable = android.graphics.drawable.ClipDrawable(logoForegroundDrawable, Gravity.LEFT, android.graphics.drawable.ClipDrawable.HORIZONTAL).apply {
+            level = currentProgressPercentage * 100
+        }
+        val logoForeground = ImageView(this).apply {
+            setImageDrawable(clipDrawable)
+            scaleType = ImageView.ScaleType.FIT_CENTER
+        }
+        logoContainer.addView(logoForeground, matchParent())
+
+        if (::loadingSpinner.isInitialized) {
+            loadingSpinner.visibility = View.GONE
+        }
+    }
+
+    private fun updateLoadingProgress(pct: Int) {
+        val targetPct = pct.coerceIn(0, 100)
+        if (targetPct <= currentProgressPercentage && targetPct > 0) return
+        currentProgressPercentage = targetPct
+
+        runOnUiThread {
+            if (::loadingText.isInitialized) {
+                loadingText.text = "Loading... $currentProgressPercentage%"
+            }
+            clipDrawable?.level = currentProgressPercentage * 100
+        }
     }
 
     private fun createBufferingOverlay(): View {

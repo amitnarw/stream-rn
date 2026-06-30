@@ -1,19 +1,20 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import {
   View,
   Text,
-  FlatList,
+  Animated,
   TouchableOpacity,
   StyleSheet,
   Dimensions,
-  InteractionManager,
   ActivityIndicator,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
+import { BlurView } from 'expo-blur';
 import type { MediaItem } from '../types/plugin';
 import MediaCard from '../components/MediaCard';
-import { useTransitionActions } from '../context/TransitionContext';
+import { useTransition, useTransitionActions } from '../context/TransitionContext';
+import type { CardLayout } from '../context/TransitionContext';
 import { theme } from '../theme';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -26,28 +27,32 @@ interface Props {
 
 export default function SeeAllScreen({ route, navigation }: Props) {
   const { title, items } = route.params || { title: 'Collection', items: [] };
+  const { phase } = useTransition();
   const { openFromCard } = useTransitionActions();
   const [isReady, setIsReady] = useState(false);
+  const insets = useSafeAreaInsets();
+  const scrollY = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    const task = InteractionManager.runAfterInteractions(() => {
+    const handle = requestIdleCallback(() => {
       setIsReady(true);
     });
-    return () => task.cancel();
+    return () => cancelIdleCallback(handle);
   }, []);
 
-  const handleMediaPress = (item: MediaItem) => {
-    openFromCard(item, {
-      x: SCREEN_WIDTH / 2 - CARD_WIDTH / 2,
-      y: SCREEN_HEIGHT / 2 - (CARD_WIDTH * 1.5) / 2,
-      width: CARD_WIDTH,
-      height: CARD_WIDTH * 1.5,
-      borderRadius: 20, // updated to match new card border radius
-    });
+  const handleMediaPress = (item: MediaItem, layout: CardLayout) => {
+    openFromCard(item, layout);
   };
 
+  const scrollThreshold = 80;
+  const headerBgOpacity = scrollY.interpolate({
+    inputRange: [0, scrollThreshold],
+    outputRange: [0, 1],
+    extrapolate: 'clamp',
+  });
+
   return (
-    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+    <SafeAreaView style={styles.container} edges={['bottom']}>
       {/* Ambient Glow */}
       <LinearGradient
         colors={[theme.colors.accentGlow, 'transparent']}
@@ -55,18 +60,52 @@ export default function SeeAllScreen({ route, navigation }: Props) {
         pointerEvents="none"
       />
 
-      {/* Header Bar */}
-      <View style={styles.headerBar}>
+      {/* Floating Custom Header Bar (Oval/Capsule) */}
+      <Animated.View style={[
+        styles.headerBar,
+        {
+          top: Math.max(insets.top - 4, 8),
+          shadowOpacity: headerBgOpacity,
+          elevation: scrollY.interpolate({
+            inputRange: [0, scrollThreshold],
+            outputRange: [0, 4],
+            extrapolate: 'clamp',
+          }),
+        }
+      ]}>
+        {/* Animated Background blur capsule */}
+        <Animated.View style={[
+          StyleSheet.absoluteFillObject,
+          {
+            opacity: headerBgOpacity,
+            borderRadius: 24,
+            overflow: 'hidden',
+          }
+        ]}>
+          <BlurView 
+            intensity={100} 
+            tint="dark" 
+            style={StyleSheet.absoluteFillObject}
+          />
+          <View style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(15, 15, 20, 0.38)' }]} />
+        </Animated.View>
+
         <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-          <View style={styles.backButtonGlass}>
+          <BlurView 
+            intensity={40} 
+            tint="dark" 
+            style={styles.backButtonBlur}
+          >
             <Text style={styles.backButtonText}>←</Text>
-          </View>
+          </BlurView>
         </TouchableOpacity>
+
         <Text style={styles.headerTitle} numberOfLines={1}>
           {title}
         </Text>
-        <View style={{ width: 36 }} />
-      </View>
+
+        <View style={{ width: 36, height: 36 }} />
+      </Animated.View>
 
       {/* Grid of items */}
       {!isReady ? (
@@ -74,11 +113,22 @@ export default function SeeAllScreen({ route, navigation }: Props) {
           <ActivityIndicator size="large" color={theme.colors.accent} />
         </View>
       ) : (
-        <FlatList
+        <Animated.FlatList
           data={items}
           keyExtractor={(_, i) => String(i)}
-          contentContainerStyle={styles.grid}
+          contentContainerStyle={[
+            styles.grid,
+            {
+              paddingTop: Math.max(insets.top, 16) + 60,
+              paddingBottom: 40,
+            }
+          ]}
           numColumns={3}
+          onScroll={Animated.event(
+            [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+            { useNativeDriver: true }
+          )}
+          scrollEventThrottle={16}
           renderItem={({ item }) => (
             <MediaCard item={item} onPress={handleMediaPress} />
           )}
@@ -107,12 +157,22 @@ const styles = StyleSheet.create({
     zIndex: 0,
   },
   headerBar: {
+    position: 'absolute',
+    left: 20,
+    right: 20,
+    height: 48,
+    borderRadius: 24,
+    overflow: 'hidden',
+    zIndex: 50,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    zIndex: 10,
+    paddingHorizontal: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowRadius: 4,
   },
   backButton: {
     width: 36,
@@ -120,14 +180,11 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     overflow: 'hidden',
   },
-  backButtonGlass: {
+  backButtonBlur: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(255, 255, 255, 0.12)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
-    borderRadius: 18,
   },
   backButtonText: {
     color: '#fff',
@@ -136,11 +193,11 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     color: '#fff',
-    fontSize: 18,
-    fontWeight: '600',
+    fontSize: 16,
+    fontWeight: '700',
     flex: 1,
     textAlign: 'center',
-    marginHorizontal: 16,
+    marginRight: 36, // offset to center title due to back button
   },
   grid: {
     paddingHorizontal: 12,

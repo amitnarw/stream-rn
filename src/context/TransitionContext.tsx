@@ -13,6 +13,8 @@ import {
   useSharedValue,
   withDelay,
   withTiming,
+  withSpring,
+  withSequence,
 } from 'react-native-reanimated';
 import type { SharedValue } from 'react-native-reanimated';
 import type { DetailResult, MediaItem } from '../types/plugin';
@@ -72,8 +74,15 @@ const ENTER = {
 };
 
 const EXIT = {
-  duration: 420,
-  easing: Easing.bezier(0.4, 0, 0.2, 1),
+  // Pure ease-in: starts moving on frame 1, no sluggish ramp-up at the beginning.
+  // 380ms is perceptibly snappy without feeling abrupt.
+  duration: 380,
+  easing: Easing.bezier(0.4, 0, 1, 1),
+};
+
+const EXIT_SHRINK = {
+  duration: 300,
+  easing: Easing.bezier(0.25, 1, 0.5, 1),
 };
 
 export function TransitionProvider({ children }: { children: React.ReactNode }) {
@@ -158,36 +167,45 @@ export function TransitionProvider({ children }: { children: React.ReactNode }) 
     activeItemRef.current = null;
     originRef.current = null;
     phaseRef.current = 'idle';
-    setPhase('idle');
-    setItem(null);
-    setDetail(null);
-    setError(null);
-    setLoading(false);
-    setOrigin(null);
+    // Reset shared values immediately (UI thread already done)
     contentProgress.value = 0;
     surfaceProgress.value = 0;
+    // Batch all React state resets into a single synchronous flush.
+    // React 18 batches these automatically in a single re-render, but we
+    // explicitly group them to make intent clear and avoid 6 separate commits.
+    React.startTransition(() => {
+      setPhase('idle');
+      setItem(null);
+      setDetail(null);
+      setError(null);
+      setLoading(false);
+      setOrigin(null);
+    });
   }, [contentProgress, surfaceProgress]);
 
   const closeToCard = useCallback(() => {
-    // The "timeout thingy": delay the heavy animation by 150ms to allow native 
-    // interactions (touch ripples, OS back gestures) to finish, preventing lag.
-    setTimeout(() => {
-      const currentOrigin = originRef.current;
-      if (!currentOrigin || phaseRef.current === 'idle' || phaseRef.current === 'closing') return;
+    const currentOrigin = originRef.current;
+    if (!currentOrigin || phaseRef.current === 'idle' || phaseRef.current === 'closing') return;
 
-      phaseRef.current = 'closing';
-      setPhase('closing');
-      
-      contentProgress.value = withTiming(0, { duration: 160, easing: Easing.out(Easing.quad) });
-      surfaceProgress.value = withTiming(0, EXIT);
-      x.value = withTiming(currentOrigin.x, EXIT);
-      y.value = withTiming(currentOrigin.y, EXIT);
-      width.value = withTiming(currentOrigin.width, EXIT);
-      height.value = withTiming(currentOrigin.height, EXIT);
-      borderRadius.value = withTiming(currentOrigin.borderRadius ?? 18, EXIT, (finished) => {
-        if (finished) runOnJS(finishClose)();
-      });
-    }, 150);
+    phaseRef.current = 'closing';
+    setPhase('closing');
+
+    // 1. Fade out all details content first over 150ms on UI thread
+    contentProgress.value = withTiming(0, { duration: 150, easing: Easing.out(Easing.quad) });
+
+    // 2. Delay the container scale/shrink animation by 150ms.
+    // This allows the details content in DetailScreen to remain at fixed layout sizes,
+    // preventing the layout engine from recalculating elements (Yoga jank) and
+    // aligning with the home/search card's 150ms delayed spring animation.
+    const SHRINK_DELAY = 150;
+    surfaceProgress.value = withDelay(SHRINK_DELAY, withTiming(0, EXIT_SHRINK));
+    x.value = withDelay(SHRINK_DELAY, withTiming(currentOrigin.x, EXIT_SHRINK));
+    y.value = withDelay(SHRINK_DELAY, withTiming(currentOrigin.y, EXIT_SHRINK));
+    width.value = withDelay(SHRINK_DELAY, withTiming(currentOrigin.width, EXIT_SHRINK));
+    height.value = withDelay(SHRINK_DELAY, withTiming(currentOrigin.height, EXIT_SHRINK));
+    borderRadius.value = withDelay(SHRINK_DELAY, withTiming(currentOrigin.borderRadius ?? 22, EXIT_SHRINK, (finished) => {
+      if (finished) runOnJS(finishClose)();
+    }));
   }, [borderRadius, contentProgress, finishClose, height, surfaceProgress, width, x, y]);
 
   const openFromCard = useCallback(
@@ -199,7 +217,7 @@ export function TransitionProvider({ children }: { children: React.ReactNode }) 
       y.value = layout.y;
       width.value = layout.width;
       height.value = layout.height;
-      borderRadius.value = layout.borderRadius ?? 18;
+      borderRadius.value = layout.borderRadius ?? 22;
       surfaceProgress.value = 0;
       contentProgress.value = 0;
 

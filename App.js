@@ -7,13 +7,12 @@ import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import HomeScreen from './src/screens/HomeScreen';
 import SearchScreen from './src/screens/SearchScreen';
-import DetailScreen from './src/screens/DetailScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
 import FavoritesScreen from './src/screens/FavoritesScreen';
 import SeeAllScreen from './src/screens/SeeAllScreen';
 import { TransitionProvider, useTransition } from './src/context/TransitionContext';
 import { getFavorites } from './src/api/favorites';
-import HeroOverlay from './src/components/HeroOverlay';
+import DetailScreen from './src/screens/DetailScreen';
 import { theme } from './src/theme';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import OnboardingScreen from './src/screens/OnboardingScreen';
@@ -169,7 +168,7 @@ function TabNavigator({ navigation }) {
             <TabIcon name="compass" focused={activeTab === 1} />
           </TouchableOpacity>
           <TouchableOpacity style={tabStyles.tabButton} onPress={() => handleTabPress(2)} activeOpacity={0.7}>
-            <TabIcon name="heart" focused={activeTab === 2} badgeCount={favCount} />
+            <TabIcon name="heart" focused={activeTab === 2} />
           </TouchableOpacity>
           <TouchableOpacity style={tabStyles.tabButton} onPress={() => handleTabPress(3)} activeOpacity={0.7}>
             <TabIcon name="person" focused={activeTab === 3} />
@@ -247,13 +246,12 @@ export default function App() {
             ) : (
               <>
                 <RootStack.Screen name="Main" component={TabNavigator} />
-                <RootStack.Screen name="Detail" component={DetailScreen} />
                 <RootStack.Screen name="SeeAll" component={SeeAllScreen} />
               </>
             )}
           </RootStack.Navigator>
         </NavigationContainer>
-        <HeroOverlay />
+        <DetailScreen />
       </TransitionProvider>
     </SafeAreaProvider>
   );

@@ -115,7 +115,8 @@ class CloudStreamModule(reactContext: ReactApplicationContext) :
         posterUrl: String,
         season: Int,
         episode: Int,
-        episodeTitle: String
+        episodeTitle: String,
+        logoUrl: String
     ) {
         try {
             val context = reactApplicationContext
@@ -135,6 +136,7 @@ class CloudStreamModule(reactContext: ReactApplicationContext) :
                 putExtra("season", season)
                 putExtra("episode", episode)
                 putExtra("episodeTitle", episodeTitle)
+                putExtra("logoUrl", logoUrl)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
             context.startActivity(intent)

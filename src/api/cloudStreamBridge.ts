@@ -30,27 +30,50 @@ interface CacheEntry<T> {
 
 const DEFAULT_MAIN_PAGE_TTL = 12 * 60 * 60 * 1000; // 12 hours
 const DEFAULT_DETAILS_TTL = 24 * 60 * 60 * 1000; // 24 hours
+const LINKS_CACHE_TTL = 30 * 60 * 1000; // 30 minutes in-memory play links cache
+const linksCache = new Map<string, { timestamp: number; result: LinksResult }>();
+let currentLinksTtl = LINKS_CACHE_TTL;
 
-export async function getSettings(): Promise<{ mainPageTtl: number; detailsTtl: number }> {
+export async function getSettings(): Promise<{ mainPageTtl: number; detailsTtl: number; linksTtl: number }> {
   try {
     const mainRaw = await AsyncStorage.getItem('@sozo_setting_main_ttl');
     const detailRaw = await AsyncStorage.getItem('@sozo_setting_detail_ttl');
+    const linksRaw = await AsyncStorage.getItem('@sozo_setting_links_ttl');
+    const linksTtl = linksRaw !== null ? Number(linksRaw) : LINKS_CACHE_TTL;
+    currentLinksTtl = linksTtl;
     return {
       mainPageTtl: mainRaw !== null ? Number(mainRaw) : DEFAULT_MAIN_PAGE_TTL,
       detailsTtl: detailRaw !== null ? Number(detailRaw) : DEFAULT_DETAILS_TTL,
+      linksTtl,
     };
   } catch {
-    return { mainPageTtl: DEFAULT_MAIN_PAGE_TTL, detailsTtl: DEFAULT_DETAILS_TTL };
+    return { mainPageTtl: DEFAULT_MAIN_PAGE_TTL, detailsTtl: DEFAULT_DETAILS_TTL, linksTtl: LINKS_CACHE_TTL };
   }
 }
 
-export async function saveSettings(mainPageTtl: number, detailsTtl: number): Promise<void> {
+export async function saveSettings(mainPageTtl: number, detailsTtl: number, linksTtl: number): Promise<void> {
   try {
     await AsyncStorage.setItem('@sozo_setting_main_ttl', String(mainPageTtl));
     await AsyncStorage.setItem('@sozo_setting_detail_ttl', String(detailsTtl));
+    await AsyncStorage.setItem('@sozo_setting_links_ttl', String(linksTtl));
+    currentLinksTtl = linksTtl;
   } catch (e) {
     console.warn('Failed to save settings:', e);
   }
+}
+
+export function clearLinksCache(): void {
+  linksCache.clear();
+}
+
+export function hasCachedLinks(providerName: string, data: string): boolean {
+  const cacheKey = `${providerName}:${data}`;
+  const cached = linksCache.get(cacheKey);
+  console.log(`[hasCachedLinks] Key: ${cacheKey}, Found: ${!!cached}, Cache size: ${linksCache.size}, TTL: ${currentLinksTtl}`);
+  if (!cached) return false;
+  const valid = Date.now() - cached.timestamp < currentLinksTtl;
+  console.log(`[hasCachedLinks] Cache age: ${Date.now() - cached.timestamp}ms, Valid: ${valid}`);
+  return valid;
 }
 
 export async function clearCache(): Promise<void> {
@@ -60,6 +83,7 @@ export async function clearCache(): Promise<void> {
     if (cacheKeys.length > 0) {
       await AsyncStorage.multiRemove(cacheKeys);
     }
+    clearLinksCache();
     await CloudStreamModule.clearNativeCache();
   } catch (e) {
     console.warn('Failed to clear cache:', e);
@@ -387,7 +411,7 @@ export async function loadDetail(
     contentRating: obj.releaseInfo ?? null,
     logoUrl: obj.logo ?? null,
     imdbId: id,
-    tmdbId: obj.moviedb_id ? String(obj.moviedb_id) : null,
+
     cast: (obj.cast ?? []).map((name: string) => ({
       name,
       image: null,
@@ -399,7 +423,38 @@ export async function loadDetail(
       referer: 'https://youtube.com',
       raw: false,
     })),
+    director: obj.director ?? null,
+    writer: obj.writer ?? null,
+    awards: obj.awards ?? null,
   };
+
+  // Enrich cast from TVmaze (free, no API key) for series
+  // For movies, ActorAvatar already fetches photos from Wikipedia lazily
+  if (isSerial && id) {
+    try {
+      // TVmaze lookup by IMDb ID
+      const tvmazeShowRes = await fetch(`https://api.tvmaze.com/lookup/shows?imdb=${id}`);
+      if (tvmazeShowRes.ok) {
+        const tvmazeShow = await tvmazeShowRes.json();
+        if (tvmazeShow?.id) {
+          const castRes = await fetch(`https://api.tvmaze.com/shows/${tvmazeShow.id}/cast`);
+          if (castRes.ok) {
+            const castData = await castRes.json();
+            const tvmazeCast = (castData as any[]).slice(0, 20);
+            if (tvmazeCast.length > 0) {
+              data.cast = tvmazeCast.map((c: any) => ({
+                name: c.person?.name ?? '',
+                image: c.person?.image?.medium ?? null,
+                role: c.character?.name ?? null,
+              }));
+            }
+          }
+        }
+      }
+    } catch (e) {
+      // TVmaze not reachable — keep Cinemeta's 3 names as fallback
+    }
+  }
 
   await setCache(cacheKey, data);
   return data;
@@ -407,9 +462,31 @@ export async function loadDetail(
 
 export async function loadLinks(
   providerName: string,
-  data: string
+  data: string,
+  onProgress?: (progress: PlaybackProgress[]) => void,
+  onSourceFound?: (source: VideoSource) => void
 ): Promise<LinksResult> {
+  const cacheKey = `${providerName}:${data}`;
+  const now = Date.now();
+  const cached = linksCache.get(cacheKey);
+
+  if (cached && now - cached.timestamp < currentLinksTtl) {
+    console.log(`[Cache Hit - Synced] Returning cached playback links for ${cacheKey}`);
+    if (onSourceFound) {
+      cached.result.sources.forEach(src => onSourceFound(src));
+    }
+    return cached.result;
+  }
+
   await ensureOnline();
+  const settings = await getSettings();
+  if (cached && now - cached.timestamp < settings.linksTtl) {
+    console.log(`[Cache Hit] Returning cached playback links for ${cacheKey}`);
+    if (onSourceFound) {
+      cached.result.sources.forEach(src => onSourceFound(src));
+    }
+    return cached.result;
+  }
 
   if (providerName === 'Cinemeta') {
     const parts = data.split(':');
@@ -438,15 +515,23 @@ export async function loadLinks(
     const title = meta.name;
     const isSerial = type === 'series';
 
-    return await resolvePlaybackSources(
+    const result = await resolvePlaybackSources(
       title,
       isSerial,
       season,
       episode,
       (progress) => {
         console.log(`Resolving ${title} S${season}E${episode} progress:`, progress);
-      }
+        if (onProgress) onProgress(progress);
+      },
+      onSourceFound
     );
+
+    if (result.sources && result.sources.length > 0) {
+      console.log(`[linksCache.set] Cinemeta Key: ${cacheKey}, sources count: ${result.sources.length}`);
+      linksCache.set(cacheKey, { timestamp: now, result });
+    }
+    return result;
   }
 
   const json = await CloudStreamModule.loadLinks(providerName, data);
@@ -454,18 +539,32 @@ export async function loadLinks(
   if (!obj.sources || obj.sources.length === 0) {
     throw new Error('No playable sources found for this item');
   }
-  return {
+
+  const result: LinksResult = {
     sources: (obj.sources ?? []).map((s: any) => ({
       quality: s.quality ?? '',
       url: s.url ?? '',
       type: s.type ?? '',
       headers: s.headers ?? {},
+      provider: providerName,
+      host: s.host ?? '',
     })),
     subtitles: (obj.subtitles ?? []).map((sub: any) => ({
       lang: sub.lang ?? '',
       url: sub.url ?? '',
     })),
   };
+
+  if (onSourceFound) {
+    result.sources.forEach(src => onSourceFound(src));
+  }
+
+  if (result.sources && result.sources.length > 0) {
+    console.log(`[linksCache.set] Direct Key: ${cacheKey}, sources count: ${result.sources.length}`);
+    linksCache.set(cacheKey, { timestamp: now, result });
+  }
+
+  return result;
 }
 
 export interface PlaybackProgress {
@@ -479,7 +578,8 @@ export async function resolvePlaybackSources(
   isSerial: boolean,
   season: number,
   episode: number,
-  onProgress: (progress: PlaybackProgress[]) => void
+  onProgress: (progress: PlaybackProgress[]) => void,
+  onSourceFound?: (source: VideoSource) => void
 ): Promise<LinksResult> {
   const providers = await getProviders();
   const progressList: PlaybackProgress[] = providers.map(p => ({
@@ -544,6 +644,7 @@ export async function resolvePlaybackSources(
         type: s.type ?? '',
         headers: s.headers ?? {},
         provider: provider.name,
+        host: s.host ?? '',
       }));
 
       const subtitles = (linksObj.subtitles ?? []).map((sub: any) => ({
@@ -555,6 +656,9 @@ export async function resolvePlaybackSources(
         progressList[idx].status = 'found';
         progressList[idx].linksCount = sources.length;
         onProgress([...progressList]);
+        if (onSourceFound) {
+          sources.forEach((s: any) => onSourceFound(s));
+        }
         return { sources, subtitles };
       } else {
         progressList[idx].status = 'none';
@@ -569,7 +673,7 @@ export async function resolvePlaybackSources(
     }
   };
 
-  const TIMEOUT = 10000;
+  const TIMEOUT = 20000; // Increased to 20 seconds to allow slower providers/scrapers to finish resolving
   const promises = providers.map((p, i) => {
     return Promise.race([
       searchAndResolve(p, i),
@@ -626,6 +730,7 @@ export function playStream(
   season?: number,
   episode?: number,
   episodeTitle?: string,
+  logoUrl?: string,
 ) {
   CloudStreamModule.playStream(
     url,
@@ -642,6 +747,7 @@ export function playStream(
     season ?? 1,
     episode ?? 1,
     episodeTitle ?? '',
+    logoUrl ?? '',
   );
 }
 

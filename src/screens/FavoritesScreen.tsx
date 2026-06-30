@@ -17,7 +17,7 @@ import type { MediaItem } from '../types/plugin';
 import { getFavorites } from '../api/favorites';
 import MediaCard from '../components/MediaCard';
 import { theme } from '../theme';
-import { useTransitionActions } from '../context/TransitionContext';
+import { useTransition, useTransitionActions, CardLayout } from '../context/TransitionContext';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -27,7 +27,8 @@ interface Props {
 
 export default function FavoritesScreen({ navigation }: Props) {
   const insets = useSafeAreaInsets();
-  const { setGlobalBlurTarget } = useTransitionActions();
+  const { phase } = useTransition();
+  const { setGlobalBlurTarget, openFromCard } = useTransitionActions();
   const [favorites, setFavorites] = useState<MediaItem[]>([]);
   const [blurTarget, setBlurTarget] = useState<any>(null);
   const blurTargetRef = useRef<any>(null);
@@ -53,11 +54,8 @@ export default function FavoritesScreen({ navigation }: Props) {
     }, [setGlobalBlurTarget])
   );
 
-  function onMediaPress(item: MediaItem) {
-    navigation.navigate('Detail', {
-      providerName: item.provider || 'Cinemeta',
-      url: item.url,
-    });
+  function onMediaPress(item: MediaItem, layout: CardLayout) {
+    openFromCard(item, layout);
   }
 
   const scrollThreshold = 40;

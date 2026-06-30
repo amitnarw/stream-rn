@@ -16,7 +16,7 @@ import type { MediaItem } from '../types/plugin';
 import * as bridge from '../api/cloudStreamBridge';
 import MediaCard from '../components/MediaCard';
 import { theme } from '../theme';
-import { useTransitionActions } from '../context/TransitionContext';
+import { useTransition, useTransitionActions, CardLayout } from '../context/TransitionContext';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -26,7 +26,8 @@ interface Props {
 }
 
 export default function SearchScreen({ route, navigation }: Props) {
-  const { setGlobalBlurTarget } = useTransitionActions();
+  const { phase } = useTransition();
+  const { setGlobalBlurTarget, openFromCard } = useTransitionActions();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<MediaItem[]>([]);
   const [loading, setLoading] = useState(false);
@@ -59,11 +60,8 @@ export default function SearchScreen({ route, navigation }: Props) {
     }
   }
 
-  function onMediaPress(item: MediaItem) {
-    navigation.navigate('Detail', {
-      providerName: item.provider || 'Cinemeta',
-      url: item.url,
-    });
+  function onMediaPress(item: MediaItem, layout: CardLayout) {
+    openFromCard(item, layout);
   }
 
   return (

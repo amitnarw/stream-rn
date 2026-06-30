@@ -26,10 +26,10 @@ import { BlurView, BlurTargetView } from "expo-blur";
 import { LinearGradient } from "expo-linear-gradient";
 import type { HomeSection, MediaItem } from "../types/plugin";
 import * as bridge from "../api/cloudStreamBridge";
-import { useTransitionActions } from "../context/TransitionContext";
+import { useTransition, useTransitionActions } from "../context/TransitionContext";
 import type { CardLayout } from "../context/TransitionContext";
 import { HeroCard } from "../components/HeroCard";
-import { SmallCard } from "../components/SmallCard";
+import MediaCard from "../components/MediaCard";
 import { ContinueCard } from "../components/ContinueCard";
 
 import { theme } from "../theme";
@@ -272,17 +272,17 @@ function HomeSkeletonScreen() {
               <SkeletonBox
                 width={S_CARD_W}
                 height={S_CARD_H}
-                borderRadius={18}
+                borderRadius={22}
               />
               <SkeletonBox
                 width={S_CARD_W}
                 height={S_CARD_H}
-                borderRadius={18}
+                borderRadius={22}
               />
               <SkeletonBox
                 width={S_CARD_W}
                 height={S_CARD_H}
-                borderRadius={18}
+                borderRadius={22}
               />
             </View>
           </View>
@@ -292,17 +292,17 @@ function HomeSkeletonScreen() {
               <SkeletonBox
                 width={S_CARD_W}
                 height={S_CARD_H}
-                borderRadius={18}
+                borderRadius={22}
               />
               <SkeletonBox
                 width={S_CARD_W}
                 height={S_CARD_H}
-                borderRadius={18}
+                borderRadius={22}
               />
               <SkeletonBox
                 width={S_CARD_W}
                 height={S_CARD_H}
-                borderRadius={18}
+                borderRadius={22}
               />
             </View>
           </View>
@@ -324,6 +324,7 @@ const SectionRow = React.memo(function SectionRow({
   navigation,
   goDetail,
 }: SectionRowProps) {
+  const { phase } = useTransition();
   const isCW = section.name === "Continue Watching";
 
   const renderItem = useCallback(
@@ -331,7 +332,12 @@ const SectionRow = React.memo(function SectionRow({
       isCW ? (
         <ContinueCard item={item} onPress={goDetail} />
       ) : (
-        <SmallCard item={item as MediaItem} onPress={goDetail} />
+        <MediaCard
+          item={item as MediaItem}
+          onPress={goDetail}
+          width={S_CARD_W}
+          style={{ marginRight: 8, marginHorizontal: 0, marginBottom: 0 }}
+        />
       ),
     [isCW, goDetail],
   );
@@ -368,6 +374,7 @@ const SectionRow = React.memo(function SectionRow({
 // ── Main Screen ──────────────────────────────────────────────────────────────
 export default function HomeScreen({ navigation }: { navigation: any }) {
   const insets = useSafeAreaInsets();
+  const { phase } = useTransition();
   const { openFromCard, setFallbackRecommendations, setGlobalBlurTarget } =
     useTransitionActions();
 
@@ -392,6 +399,10 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
   const flatListRef = useRef<any>(null);
   const scrollX = useRef(new Animated.Value(0)).current;
   const scrollY = useRef(new Animated.Value(0)).current;
+  // Track whether we have live section data so the focus listener can skip
+  // re-fetching when the user returns from a nested screen (SeeAll, etc.).
+  // Using a ref avoids stale closures and keeps the effect deps stable.
+  const sectionsLoadedRef = useRef(false);
 
   const [blurTarget, setBlurTarget] = useState<any>(null);
   const blurTargetRef = useRef<any>(null);
@@ -464,15 +475,16 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
         setHeroIdx(indexInOrig);
       }
 
-      // Seamless boundary jump check (only when scroll has settled)
+      // Seamless boundary jump: reposition the list to the middle replica so
+      // the user can continue swiping in either direction. We do NOT call
+      // scrollX.setValue() here — the Animated.event on onScroll keeps scrollX
+      // in sync automatically. A manual setValue() would create a 1-frame
+      // mismatch between the JS Animated.Value and the native scroll offset,
+      // causing the first/last cards to flash their wrong scale/opacity.
       if (indexInLoop < N) {
-        const newIndex = indexInLoop + N;
-        scrollX.setValue(newIndex * HERO_SNAP);
-        flatListRef.current?.scrollToOffset({ offset: newIndex * HERO_SNAP, animated: false });
+        flatListRef.current?.scrollToOffset({ offset: (indexInLoop + N) * HERO_SNAP, animated: false });
       } else if (indexInLoop >= 2 * N) {
-        const newIndex = indexInLoop - N;
-        scrollX.setValue(newIndex * HERO_SNAP);
-        flatListRef.current?.scrollToOffset({ offset: newIndex * HERO_SNAP, animated: false });
+        flatListRef.current?.scrollToOffset({ offset: (indexInLoop - N) * HERO_SNAP, animated: false });
       }
     },
     [heroItems.length],
@@ -495,26 +507,28 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
         setHeroIdx(indexInOrig);
       }
 
-      // Only perform programmatic jump if there is no momentum remaining (velocity is 0)
+      // Only jump when no momentum remains (velocity is 0). Same rule:
+      // no scrollX.setValue() — let onScroll's Animated.event handle it.
       if (velocityX === 0) {
         if (indexInLoop < N) {
-          const newIndex = indexInLoop + N;
-          scrollX.setValue(newIndex * HERO_SNAP);
-          flatListRef.current?.scrollToOffset({ offset: newIndex * HERO_SNAP, animated: false });
+          flatListRef.current?.scrollToOffset({ offset: (indexInLoop + N) * HERO_SNAP, animated: false });
         } else if (indexInLoop >= 2 * N) {
-          const newIndex = indexInLoop - N;
-          scrollX.setValue(newIndex * HERO_SNAP);
-          flatListRef.current?.scrollToOffset({ offset: newIndex * HERO_SNAP, animated: false });
+          flatListRef.current?.scrollToOffset({ offset: (indexInLoop - N) * HERO_SNAP, animated: false });
         }
       }
     },
     [heroItems.length],
   );
 
-  // Reset active hero index and scroll position when sections/tabs change
+  // Reset active hero index when sections/tabs change.
+  // We do NOT call scrollX.setValue(0) here — that would synchronously snap
+  // the animation source to 0, invalidating every card scale/opacity
+  // interpolation and the active dot position for 1+ frames before
+  // handleContentSizeChange can re-center the FlatList.
+  // setInitialScrolled(false) is sufficient: handleContentSizeChange fires
+  // after the data change and scrolls to the correct center position.
   useEffect(() => {
     setHeroIdx(0);
-    scrollX.setValue(0);
     setInitialScrolled(false);
   }, [sections, activeTab]);
 
@@ -576,9 +590,17 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
 
   useEffect(() => {
     init();
-    const unsub = navigation.addListener("focus", () => {
-      loadSections(false, CATEGORY_TABS[activeTab]);
+    const unsub = navigation.addListener('focus', () => {
+      // Restore blur target whenever the screen regains focus
       setGlobalBlurTarget(blurTargetRef.current);
+      // Only re-fetch sections when we have no data (e.g. after an error).
+      // Re-fetching every time the user comes back from a nested screen
+      // (SeeAll, detail, etc.) sets sectionsLoading=true → shows a skeleton
+      // flash over the already-rendered carousel. If we already have data,
+      // the content is still fresh enough — skip the re-fetch.
+      if (!sectionsLoadedRef.current) {
+        loadSections(false, CATEGORY_TABS[activeTab]);
+      }
     });
     return unsub;
   }, [navigation, activeTab]);
@@ -643,6 +665,7 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
         }
       } catch (_) {}
       setSections(secs);
+      sectionsLoadedRef.current = true;
 
       // Collect some recommended items from general sections as a fallback
       const fallbacks: MediaItem[] = [];
@@ -671,31 +694,16 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
 
   const handleTabPress = (index: number) => {
     setActiveTab(index);
+    // Mark sections as stale so the next focus/init will re-fetch for this tab
+    sectionsLoadedRef.current = false;
     loadSections(false, CATEGORY_TABS[index]);
   };
 
   const goDetail = useCallback(
     (item: MediaItem, layout: CardLayout, index?: number) => {
-      if (index !== undefined) {
-        const N = heroItems.length;
-        const isActive = N > 0 && (index % N) === heroIdxRef.current;
-        const S = isActive ? 1.0 : 0.85; // Unpressed scale factor (matches resting size)
-        const sWidth = layout.width * S;
-        const sHeight = layout.height * S;
-        const sX = layout.x + (layout.width - sWidth) / 2;
-        const sY = layout.y + (layout.height - sHeight) / 2;
-        openFromCard(item, {
-          x: sX,
-          y: sY,
-          width: sWidth,
-          height: sHeight,
-          borderRadius: 28,
-        });
-      } else {
-        openFromCard(item, layout);
-      }
+      openFromCard(item, layout);
     },
-    [openFromCard, heroItems.length],
+    [openFromCard],
   );
 
   const renderedSections = useMemo(() => {
@@ -717,9 +725,9 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
         <View style={{ paddingHorizontal: 20, marginTop: 24, gap: 10 }}>
           <SkeletonBox width={80} height={16} />
           <View style={{ flexDirection: "row", gap: 8 }}>
-            <SkeletonBox width={S_CARD_W} height={S_CARD_H} borderRadius={18} />
-            <SkeletonBox width={S_CARD_W} height={S_CARD_H} borderRadius={18} />
-            <SkeletonBox width={S_CARD_W} height={S_CARD_H} borderRadius={18} />
+            <SkeletonBox width={S_CARD_W} height={S_CARD_H} borderRadius={22} />
+            <SkeletonBox width={S_CARD_W} height={S_CARD_H} borderRadius={22} />
+            <SkeletonBox width={S_CARD_W} height={S_CARD_H} borderRadius={22} />
           </View>
         </View>
       );
@@ -899,7 +907,10 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
                 ) : (
                   <Animated.FlatList
                     ref={flatListRef}
-                    key={`hero-list-${activeTab}`}
+                    // No forced key here. The old key={`hero-list-${activeTab}`}
+                    // forced a full FlatList remount on every tab press, tearing
+                    // down all items and guaranteed a flash. Data-driven updates
+                    // (loopItems changes) + initialScrolled reset are sufficient.
                     data={loopItems}
                     keyExtractor={(_: any, i: number) => String(i)}
                     horizontal
