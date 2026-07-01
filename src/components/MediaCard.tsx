@@ -115,7 +115,7 @@ export default function MediaCard({ item, onPress, width: propWidth, style }: Pr
         <Animated.View style={{ transform: [{ scale }] }}>
           {item.posterUrl ? (
             <Image
-              source={{ uri: item.posterUrl }}
+              source={{ uri: item.posterUrl, cache: 'force-cache' }}
               style={[styles.poster, { width: cardWidth, height: cardHeight }]}
               resizeMode="cover"
             />

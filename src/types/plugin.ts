@@ -1,6 +1,7 @@
 export interface PluginProvider {
   id: string;
   name: string;
+  hasSearch?: boolean;
 }
 
 export interface MediaItem {

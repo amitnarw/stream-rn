@@ -1,4 +1,4 @@
-package com.anonymous.sozornandroid.cloudstream
+package com.anonymous.zunornandroid.cloudstream
 
 import android.animation.Animator
 import android.animation.AnimatorListenerAdapter
@@ -314,8 +314,13 @@ class PlayerActivity : AppCompatActivity() {
         loadingText.text = "Preparing video..."
         CoroutineScope(Dispatchers.IO).launch {
             val host = CloudStreamPluginHost.instance
-                ?: CloudStreamPluginHost(applicationContext)
-            host.loadPluginsFromAssets()
+            if (host == null) {
+                withContext(Dispatchers.Main) {
+                    loadingGroup.visibility = View.GONE
+                    showError("Plugin host not initialized")
+                }
+                return@launch
+            }
             val resultJson = host.loadLinksBlocking(providerName, mediaRef)
             withContext(Dispatchers.Main) {
                 try {
@@ -474,6 +479,7 @@ class PlayerActivity : AppCompatActivity() {
         val headers = try { JSONObject(headersJson) } catch (_: Exception) { JSONObject() }
 
         val dataSourceFactory = DefaultHttpDataSource.Factory()
+            .setUserAgent("Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36")
             .setAllowCrossProtocolRedirects(true)
             .setConnectTimeoutMs(30000)
             .setReadTimeoutMs(30000)

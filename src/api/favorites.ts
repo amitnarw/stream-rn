@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { MediaItem } from '../types/plugin';
 
-const FAVORITES_KEY = '@sozo_favorites_list';
+const FAVORITES_KEY = '@zuno_favorites_list';
 
 export async function getFavorites(): Promise<MediaItem[]> {
   try {

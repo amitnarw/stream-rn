@@ -1,5 +1,6 @@
-import { NativeModules } from 'react-native';
+import { NativeModules, DeviceEventEmitter } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { PROVIDER_TIMEOUT_MS } from '../config';
 import type {
   PluginProvider,
   MediaItem,
@@ -11,6 +12,32 @@ import type {
 } from '../types/plugin';
 
 const { CloudStreamModule } = NativeModules;
+
+// Global active callbacks for streaming links
+let activeSourceCallback: ((source: VideoSource) => void) | null = null;
+let activeSubtitleCallback: ((sub: { lang: string; url: string }) => void) | null = null;
+
+DeviceEventEmitter.addListener('onPlaybackSourceFound', (event) => {
+  try {
+    if (event.sourceJson && activeSourceCallback) {
+      const source = JSON.parse(event.sourceJson);
+      activeSourceCallback(source);
+    }
+  } catch (e) {
+    console.warn('[ZunoPlugin][JS] Failed to parse streamed source:', e);
+  }
+});
+
+DeviceEventEmitter.addListener('onPlaybackSubtitleFound', (event) => {
+  try {
+    if (event.subtitleJson && activeSubtitleCallback) {
+      const sub = JSON.parse(event.subtitleJson);
+      activeSubtitleCallback(sub);
+    }
+  } catch (e) {
+    console.warn('[ZunoPlugin][JS] Failed to parse streamed subtitle:', e);
+  }
+});
 
 export class OfflineError extends Error {
   constructor() {
@@ -36,9 +63,9 @@ let currentLinksTtl = LINKS_CACHE_TTL;
 
 export async function getSettings(): Promise<{ mainPageTtl: number; detailsTtl: number; linksTtl: number }> {
   try {
-    const mainRaw = await AsyncStorage.getItem('@sozo_setting_main_ttl');
-    const detailRaw = await AsyncStorage.getItem('@sozo_setting_detail_ttl');
-    const linksRaw = await AsyncStorage.getItem('@sozo_setting_links_ttl');
+    const mainRaw = await AsyncStorage.getItem('@zuno_setting_main_ttl');
+    const detailRaw = await AsyncStorage.getItem('@zuno_setting_detail_ttl');
+    const linksRaw = await AsyncStorage.getItem('@zuno_setting_links_ttl');
     const linksTtl = linksRaw !== null ? Number(linksRaw) : LINKS_CACHE_TTL;
     currentLinksTtl = linksTtl;
     return {
@@ -53,9 +80,9 @@ export async function getSettings(): Promise<{ mainPageTtl: number; detailsTtl: 
 
 export async function saveSettings(mainPageTtl: number, detailsTtl: number, linksTtl: number): Promise<void> {
   try {
-    await AsyncStorage.setItem('@sozo_setting_main_ttl', String(mainPageTtl));
-    await AsyncStorage.setItem('@sozo_setting_detail_ttl', String(detailsTtl));
-    await AsyncStorage.setItem('@sozo_setting_links_ttl', String(linksTtl));
+    await AsyncStorage.setItem('@zuno_setting_main_ttl', String(mainPageTtl));
+    await AsyncStorage.setItem('@zuno_setting_detail_ttl', String(detailsTtl));
+    await AsyncStorage.setItem('@zuno_setting_links_ttl', String(linksTtl));
     currentLinksTtl = linksTtl;
   } catch (e) {
     console.warn('Failed to save settings:', e);
@@ -79,7 +106,7 @@ export function hasCachedLinks(providerName: string, data: string): boolean {
 export async function clearCache(): Promise<void> {
   try {
     const keys = await AsyncStorage.getAllKeys();
-    const cacheKeys = keys.filter(k => k.startsWith('@sozo_cache_'));
+    const cacheKeys = keys.filter(k => k.startsWith('@zuno_cache_'));
     if (cacheKeys.length > 0) {
       await AsyncStorage.multiRemove(cacheKeys);
     }
@@ -177,7 +204,7 @@ export async function getProviders(): Promise<PluginProvider[]> {
   await ensureOnline();
   const json = await CloudStreamModule.getProviders();
   const providers = parseJson<PluginProvider[]>(json);
-  const excludeNames = ['Internet Archive', 'Invidious'];
+  const excludeNames = ['Internet Archive', 'Invidious', 'ShowBox'];
   const filtered = providers.filter(
     (p) => !excludeNames.some((ex) => p.name.toLowerCase().includes(ex.toLowerCase()))
   );
@@ -186,7 +213,8 @@ export async function getProviders(): Promise<PluginProvider[]> {
     if (uniqueNames.has(p.name)) return false;
     uniqueNames.add(p.name);
     return true;
-  });
+  })
+  .map(p => ({ ...p, hasSearch: p.hasSearch !== false }));
 }
 
 export async function getMainPage(
@@ -195,7 +223,7 @@ export async function getMainPage(
   forceRefresh: boolean = false,
   category: string = 'Trending'
 ): Promise<HomeSection[]> {
-  const cacheKey = `@sozo_cache_main_cinemeta_cat_${category}_page_${page}`;
+  const cacheKey = `@zuno_cache_main_cinemeta_cat_${category}_page_${page}`;
 
   if (!forceRefresh) {
     const settings = await getSettings();
@@ -342,7 +370,7 @@ export async function loadDetail(
   const type = parts.length > 1 ? parts[0] : 'movie';
   const id = parts.length > 1 ? parts[1] : url;
 
-  const cacheKey = `@sozo_cache_detail_cinemeta_${type}_${id}`;
+  const cacheKey = `@zuno_cache_detail_cinemeta_${type}_${id}`;
 
   if (!forceRefresh) {
     const settings = await getSettings();
@@ -464,7 +492,8 @@ export async function loadLinks(
   providerName: string,
   data: string,
   onProgress?: (progress: PlaybackProgress[]) => void,
-  onSourceFound?: (source: VideoSource) => void
+  onSourceFound?: (source: VideoSource) => void,
+  onAllDone?: () => void
 ): Promise<LinksResult> {
   const cacheKey = `${providerName}:${data}`;
   const now = Date.now();
@@ -475,6 +504,7 @@ export async function loadLinks(
     if (onSourceFound) {
       cached.result.sources.forEach(src => onSourceFound(src));
     }
+    onAllDone?.(); // Signal that we're done so loading indicator clears
     return cached.result;
   }
 
@@ -485,6 +515,7 @@ export async function loadLinks(
     if (onSourceFound) {
       cached.result.sources.forEach(src => onSourceFound(src));
     }
+    onAllDone?.(); // Signal that we're done so loading indicator clears
     return cached.result;
   }
 
@@ -524,13 +555,19 @@ export async function loadLinks(
         console.log(`Resolving ${title} S${season}E${episode} progress:`, progress);
         if (onProgress) onProgress(progress);
       },
-      onSourceFound
+      onSourceFound,
+      () => {
+        // onAllDone: cache the complete source list (not just the snapshot from promise resolution)
+        if (onAllDone) onAllDone();
+      },
+      (completeResult) => {
+        if (completeResult.sources && completeResult.sources.length > 0) {
+          console.log(`[linksCache.set] Cinemeta Key: ${cacheKey}, sources count: ${completeResult.sources.length}`);
+          linksCache.set(cacheKey, { timestamp: now, result: completeResult });
+        }
+      }
     );
 
-    if (result.sources && result.sources.length > 0) {
-      console.log(`[linksCache.set] Cinemeta Key: ${cacheKey}, sources count: ${result.sources.length}`);
-      linksCache.set(cacheKey, { timestamp: now, result });
-    }
     return result;
   }
 
@@ -564,6 +601,7 @@ export async function loadLinks(
     linksCache.set(cacheKey, { timestamp: now, result });
   }
 
+  onAllDone?.(); // Signal that we're done so loading indicator clears
   return result;
 }
 
@@ -571,6 +609,7 @@ export interface PlaybackProgress {
   providerName: string;
   status: 'searching' | 'found' | 'none' | 'error';
   linksCount: number;
+  errorReason?: string;
 }
 
 export async function resolvePlaybackSources(
@@ -579,44 +618,166 @@ export async function resolvePlaybackSources(
   season: number,
   episode: number,
   onProgress: (progress: PlaybackProgress[]) => void,
-  onSourceFound?: (source: VideoSource) => void
+  onSourceFound?: (source: VideoSource) => void,
+  onAllDone?: () => void,
+  onCacheUpdate?: (result: LinksResult) => void
 ): Promise<LinksResult> {
-  const providers = await getProviders();
-  const progressList: PlaybackProgress[] = providers.map(p => ({
+  const allProviders = await getProviders();
+  const providers = allProviders.filter(p => p.hasSearch !== false && p.name !== 'ShowBox');
+  const progressList: PlaybackProgress[] = allProviders.map(p => ({
     providerName: p.name,
-    status: 'searching',
+    status: p.hasSearch === false || p.name === 'ShowBox' ? 'none' : 'searching',
     linksCount: 0,
   }));
 
   onProgress([...progressList]);
 
-  const cleanTitle = (t: string) => t.toLowerCase().replace(/[^a-z0-9]/g, '').trim();
+  /**
+   * Strips noise added by Indian streaming sites before comparing titles.
+   * Input:  "Dune Part Two (2024) {Hindi} 1080p BluRay"
+   * Output: "dune part two"
+   */
+  const cleanForMatch = (t: string): string => {
+    return t
+      .toLowerCase()
+      // Remove year in any bracket: (2024), [2024], {2024}
+      .replace(/[\(\[\{]\s*\d{4}\s*[\)\]\}]/g, ' ')
+      // Remove quality/format tags (standalone words)
+      .replace(/\b(1080p|720p|480p|360p|4k|uhd|hdrip|bluray|blu-ray|webrip|web-dl|dvdrip|dvdscr|hdcam|cam|ts|bdrip|hdtv|pdvd|hd|sd)\b/gi, ' ')
+      // Remove audio/language tags in any bracket type: {Hindi}, [Dual Audio], (Tamil)
+      .replace(/[\(\[\{][^\)\]\}]*(hindi|english|tamil|telugu|malayalam|kannada|punjabi|bengali|dual|dubbed|multi|org)[^\)\]\}]*[\)\]\}]/gi, ' ')
+      // Remove standalone language words not in brackets
+      .replace(/\b(hindi|english|tamil|telugu|malayalam|kannada|punjabi|bengali|dual|dubbed|multi)\b/gi, ' ')
+      // Remove season/episode markers: S01E01, Season 1, Ep 2
+      .replace(/\b(s\d{1,2}e\d{1,2}|season\s*\d+|episode\s*\d+|ep\s*\d+)\b/gi, ' ')
+      // Remove non-alphanumeric except spaces
+      .replace(/[^a-z0-9 ]/g, ' ')
+      // Collapse whitespace
+      .replace(/\s+/g, ' ')
+      .trim();
+  };
 
-  const searchAndResolve = async (provider: PluginProvider, idx: number): Promise<LinksResult | null> => {
+  /**
+   * Word-overlap score between two cleaned titles (Jaccard-like).
+   * Returns 0.0–1.0 where 1.0 = perfect match.
+   * Also returns 1.0 if either title's words are a complete subset of the other
+   * (handles cases like site title "Dhurandhar" matching query "Dhurandhar The Revenge").
+   */
+  const titleSimilarity = (a: string, b: string): number => {
+    const wordsA = new Set(a.split(' ').filter(w => w.length > 1));
+    const wordsB = new Set(b.split(' ').filter(w => w.length > 1));
+    if (wordsA.size === 0 || wordsB.size === 0) return 0;
+    let overlap = 0;
+    wordsA.forEach(w => { if (wordsB.has(w)) overlap++; });
+    // Subset match: if all words of the shorter title appear in the longer, treat as strong match
+    const smaller = wordsA.size <= wordsB.size ? wordsA : wordsB;
+    const larger  = wordsA.size <= wordsB.size ? wordsB : wordsA;
+    if (overlap === smaller.size && smaller.size >= 1) {
+      // Full subset — score based on how much of the larger title is covered
+      return 0.6 + (0.4 * smaller.size / larger.size);
+    }
+    const union = new Set([...wordsA, ...wordsB]).size;
+    return overlap / union;
+  };
+
+  const SIMILARITY_THRESHOLD = 0.55; // at least 55% word overlap required
+
+  const finalSources: VideoSource[] = [];
+  const finalSubtitles: { lang: string; url: string }[] = [];
+
+  let resolvePromise: ((result: LinksResult) => void) | null = null;
+  let promiseResolved = false;
+
+  // Register active callbacks so DeviceEventEmitter can stream new results directly to the UI
+  activeSourceCallback = (s) => {
+    // No cross-provider dedup — each provider keeps all its sources.
+    // Within the same provider, dedup by URL to avoid streaming the same link twice.
+    if (!finalSources.some(fs => fs.url === s.url && fs.provider === s.provider)) {
+      finalSources.push(s);
+      if (onSourceFound) onSourceFound(s);
+      // Resolve promise immediately on first source so UI shows it right away
+      if (!promiseResolved && resolvePromise) {
+        promiseResolved = true;
+        const uniqueSubs = Array.from(new Map(finalSubtitles.map(sub => [sub.url, sub])).values());
+        console.log(`[ZunoPlugin][RESOLVED_SOURCES] First source arrived. Sources: ${finalSources.length}`);
+        resolvePromise({ sources: [...finalSources], subtitles: uniqueSubs });
+      }
+    }
+  };
+
+  activeSubtitleCallback = (sub) => {
+    if (!finalSubtitles.some(fs => fs.url === sub.url)) {
+      finalSubtitles.push(sub);
+    }
+  };
+
+    const searchAndResolve = async (provider: PluginProvider, idx: number, onEnterLoadLinks?: () => void): Promise<LinksResult | null> => {
     try {
+      console.log(`[ZunoPlugin][SEARCH] ${provider.name} searching for '${title}'`);
       const items = await CloudStreamModule.search(provider.name, title);
-      const searchResults = parseJson<{ items: any[] }>(items).items ?? [];
-      
-      const targetClean = cleanTitle(title);
-      const match = searchResults.find(item => {
-        const itemClean = cleanTitle(item.title ?? '');
-        return itemClean === targetClean || itemClean.includes(targetClean) || targetClean.includes(itemClean);
-      });
+      const parsed = parseJson<{ items: any[]; error?: string }>(items);
+      const searchResults = parsed.items ?? [];
+      const searchError = parsed.error;
 
-      if (!match) {
+      if (searchError) {
+        console.log(`[ZunoPlugin][SEARCH] ${provider.name}: error - ${searchError}`);
+        progressList[idx].status = 'error';
+        progressList[idx].errorReason = searchError;
+        onProgress([...progressList]);
+        return null;
+      }
+
+      console.log(`[ZunoPlugin][SEARCH] ${provider.name}: ${searchResults.length} results -`, searchResults.slice(0,5).map((r: any) => r.title));
+
+      if (searchResults.length === 0) {
+        console.log(`[ZunoPlugin][SEARCH] ${provider.name}: no results returned`);
         progressList[idx].status = 'none';
         onProgress([...progressList]);
         return null;
       }
 
-      const detailJson = await CloudStreamModule.loadDetail(provider.name, match.url);
+      const targetClean = cleanForMatch(title);
+      // Score each result and pick best
+      let bestMatch: any = null;
+      let bestScore = 0;
+      for (const item of searchResults) {
+        const itemClean = cleanForMatch(item.title ?? '');
+        const score = titleSimilarity(targetClean, itemClean);
+        console.log(`[ZunoPlugin][MATCH] ${provider.name}: '${item.title}' -> cleaned='${itemClean}' score=${score.toFixed(2)}`);
+        if (score > bestScore) {
+          bestScore = score;
+          bestMatch = item;
+        }
+      }
+
+      if (!bestMatch || bestScore < SIMILARITY_THRESHOLD) {
+        console.log(`[ZunoPlugin][MATCH] ${provider.name}: best score ${bestScore.toFixed(2)} below threshold ${SIMILARITY_THRESHOLD} for '${title}'`);
+        progressList[idx].status = 'none';
+        onProgress([...progressList]);
+        return null;
+      }
+
+      console.log(`[ZunoPlugin][MATCH] ${provider.name}: matched '${bestMatch.title}' (score=${bestScore.toFixed(2)}) -> loading detail url='${bestMatch.url}'`);
+
+      const detailJson = await CloudStreamModule.loadDetail(provider.name, bestMatch.url);
       const detailObj = parseJson<any>(detailJson);
 
+      if (detailObj?.error) {
+        console.log(`[ZunoPlugin][DETAIL] ${provider.name}: error - ${detailObj.error}`);
+        progressList[idx].status = 'error';
+        progressList[idx].errorReason = detailObj.error;
+        onProgress([...progressList]);
+        return null;
+      }
+
       if (!detailObj || !detailObj.episodes || detailObj.episodes.length === 0) {
+        console.log(`[ZunoPlugin][DETAIL] ${provider.name}: no episodes in detail response`);
         progressList[idx].status = 'none';
         onProgress([...progressList]);
         return null;
       }
+
+      console.log(`[ZunoPlugin][DETAIL] ${provider.name}: found ${detailObj.episodes.length} episodes, isSerial=${isSerial}, want S${season}E${episode}`);
 
       let matchingEpisode: any = null;
       if (isSerial) {
@@ -625,18 +786,32 @@ export async function resolvePlaybackSources(
           const epEpisode = parseNumber(ep.episode) ?? 1;
           return epSeason === season && epEpisode === episode;
         });
+        if (!matchingEpisode) {
+          console.log(`[ZunoPlugin][DETAIL] ${provider.name}: S${season}E${episode} not found in episode list`);
+        }
       } else {
         matchingEpisode = detailObj.episodes[0];
       }
 
       if (!matchingEpisode || !matchingEpisode.mediaRef) {
+        console.log(`[ZunoPlugin][DETAIL] ${provider.name}: no matching episode or missing mediaRef`);
         progressList[idx].status = 'none';
         onProgress([...progressList]);
         return null;
       }
 
+      console.log(`[ZunoPlugin][LINKS] ${provider.name}: loading links for mediaRef='${matchingEpisode.mediaRef}'`);
+      onEnterLoadLinks?.();
       const linksJson = await CloudStreamModule.loadLinks(provider.name, matchingEpisode.mediaRef);
       const linksObj = parseJson<any>(linksJson);
+
+      if (linksObj?.error) {
+        console.log(`[ZunoPlugin][LINKS] ${provider.name}: error - ${linksObj.error}`);
+        progressList[idx].status = 'error';
+        progressList[idx].errorReason = linksObj.error;
+        onProgress([...progressList]);
+        return null;
+      }
 
       const sources = (linksObj.sources ?? []).map((s: any) => ({
         quality: s.quality ?? '',
@@ -652,59 +827,108 @@ export async function resolvePlaybackSources(
         url: sub.url ?? '',
       }));
 
+      console.log(`[ZunoPlugin][LINKS] ${provider.name}: ${sources.length} sources, ${subtitles.length} subtitles`);
+
       if (sources.length > 0) {
         progressList[idx].status = 'found';
-        progressList[idx].linksCount = sources.length;
+        progressList[idx].linksCount = sources.length; // No cross-provider dedup — each provider keeps all its sources
         onProgress([...progressList]);
-        if (onSourceFound) {
-          sources.forEach((s: any) => onSourceFound(s));
-        }
+
+        // Push all sources without cross-provider dedup — same URL from different providers are kept separate
+        sources.forEach((s: any) => {
+          if (!finalSources.some(fs => fs.url === s.url && fs.provider === s.provider)) {
+            finalSources.push(s);
+            if (onSourceFound) onSourceFound(s);
+          }
+        });
+
+        subtitles.forEach((sub: any) => {
+          if (!finalSubtitles.some(fs => fs.url === sub.url)) {
+            finalSubtitles.push(sub);
+          }
+        });
+
         return { sources, subtitles };
       } else {
+        const reason = linksObj?.error ? ` (${linksObj.error})` : '';
+        console.log(`[ZunoPlugin][LINKS] ${provider.name}: loadLinks returned 0 sources${reason}`);
         progressList[idx].status = 'none';
+        if (linksObj?.error) progressList[idx].errorReason = linksObj.error;
         onProgress([...progressList]);
         return null;
       }
-    } catch (err) {
-      console.warn(`Error resolving links for provider ${provider.name}:`, err);
+    } catch (err: any) {
+      console.warn(`[ZunoPlugin][ERROR] ${provider.name}:`, err);
       progressList[idx].status = 'error';
+      progressList[idx].errorReason = err?.message || String(err);
       onProgress([...progressList]);
       return null;
     }
   };
 
-  const TIMEOUT = 20000; // Increased to 20 seconds to allow slower providers/scrapers to finish resolving
-  const promises = providers.map((p, i) => {
-    return Promise.race([
-      searchAndResolve(p, i),
-      new Promise<null>((resolve) => setTimeout(() => {
-        if (progressList[i].status === 'searching') {
-          progressList[i].status = 'none';
-          onProgress([...progressList]);
+  const TIMEOUT = PROVIDER_TIMEOUT_MS; // 60 seconds per provider (increased from 30s for slow resolvers like 4K HDHUB)
+  // Track if any provider found a match and is loading links (even if timed out)
+  // This prevents resolving empty while a loadLinks call is still in-flight
+  let anyProviderMatchedAndLoadingLinks = false;
+  
+  return new Promise<LinksResult>((resolve) => {
+    resolvePromise = resolve;
+    let completedCount = 0;
+
+    const checkResolve = (allDone = false) => {
+      if (promiseResolved) return;
+      if (finalSources.length > 0) {
+        // We have sources — resolve immediately to show them
+        promiseResolved = true;
+        console.log(`[ZunoPlugin][RESOLVED_SOURCES] Resolving links promise. Sources found: ${finalSources.length}`);
+        const uniqueSubs = Array.from(new Map(finalSubtitles.map(s => [s.url, s])).values());
+        resolve({
+          sources: [...finalSources],
+          subtitles: uniqueSubs,
+        });
+        // Don't null out activeSourceCallback here — keep feeding any
+        // in-flight streamed events (e.g. remaining links from 4K HDHUB)
+        // into onSourceFound so the UI list keeps updating live.
+        // Callbacks are cleaned up only when all providers finish.
+      } else if (allDone && completedCount >= providers.length) {
+        // All providers done, no sources found
+        promiseResolved = true;
+        console.log(`[ZunoPlugin][RESOLVED_EMPTY] All providers done, no sources found.`);
+        const uniqueSubs = Array.from(new Map(finalSubtitles.map(s => [s.url, s])).values());
+        resolve({ sources: [], subtitles: uniqueSubs });
+      }
+    };
+
+    // Run searches in parallel
+    providers.forEach((p) => {
+      const idx = progressList.findIndex(pr => pr.providerName === p.name);
+      if (idx === -1) return;
+
+      Promise.race([
+        searchAndResolve(p, idx, () => { anyProviderMatchedAndLoadingLinks = true; }),
+        new Promise<null>((res) => setTimeout(() => {
+          if (progressList[idx].status === 'searching') {
+            console.log(`[ZunoPlugin][TIMEOUT] ${p.name} timed out after ${TIMEOUT}ms`);
+            progressList[idx].status = 'none';
+            progressList[idx].errorReason = 'Timed out';
+            onProgress([...progressList]);
+          }
+          res(null);
+        }, TIMEOUT))
+      ]).then(() => {
+        completedCount++;
+        checkResolve(completedCount >= providers.length);
+        // Once truly all done, clean up callbacks, fire onAllDone, and update cache with complete list
+        if (completedCount >= providers.length) {
+          activeSourceCallback = null;
+          activeSubtitleCallback = null;
+          onAllDone?.();
+          const uniqueSubs = Array.from(new Map(finalSubtitles.map(s => [s.url, s])).values());
+          onCacheUpdate?.({ sources: [...finalSources], subtitles: uniqueSubs });
         }
-        resolve(null);
-      }, TIMEOUT))
-    ]);
+      });
+    });
   });
-
-  const resolvedResults = await Promise.all(promises);
-
-  const finalSources: VideoSource[] = [];
-  const finalSubtitles: { lang: string; url: string }[] = [];
-
-  resolvedResults.forEach(res => {
-    if (res) {
-      finalSources.push(...res.sources);
-      finalSubtitles.push(...res.subtitles);
-    }
-  });
-
-  const uniqueSubs = Array.from(new Map(finalSubtitles.map(s => [s.url, s])).values());
-
-  return {
-    sources: finalSources,
-    subtitles: uniqueSubs,
-  };
 }
 
 export function playWithMediaRef(

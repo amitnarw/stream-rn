@@ -1,10 +1,10 @@
 {
   "expo": {
-    "name": "sozo-rn-android",
-    "slug": "sozo-rn-android",
+    "name": "Zuno",
+    "slug": "zuno",
     "version": "1.0.0",
     "android": {
-      "package": "com.anonymous.sozornandroid"
+      "package": "com.anonymous.zunornandroid"
     }
   }
 }

@@ -1,4 +1,4 @@
-package com.anonymous.sozornandroid.cloudstream
+package com.anonymous.zunornandroid.cloudstream
 
 import com.facebook.react.ReactPackage
 import com.facebook.react.bridge.NativeModule

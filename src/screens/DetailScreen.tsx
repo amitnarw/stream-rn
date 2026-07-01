@@ -7,6 +7,7 @@ import React, {
 } from "react";
 import {
   ActivityIndicator,
+  BackHandler,
   Dimensions,
   FlatList,
   Image,
@@ -19,6 +20,7 @@ import {
   View,
   Pressable,
   Animated as RNAnimated,
+  Alert,
 } from "react-native";
 import Animated, {
   Extrapolation,
@@ -181,7 +183,7 @@ function ActorAvatar({
   }, [name]);
 
   if (imageUrl) {
-    return <Image source={{ uri: imageUrl }} style={style} />;
+    return <Image source={{ uri: imageUrl, cache: 'force-cache' }} style={style} />;
   }
 
   return (
@@ -220,7 +222,7 @@ const HeroEpisodeRow = React.memo(
       >
         <View style={styles.episodeThumbContainer}>
           <Image
-            source={{ uri: ep.image || posterUrl || undefined }}
+            source={{ uri: ep.image || posterUrl || undefined, cache: 'force-cache' }}
             style={styles.episodeThumb}
             resizeMode="cover"
           />
@@ -358,6 +360,27 @@ export default function DetailScreen() {
   );
   const [showSourcePicker, setShowSourcePicker] = useState(false);
   const [selectedSourceIndex, setSelectedSourceIndex] = useState(0);
+
+  const closeSourcePicker = () => {
+    setShowSourcePicker(false);
+    setPlayingEpisode(null);
+  };
+
+  useEffect(() => {
+    if (showSourcePicker) {
+      const backAction = () => {
+        closeSourcePicker();
+        return true;
+      };
+
+      const backHandler = BackHandler.addEventListener(
+        "hardwareBackPress",
+        backAction
+      );
+
+      return () => backHandler.remove();
+    }
+  }, [showSourcePicker]);
 
   // Dynamic Tab states for source plugins
   const [allProviders, setAllProviders] = useState<PluginProvider[]>(
@@ -548,28 +571,40 @@ export default function DetailScreen() {
 
   const providerTabs = useMemo(() => {
     if (providerName === 'Cinemeta') {
+      if (resolvingProgress.length > 0) {
+        // Always show All + all providers, regardless of resolving state.
+        // This keeps tabs stable — they don't disappear when resolving ends.
+        return ['All', ...resolvingProgress.map(p => p.providerName)];
+      }
+      // Fallback to allProviders (loaded at mount)
       const list = ['All'];
-      allProviders.forEach(p => {
-        list.push(p.name);
-      });
+      allProviders.forEach(p => { list.push(p.name); });
       return list;
     } else {
       return ['All', providerName];
     }
-  }, [allProviders, providerName]);
+  }, [allProviders, providerName, resolvingProgress]);
 
   const filteredSources = useMemo(() => {
     if (activeProviderTab === 'All') return sources;
     return sources.filter(s => s.provider === activeProviderTab);
   }, [sources, activeProviderTab]);
 
-  const showSkeleton = useMemo(() => {
-    if (filteredSources.length > 0) return false;
-    if (activeProviderTab === 'All') {
-      return isResolving;
+  // If the active tab disappears from the list (e.g. provider had no sources),
+  // fall back to 'All' so the user doesn't see a blank filtered view
+  useEffect(() => {
+    if (providerTabs.length > 0 && !providerTabs.includes(activeProviderTab)) {
+      setActiveProviderTab('All');
     }
-    return resolvingProgress.some(p => p.providerName === activeProviderTab && p.status === 'searching');
-  }, [filteredSources.length, activeProviderTab, isResolving, resolvingProgress]);
+  }, [providerTabs, activeProviderTab]);
+
+  const isTabResolving = useMemo(() => {
+    // Always use isResolving — while ANY provider is still searching, ALL tabs show the circular loader.
+    // Individual provider status is still tracked in resolvingProgress for tab labels.
+    return isResolving;
+  }, [isResolving]);
+
+
 
   const allEpisodes = useMemo(() => detail?.episodes ?? [], [detail?.episodes]);
 
@@ -728,7 +763,7 @@ export default function DetailScreen() {
       setSources([]);
       setSubtitles([]);
       setResolvingProgress([]);
-      setIsResolving(!hasCache);
+      setIsResolving(true);
       setShowSourcePicker(true);
       setSelectedSourceIndex(0);
       setActiveProviderTab('All');
@@ -741,36 +776,57 @@ export default function DetailScreen() {
             setResolvingProgress(progress);
           },
           (newSource) => {
+            // Stream sources into UI immediately as each provider returns them
             setSources(prev => {
               if (prev.some(s => s.url === newSource.url)) return prev;
               return [...prev, newSource];
             });
+          },
+          () => {
+            // onAllDone: ALL providers have completed — now safe to stop loading
+            setIsResolving(false);
+            setPlayingEpisode(null);
           }
         );
-        
+
         setSubtitles(result.subtitles);
-        if (!result.sources || result.sources.length === 0) {
-          throw new Error("No playable sources found for this item");
-        }
+        // Merge snapshot sources into live-streamed ones (never overwrite)
+        setSources(prev => {
+          const merged = new Map(prev.map(s => [s.url, s]));
+          (result.sources ?? []).forEach(s => { if (!merged.has(s.url)) merged.set(s.url, s); });
+          return [...merged.values()];
+        });
       } catch (e: any) {
         setLinksError(
           e instanceof bridge.OfflineError
             ? "No internet connection. Please check your network."
             : e.message || "Failed to load playable links.",
         );
-      } finally {
         setIsResolving(false);
         setPlayingEpisode(null);
       }
+      // Note: isResolving(false) is handled by onAllDone callback (for Cinemeta streaming path)
+      // For cache-hit and non-Cinemeta paths, loadLinks calls onAllDone before returning
     },
     [detail, providerName],
   );
+
 
   if (phase === "idle" || !item) return null;
 
   function onSourceSelect(source: VideoSource) {
     const originalIndex = sources.findIndex(s => s.url === source.url);
     if (originalIndex === -1) return;
+
+    const protocol = getProtocolLabel(source.type, source.url);
+    if (protocol === 'TORRENT') {
+      Alert.alert(
+        "Unsupported Source",
+        "Tamilblasters provides torrent/magnet links. Torrent streaming is not supported. Please select a direct HTTP, M3U8, or DASH link from other providers.",
+        [{ text: "OK" }]
+      );
+      return;
+    }
 
     setSelectedSourceIndex(originalIndex);
     setShowSourcePicker(false);
@@ -870,6 +926,7 @@ export default function DetailScreen() {
           <Text style={styles.sectionTitle}>Cast</Text>
           <ScrollView
             horizontal
+            nestedScrollEnabled={true}
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.castList}
           >
@@ -884,7 +941,7 @@ export default function DetailScreen() {
                 <View key={`actor-${idx}`} style={styles.castCard}>
                   {actor.image ? (
                     <Image
-                      source={{ uri: actor.image }}
+                      source={{ uri: actor.image, cache: 'force-cache' }}
                       style={styles.castImage}
                     />
                   ) : (
@@ -911,10 +968,6 @@ export default function DetailScreen() {
     </View>
   ) : null;
 
-  const closeSourcePicker = () => {
-    setShowSourcePicker(false);
-    setPlayingEpisode(null);
-  };
 
   return (
     <View
@@ -939,6 +992,7 @@ export default function DetailScreen() {
                 <Image
                   source={{
                     uri: item?.posterUrl || detail?.posterUrl || undefined,
+                    cache: 'force-cache',
                   }}
                   style={[StyleSheet.absoluteFillObject, { opacity: 0.45 }]}
                   resizeMode="cover"
@@ -948,7 +1002,7 @@ export default function DetailScreen() {
 
               {posterUrl ? (
                 <Image
-                  source={{ uri: posterUrl }}
+                  source={{ uri: posterUrl, cache: 'force-cache' }}
                   style={styles.image}
                   resizeMode="cover"
                 />
@@ -1169,7 +1223,7 @@ export default function DetailScreen() {
                         <View style={styles.blurContainer}>
                           {posterUrl ? (
                             <Image
-                              source={{ uri: posterUrl }}
+                              source={{ uri: posterUrl, cache: 'force-cache' }}
                               style={StyleSheet.absoluteFillObject}
                               blurRadius={35}
                               resizeMode="cover"
@@ -1382,6 +1436,7 @@ export default function DetailScreen() {
                               </Text>
                               <ScrollView
                                 horizontal
+                                nestedScrollEnabled={true}
                                 showsHorizontalScrollIndicator={false}
                                 contentContainerStyle={styles.recommendationsList}
                               >
@@ -1421,7 +1476,19 @@ export default function DetailScreen() {
           <Animated.View style={[styles.sheet, sheetAnimatedStyle]}>
             <View style={styles.sheetContent}>
               <View style={styles.sheetHandle} />
-              <Text style={styles.sheetTitle}>Select Source</Text>
+              <View style={styles.sheetHeaderRow}>
+                {isResolving && (
+                  <ActivityIndicator size="small" color="#0047FF" style={{ marginRight: 8 }} />
+                )}
+                <Text style={styles.sheetTitle}>Select Source</Text>
+                <TouchableOpacity
+                  style={styles.sheetCloseButton}
+                  onPress={closeSourcePicker}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name="close" size={20} color="#ffffff" />
+                </TouchableOpacity>
+              </View>
 
               {/* Dynamic Provider Tabs scroll view */}
               {providerTabs.length > 1 && (
@@ -1433,32 +1500,99 @@ export default function DetailScreen() {
                   >
                     {providerTabs.map((tab) => {
                       const isActive = activeProviderTab === tab;
+                      
+                      // Calculate tab status decorations
+                       const prog = resolvingProgress.find(p => p.providerName === tab);
+                       let tabLabel = tab;
+                       const tabSubLabel = prog?.errorReason || '';
+                       const isSearching = (tab === 'All' && isResolving) || (prog?.status === 'searching');
+
+                       if (tab === 'All') {
+                         const totalFound = resolvingProgress.reduce(
+                           (acc, curr) => acc + (curr.status === 'found' ? curr.linksCount : 0),
+                           0
+                         );
+                         tabLabel = totalFound > 0 ? `All (${totalFound})` : 'All';
+                       } else if (prog) {
+                         if (prog.status === 'searching') {
+                           tabLabel = tab;
+                         } else if (prog.status === 'found' && prog.linksCount > 0) {
+                           tabLabel = `${tab} (${prog.linksCount})`;
+                         } else if (prog.status === 'none') {
+                           tabLabel = `${tab} (0)`;
+                         } else if (prog.status === 'error') {
+                           tabLabel = `${tab} ⚠`;
+                         }
+                       }
+
                       return (
-                        <TouchableOpacity
-                          key={tab}
-                          style={[styles.tabButton, isActive && styles.tabButtonActive]}
-                          onPress={() => setActiveProviderTab(tab)}
-                          activeOpacity={0.7}
-                        >
-                          <Text style={[styles.tabText, isActive && styles.tabTextActive]}>
-                            {tab}
-                          </Text>
-                        </TouchableOpacity>
+                         <TouchableOpacity
+                           key={tab}
+                           style={[styles.tabButton, isActive && styles.tabButtonActive, { flexDirection: 'row', alignItems: 'center' }]}
+                           onPress={() => setActiveProviderTab(tab)}
+                           activeOpacity={0.7}
+                         >
+                           {isSearching && (
+                             <ActivityIndicator 
+                               size="small" 
+                               color={isActive ? "#ffffff" : "#0047FF"} 
+                               style={{ marginRight: 6 }} 
+                             />
+                           )}
+                           <Text style={[styles.tabText, isActive && styles.tabTextActive]}>
+                             {tabLabel}
+                           </Text>
+                           {tabSubLabel && !isActive && (
+                             <Text style={styles.tabSubText} numberOfLines={1}>{tabSubLabel}</Text>
+                           )}
+                         </TouchableOpacity>
                       );
                     })}
                   </ScrollView>
                 </View>
               )}
 
-              {showSkeleton ? (
-                renderSkeleton()
-              ) : filteredSources.length === 0 ? (
+              {/* Live search indicator below tabs */}
+              {isTabResolving && filteredSources.length > 0 && (
+                <View style={styles.listSearchingIndicator}>
+                  <ActivityIndicator size="small" color="#0047FF" style={{ marginRight: 8 }} />
+                  <Text style={styles.listSearchingText}>
+                    Searching for more links... ({filteredSources.length} found)
+                  </Text>
+                </View>
+              )}
+
+              {isTabResolving && filteredSources.length === 0 ? (
+                <View style={styles.searchLoaderContainer}>
+                  <ActivityIndicator size="large" color="#0047FF" />
+                  <Text style={styles.searchLoaderText}>Searching for links...</Text>
+                  <Text style={styles.searchLoaderSubtext}>
+                    Checking all providers in parallel. Found sources will appear here instantly.
+                  </Text>
+                </View>
+              ) : !isTabResolving && filteredSources.length === 0 ? (
                 <View style={styles.noSourcesContainer}>
                   <Ionicons name="alert-circle-outline" size={48} color={theme.colors.rose} style={{ opacity: 0.8 }} />
                   <Text style={styles.noSourcesText}>No links found for this provider</Text>
                   <Text style={styles.noSourcesSubtext}>Try another provider or clear the Playback Links cache in settings.</Text>
+                  {(() => {
+                    const activeProg = resolvingProgress.find(p => p.providerName === activeProviderTab);
+                    if (activeProg?.errorReason && activeProviderTab !== 'All') {
+                      return (
+                        <View style={{ marginTop: 12, backgroundColor: "rgba(255,74,125,0.08)", borderRadius: 8, padding: 10, maxWidth: 280 }}>
+                          <Text style={{ color: "#ffb4ab", fontSize: 11, textAlign: "center" }}>
+                            {activeProg.errorReason}
+                          </Text>
+                        </View>
+                      );
+                    }
+                    return null;
+                  })()}
                 </View>
-              ) : (
+              ) : null}
+
+              {/* Always show source list when sources exist, even while still resolving */}
+              {filteredSources.length > 0 && (
                 <ScrollView
                   showsVerticalScrollIndicator={false}
                   style={styles.sheetList}
@@ -1521,14 +1655,7 @@ export default function DetailScreen() {
                               </View>
                             ) : null}
 
-                            {/* Custom Headers Badge */}
-                            {hasHeaders ? (
-                              <View style={[styles.sheetBadge, { borderColor: 'rgba(85, 128, 255, 0.35)', borderWidth: 1, backgroundColor: 'rgba(85, 128, 255, 0.05)' }]}>
-                                <Text style={[styles.sheetBadgeText, { color: '#5580FF' }]}>
-                                  HEADERS REQUIRED
-                                </Text>
-                              </View>
-                            ) : null}
+
                           </View>
                         </View>
                       </TouchableOpacity>
@@ -1663,7 +1790,7 @@ function RecommendationCard({
       <Animated.View style={animatedStyle}>
         {item.posterUrl ? (
           <Image
-            source={{ uri: item.posterUrl }}
+            source={{ uri: item.posterUrl, cache: 'force-cache' }}
             style={styles.recPoster}
             resizeMode="cover"
           />
@@ -2353,7 +2480,7 @@ const styles = StyleSheet.create({
   sheetContent: {
     flex: 1,
     paddingBottom: 24,
-    paddingHorizontal: 24,
+    paddingHorizontal: 5,
     paddingTop: 8,
   },
   sheetHandle: {
@@ -2369,7 +2496,27 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: "700",
     textAlign: "center",
+  },
+  sheetHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    position: "relative",
+    width: "100%",
     marginBottom: 20,
+  },
+  sheetCloseButton: {
+    position: "absolute",
+    right: 0,
+    top: -4,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.12)",
+    alignItems: "center",
+    justifyContent: "center",
   },
   sheetList: {
     flex: 1,
@@ -2571,6 +2718,13 @@ const styles = StyleSheet.create({
   tabTextActive: {
     color: "#ffffff",
   },
+  tabSubText: {
+    color: "rgba(255,255,255,0.3)",
+    fontSize: 9,
+    fontWeight: "500",
+    marginTop: 2,
+    maxWidth: 100,
+  },
   skeletonStreamRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -2606,5 +2760,42 @@ const styles = StyleSheet.create({
     height: 18,
     borderRadius: 4,
     backgroundColor: "rgba(255,255,255,0.05)",
+  },
+  listSearchingIndicator: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 8,
+    backgroundColor: "rgba(0, 71, 255, 0.05)",
+    borderRadius: 8,
+    marginHorizontal: 16,
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: "rgba(0, 71, 255, 0.15)",
+  },
+  listSearchingText: {
+    color: "#5580FF",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  searchLoaderContainer: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 64,
+    paddingHorizontal: 32,
+  },
+  searchLoaderText: {
+    color: "#ffffff",
+    fontSize: 16,
+    fontWeight: "700",
+    marginTop: 16,
+    textAlign: "center",
+  },
+  searchLoaderSubtext: {
+    color: "#8e8d92",
+    fontSize: 13,
+    marginTop: 8,
+    textAlign: "center",
+    lineHeight: 18,
   },
 });

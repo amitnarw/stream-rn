@@ -87,15 +87,16 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
-    namespace 'com.anonymous.sozornandroid'
+    namespace 'com.anonymous.zunornandroid'
     defaultConfig {
-        applicationId 'com.anonymous.sozornandroid'
+        applicationId 'com.anonymous.zunornandroid'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
         versionName "1.0.0"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
+        buildConfigField "long", "NATIVE_TIMEOUT", "65000L"
     }
     signingConfigs {
         debug {

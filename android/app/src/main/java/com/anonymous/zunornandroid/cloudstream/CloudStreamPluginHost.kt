@@ -1,7 +1,10 @@
-package com.anonymous.sozornandroid.cloudstream
+package com.anonymous.zunornandroid.cloudstream
 
-import android.content.Context
 import android.util.Log
+import com.facebook.react.bridge.Arguments
+import com.facebook.react.bridge.ReactApplicationContext
+import com.facebook.react.bridge.ReactContext
+import com.facebook.react.modules.core.DeviceEventManagerModule
 import com.lagradost.cloudstream3.APIHolder
 import com.lagradost.cloudstream3.AnimeLoadResponse
 import com.lagradost.cloudstream3.Episode
@@ -17,13 +20,76 @@ import dalvik.system.InMemoryDexClassLoader
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.lang.ref.WeakReference
 import java.util.zip.ZipFile
 
-class CloudStreamPluginHost(private val appContext: Context) {
+class CloudStreamPluginHost(val appContext: ReactApplicationContext) {
+
+    init {
+        try {
+            val cls = Class.forName("com.lagradost.api.ContextHelper_androidKt")
+            val ctxField = cls.getDeclaredField("ctx")
+            ctxField.isAccessible = true
+            ctxField.set(null, WeakReference<android.content.Context>(appContext))
+        } catch (_: Exception) {}
+
+        // Global OkHttpClient Interceptor Patch to block/fast-fail dead domains
+        try {
+            val apiKtCls = Class.forName("com.lagradost.cloudstream3.MainAPIKt")
+            val getAppMethod = apiKtCls.getDeclaredMethod("getApp")
+            getAppMethod.isAccessible = true
+            val appInstance = getAppMethod.invoke(null)
+            
+            if (appInstance != null) {
+                val requestsClass = Class.forName("com.lagradost.nicehttp.Requests")
+                val clientField = requestsClass.getDeclaredField("okHttpClient")
+                clientField.isAccessible = true
+                val oldClient = clientField.get(appInstance) as? okhttp3.OkHttpClient
+                if (oldClient != null) {
+                    val patchedClient = oldClient.newBuilder()
+                        .addInterceptor { chain ->
+                            val request = chain.request()
+                            val host = request.url.host
+                            if (host.contains("123moviesfree9.cv") || 
+                                host.equals("123moviesfree9.cv", ignoreCase = true) ||
+                                host.endsWith(".123moviesfree9.cv", ignoreCase = true)) {
+                                throw java.io.IOException("Blocked/Offline domain: $host")
+                            }
+                            chain.proceed(request)
+                        }
+                        .build()
+                    clientField.set(appInstance, patchedClient)
+                    Log.i(TAG, "Successfully patched NiceHttp OkHttpClient with domain-block interceptor")
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to patch NiceHttp OkHttpClient: ${e.message}", e)
+        }
+    }
+
+    private fun resolveUrl(api: MainAPI, url: String): String {
+        if (url.startsWith("http://") || url.startsWith("https://") || url.startsWith("{") || url.startsWith("[")) {
+            return url
+        }
+        if (url.startsWith("/") || (url.contains("/") && !url.contains(":"))) {
+            val baseUrl = api.mainUrl.removeSuffix("/")
+            val relative = url.removePrefix("/")
+            return "$baseUrl/$relative"
+        }
+        return url
+    }
 
     companion object {
         private const val TAG = "CloudStreamPluginHost"
+        private const val STAG = "ZunoPlugin"
         var instance: CloudStreamPluginHost? = null
+
+        private val DOMAIN_PATCHES = mapOf(
+            "Cinefreak" to "https://cinefreak.net",
+            "Dudefilms" to "https://dudefilms.co",
+            "Goojara" to "https://ww1.goojara.to",
+            "Desicinemas" to "https://desicinemas.to",
+        )
     }
 
     private val loadedPlugins = HashMap<String, BasePlugin>()
@@ -60,6 +126,34 @@ class CloudStreamPluginHost(private val appContext: Context) {
                 .getDeclaredConstructor().newInstance() as BasePlugin
             instance.filename = file.absolutePath
             instance.load()
+
+            val patchedNames = mutableListOf<String>()
+            for (api in APIHolder.allProviders) {
+                DOMAIN_PATCHES[api.name]?.let { newUrl ->
+                    try {
+                        val field = api.javaClass
+                        var cls: Class<*>? = field
+                        while (cls != null) {
+                            try {
+                                val mf = cls.getDeclaredField("mainUrl")
+                                mf.isAccessible = true
+                                mf.set(api, newUrl)
+                                Log.i(TAG, "patched ${api.name} mainUrl -> $newUrl")
+                                patchedNames.add(api.name)
+                                break
+                            } catch (_: NoSuchFieldException) {
+                                cls = cls.superclass
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "failed to patch ${api.name} mainUrl: ${e.message}")
+                    }
+                }
+            }
+            if (patchedNames.isNotEmpty()) {
+                Log.i(TAG, "domain patches applied: $patchedNames")
+            }
+
             loadedPlugins[internalName] = instance
 
             val added = APIHolder.allProviders.map { it.name }.filter { it !in before }
@@ -119,6 +213,15 @@ class CloudStreamPluginHost(private val appContext: Context) {
         put("type", r.type?.name)
     }
 
+    private fun hasSearchOverride(api: MainAPI): Boolean {
+        return try {
+            val method = api.javaClass.getMethod("search", String::class.java, kotlin.coroutines.Continuation::class.java)
+            method.declaringClass != MainAPI::class.java
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     fun getProvidersJson(): String {
         val arr = JSONArray()
         for (api in APIHolder.allProviders) {
@@ -127,6 +230,7 @@ class CloudStreamPluginHost(private val appContext: Context) {
                 put("name", api.name)
                 put("url", api.mainPage.firstOrNull()?.data ?: "")
                 put("hasMainPage", true)
+                put("hasSearch", hasSearchOverride(api))
             })
         }
         return arr.toString()
@@ -163,11 +267,18 @@ class CloudStreamPluginHost(private val appContext: Context) {
     suspend fun searchJson(providerName: String, query: String): String {
         val api = apiByName(providerName) ?: return """{"items":[]}"""
         val items = JSONArray()
+        var error: String? = null
         val results = try { api.search(query) } catch (t: Throwable) {
-            Log.e(TAG, "search ${api.name}: ${t.javaClass.simpleName}: ${t.message}"); null
+            val msg = "${t.javaClass.simpleName}: ${t.message}"
+            Log.e(TAG, "search ${api.name}: $msg")
+            error = msg
+            null
         } ?: emptyList()
         for (r in results) items.put(cardJson(r, api.name))
-        return JSONObject().apply { put("items", items) }.toString()
+        return JSONObject().apply {
+            put("items", items)
+            if (error != null) put("error", error)
+        }.toString()
     }
 
     private fun episodeJson(e: Episode, index: Int) = JSONObject().apply {
@@ -180,10 +291,21 @@ class CloudStreamPluginHost(private val appContext: Context) {
     }
 
     suspend fun loadDetailJson(providerName: String, url: String): String {
-        val api = apiByName(providerName) ?: return "{}"
-        val resp = try { api.load(url) } catch (t: Throwable) {
-            Log.e(TAG, "load ${api.name}: ${t.javaClass.simpleName}: ${t.message}"); null
-        } ?: return "{}"
+        val api = apiByName(providerName) ?: return """{"error":"Provider '${providerName}' not found"}"""
+        val resolvedUrl = resolveUrl(api, url)
+        var error: String? = null
+        val resp = try { api.load(resolvedUrl) } catch (t: Throwable) {
+            val msg = "${t.javaClass.simpleName}: ${t.message}"
+            Log.e(TAG, "load ${api.name}: $msg")
+            error = msg
+            null
+        }
+        if (resp == null) {
+            return JSONObject().apply {
+                put("error", error ?: "Failed to load detail")
+                put("provider", providerName)
+            }.toString()
+        }
         val episodes = JSONArray()
         var isSerial = false
         when (resp) {
@@ -255,48 +377,87 @@ class CloudStreamPluginHost(private val appContext: Context) {
     }
 
     suspend fun loadLinksJson(providerName: String, data: String): String {
-        val api = apiByName(providerName) ?: return "{}"
+        val api = apiByName(providerName) ?: run {
+            Log.w(STAG, "[LINKS] Provider not found: $providerName")
+            return """{"error":"Provider not found: $providerName"}"""
+        }
+        val resolvedData = resolveUrl(api, data)
+        Log.i(STAG, "[LINKS] ${api.name} data='$data' resolvedData='$resolvedData'")
         val videoSources = JSONArray()
         val subs = JSONArray()
-        if (api != null) {
-            try {
-                api.loadLinks(
-                    data = data,
-                    isCasting = false,
-                    subtitleCallback = { sf: SubtitleFile ->
-                        if (sf.url.isNotEmpty()) {
-                            subs.put(JSONObject().apply {
-                                put("lang", sf.lang)
-                                put("url", sf.url)
-                                put("default", false)
-                            })
+        var error: String? = null
+        try {
+            api.loadLinks(
+                data = resolvedData,
+                isCasting = false,
+                subtitleCallback = { sf: SubtitleFile ->
+                    if (sf.url.isNotEmpty()) {
+                        val subObj = JSONObject().apply {
+                            put("lang", sf.lang)
+                            put("url", sf.url)
+                            put("default", false)
+                            put("provider", providerName)
                         }
-                    },
-                    callback = { link: ExtractorLink ->
-                        if (link.url.isNotEmpty()) {
-                            val headers = JSONObject()
-                            if (link.referer.isNotEmpty()) headers.put("Referer", link.referer)
-                            val q = link.quality
-                            val res = if (q in 144..4320) "${q}p" else null
-                            val label = if (res != null) "${link.name} · $res" else link.name
-                            videoSources.put(JSONObject().apply {
-                                put("quality", label)
-                                put("url", link.url)
-                                put("type", if (link.isM3u8) "hls" else "http")
-                                put("host", link.name)
-                                put("headers", headers)
-                            })
+                        subs.put(subObj)
+                        Log.d(STAG, "[LINKS] ${api.name}: subtitle lang=${sf.lang} url=${sf.url}")
+                        
+                        try {
+                            val subJson = subObj.toString()
+                            val params = Arguments.createMap().apply {
+                                putString("subtitleJson", subJson)
+                            }
+                            appContext
+                                .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+                                .emit("onPlaybackSubtitleFound", params)
+                        } catch (e: Exception) {
+                            Log.e(STAG, "Error emitting subtitle: ${e.message}")
                         }
                     }
-                )
-            } catch (t: Throwable) {
-                Log.e(TAG, "loadLinks ${api.name}: ${t.javaClass.simpleName}: ${t.message}")
-            }
+                },
+                callback = { link: ExtractorLink ->
+                    if (link.url.isNotEmpty()) {
+                        val headers = JSONObject()
+                        if (link.referer.isNotEmpty()) headers.put("Referer", link.referer)
+                        val q = link.quality
+                        val res = if (q in 144..4320) "${q}p" else null
+                        val label = if (res != null) "${link.name} · $res" else link.name
+                        
+                        val sourceObj = JSONObject().apply {
+                            put("quality", label)
+                            put("url", link.url)
+                            put("type", if (link.isM3u8) "hls" else "http")
+                            put("host", link.name)
+                            put("headers", headers)
+                            put("provider", providerName)
+                        }
+                        videoSources.put(sourceObj)
+                        Log.d(STAG, "[LINKS] ${api.name}: source name=${link.name} quality=$res url=${link.url.take(80)}")
+                        
+                        try {
+                            val sourceJson = sourceObj.toString()
+                            val params = Arguments.createMap().apply {
+                                putString("sourceJson", sourceJson)
+                            }
+                            appContext
+                                .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+                                .emit("onPlaybackSourceFound", params)
+                        } catch (e: Exception) {
+                            Log.e(STAG, "Error emitting source: ${e.message}")
+                        }
+                    }
+                }
+            )
+        } catch (t: Throwable) {
+            val msg = "${t.javaClass.simpleName}: ${t.message}"
+            Log.e(STAG, "[LINKS] ❌ ${api.name} data='$data': $msg")
+            error = msg
         }
+        Log.i(STAG, "[LINKS] ${api.name}: ${videoSources.length()} sources, ${subs.length()} subtitles")
         return JSONObject().apply {
             put("videoUrl", if (videoSources.length() > 0) videoSources.getJSONObject(0).optString("url") else null)
             put("sources", videoSources)
             put("subtitles", subs)
+            if (error != null) put("error", error)
         }.toString()
     }
 }

@@ -185,7 +185,7 @@ export default function App() {
 
   React.useEffect(() => {
     async function checkFirstTimeAndLoadFonts() {
-      const checkStoragePromise = AsyncStorage.getItem('@sozo_is_first_time');
+      const checkStoragePromise = AsyncStorage.getItem('@zuno_is_first_time');
       const loadFontsPromise = Font.loadAsync({
         'PlusJakartaSans-Regular': 'https://raw.githubusercontent.com/tokotype/PlusJakartaSans/master/fonts/ttf/PlusJakartaSans-Regular.ttf',
         'PlusJakartaSans-Bold': 'https://raw.githubusercontent.com/tokotype/PlusJakartaSans/master/fonts/ttf/PlusJakartaSans-Bold.ttf',
@@ -218,7 +218,7 @@ export default function App() {
 
   const handleFinishOnboarding = async () => {
     try {
-      await AsyncStorage.setItem('@sozo_is_first_time', 'false');
+      await AsyncStorage.setItem('@zuno_is_first_time', 'false');
     } catch (e) {
       console.warn(e);
     }

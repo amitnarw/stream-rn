@@ -121,7 +121,7 @@ export default function OnboardingScreen({ onFinish }: Props) {
         </Text>
         
         <Text style={[styles.subtext, { fontFamily: fontRegular }]}>
-          Sit back, relax, and explore. Let Sozo do the thinking. You'll be watching your favorites in no time.
+          Sit back, relax, and explore. Let Zuno do the thinking. You'll be watching your favorites in no time.
         </Text>
       </View>
 

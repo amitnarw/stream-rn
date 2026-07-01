@@ -1,7 +1,8 @@
-package com.anonymous.sozornandroid.cloudstream
+package com.anonymous.zunornandroid.cloudstream
 
 import android.content.Intent
 import android.util.Log
+import com.anonymous.zunornandroid.BuildConfig
 import com.facebook.react.bridge.*
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -40,7 +41,7 @@ class CloudStreamModule(reactContext: ReactApplicationContext) :
     fun getMainPage(providerName: String, page: Int, promise: Promise) {
         Thread {
             try {
-                val json = runBlocking { withTimeout(30000L) { pluginHost.getMainPageJson(providerName, page) } }
+                val json = runBlocking { withTimeout(BuildConfig.NATIVE_TIMEOUT) { pluginHost.getMainPageJson(providerName, page) } }
                 promise.resolve(json)
             } catch (e: Exception) {
                 promise.resolve("""{"provider":"$providerName","sections":[]}""")
@@ -52,7 +53,7 @@ class CloudStreamModule(reactContext: ReactApplicationContext) :
     fun search(providerName: String, query: String, promise: Promise) {
         Thread {
             try {
-                val json = runBlocking { withTimeout(30000L) { pluginHost.searchJson(providerName, query) } }
+                val json = runBlocking { withTimeout(BuildConfig.NATIVE_TIMEOUT) { pluginHost.searchJson(providerName, query) } }
                 promise.resolve(json)
             } catch (e: Exception) {
                 promise.resolve("""{"items":[]}""")
@@ -64,7 +65,7 @@ class CloudStreamModule(reactContext: ReactApplicationContext) :
     fun loadDetail(providerName: String, url: String, promise: Promise) {
         Thread {
             try {
-                val json = runBlocking { withTimeout(30000L) { pluginHost.loadDetailJson(providerName, url) } }
+                val json = runBlocking { withTimeout(BuildConfig.NATIVE_TIMEOUT) { pluginHost.loadDetailJson(providerName, url) } }
                 promise.resolve(json)
             } catch (e: Exception) {
                 promise.resolve("{}")
@@ -76,7 +77,7 @@ class CloudStreamModule(reactContext: ReactApplicationContext) :
     fun loadLinks(providerName: String, data: String, promise: Promise) {
         Thread {
             try {
-                val json = runBlocking { withTimeout(30000L) { pluginHost.loadLinksJson(providerName, data) } }
+                val json = runBlocking { withTimeout(BuildConfig.NATIVE_TIMEOUT) { pluginHost.loadLinksJson(providerName, data) } }
                 promise.resolve(json)
             } catch (e: Exception) {
                 promise.resolve("""{"sources":[],"subtitles":[]}""")
