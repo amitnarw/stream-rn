@@ -436,6 +436,7 @@ export default function DetailScreen() {
   const [isTorrentBuffering, setIsTorrentBuffering] = useState(false);
   const [torrentStatus, setTorrentStatus] =
     useState<bridge.TorrentStatus | null>(null);
+  const [selectedTorrentSeeders, setSelectedTorrentSeeders] = useState(0);
   const [torrentErrorModal, setTorrentErrorModal] = useState<{ visible: boolean; message: string }>({ visible: false, message: '' });
   const torrentIntervalRef = useRef<any>(null);
 
@@ -961,9 +962,11 @@ export default function DetailScreen() {
       source.type === "torrent";
 
     if (isTorrent) {
+      const sourceSeeders = (source as any).seeders ?? 0;
       try {
         setIsTorrentBuffering(true);
         setTorrentStatus({ progress: 0, speed: 0, peers: 0, active: true });
+        setSelectedTorrentSeeders(sourceSeeders);
 
         bridge
           .startTorrentStream(source.url)
@@ -1745,8 +1748,10 @@ export default function DetailScreen() {
               </Text>
               <Text style={styles.torrentSubTitleText}>
                 {torrentStatus?.peers && torrentStatus.peers > 0
-                  ? `Found ${torrentStatus.peers} seeders`
-                  : "Searching for healthy seeds..."}
+                  ? `Connected to ${torrentStatus.peers} live peer${torrentStatus.peers > 1 ? 's' : ''}`
+                  : selectedTorrentSeeders > 0
+                    ? `Locating ${selectedTorrentSeeders} known seeders on network...`
+                    : 'Searching for peers...'}
               </Text>
 
               {/* Progress bar */}
@@ -2100,6 +2105,8 @@ export default function DetailScreen() {
                       );
                       const sizeTag = sizeMatch ? sizeMatch[1] : null;
                       const showProviderBadge = activeProviderTab === "All";
+                      const isTorrentSource = source.type === 'torrent' || source.url.startsWith('magnet:');
+                      const torrentSeeders = (source as any).seeders as number | undefined;
 
                       return (
                         <TouchableOpacity
@@ -2151,6 +2158,44 @@ export default function DetailScreen() {
                                   {protocolLabel}
                                 </Text>
                               </View>
+
+                              {/* Seeder Count Badge — only for torrent sources */}
+                              {isTorrentSource && torrentSeeders !== undefined && torrentSeeders > 0 && (
+                                <View
+                                  style={[
+                                    styles.sheetBadge,
+                                    {
+                                      backgroundColor: torrentSeeders >= 50
+                                        ? 'rgba(34, 197, 94, 0.12)'
+                                        : torrentSeeders >= 10
+                                          ? 'rgba(234, 179, 8, 0.10)'
+                                          : 'rgba(255, 255, 255, 0.06)',
+                                      borderColor: torrentSeeders >= 50
+                                        ? 'rgba(34, 197, 94, 0.3)'
+                                        : torrentSeeders >= 10
+                                          ? 'rgba(234, 179, 8, 0.25)'
+                                          : 'rgba(255,255,255,0.1)',
+                                      borderWidth: 0.5,
+                                    },
+                                  ]}
+                                >
+                                  <Text
+                                    style={[
+                                      styles.sheetBadgeText,
+                                      {
+                                        color: torrentSeeders >= 50
+                                          ? '#22c55e'
+                                          : torrentSeeders >= 10
+                                            ? '#eab308'
+                                            : '#a0a0a5',
+                                        fontWeight: '600',
+                                      },
+                                    ]}
+                                  >
+                                    {`👤 ${torrentSeeders}`}
+                                  </Text>
+                                </View>
+                              )}
 
                               {/* Size Badge */}
                               {sizeTag && (

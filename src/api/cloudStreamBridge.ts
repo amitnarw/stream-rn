@@ -826,10 +826,12 @@ async function fetchStremioAddonStreams(
         }
       }
 
-      // Filter out dead links (0 seeders parsed)
+      // Filter out weak/dead links (fewer than 3 seeders)
+      // Torrentio seeder counts are stale cache values — < 3 seeders means
+      // the torrent is very likely dead on the live DHT network right now.
       const hasSeedersInfo = titleText.includes('👤') || /seeders|seeds|seed/i.test(titleText) || /\bS:\s*\d+/i.test(titleText);
-      if (hasSeedersInfo && seeders === 0) {
-        return null; // Dead link, discard
+      if (hasSeedersInfo && seeders < 3) {
+        return null; // Too few seeders — likely dead, discard
       }
 
       const qualityMatch = stream.name?.match(/(1080p|720p|2160p|480p)/i);
