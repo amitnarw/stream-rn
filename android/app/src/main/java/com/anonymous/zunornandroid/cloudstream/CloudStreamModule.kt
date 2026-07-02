@@ -168,6 +168,26 @@ class CloudStreamModule(reactContext: ReactApplicationContext) :
         }
     }
 
+    @ReactMethod
+    fun deletePlaybackHistoryItem(id: String, promise: Promise) {
+        try {
+            val prefs = reactApplicationContext.getSharedPreferences("sozo_playback_history", android.content.Context.MODE_PRIVATE)
+            val history = prefs.getString("history", "[]") ?: "[]"
+            val array = org.json.JSONArray(history)
+            val newArray = org.json.JSONArray()
+            for (i in 0 until array.length()) {
+                val item = array.getJSONObject(i)
+                if (item.optString("imdbId") != id) {
+                    newArray.put(item)
+                }
+            }
+            prefs.edit().putString("history", newArray.toString()).apply()
+            promise.resolve(true)
+        } catch (e: Exception) {
+            promise.resolve(false)
+        }
+    }
+
     private fun deleteDirContents(dir: java.io.File?): Boolean {
         if (dir == null || !dir.exists() || !dir.isDirectory) return false
         val children = dir.listFiles() ?: return true
@@ -211,5 +231,53 @@ class CloudStreamModule(reactContext: ReactApplicationContext) :
                 promise.reject("CACHE_ERROR", e.message, e)
             }
         }.start()
+    }
+
+    @ReactMethod
+    fun startTorrentStream(magnetUrl: String, promise: Promise) {
+        val context = reactApplicationContext
+        Thread {
+            try {
+                val info = TorrentStreamer.getInstance(context).startStream(magnetUrl)
+                val map = Arguments.createMap().apply {
+                    putString("streamUrl", info.streamUrl)
+                    putString("fileName", info.fileName)
+                    putDouble("fileSize", info.fileSize.toDouble())
+                }
+                promise.resolve(map)
+            } catch (e: Exception) {
+                promise.reject("TORRENT_START_ERROR", e.message, e)
+            }
+        }.start()
+    }
+
+    @ReactMethod
+    fun stopTorrentStream(promise: Promise) {
+        val context = reactApplicationContext
+        Thread {
+            try {
+                TorrentStreamer.getInstance(context).stopStream()
+                promise.resolve(true)
+            } catch (e: Exception) {
+                promise.reject("TORRENT_STOP_ERROR", e.message, e)
+            }
+        }.start()
+    }
+
+    @ReactMethod
+    fun getTorrentStatus(promise: Promise) {
+        val context = reactApplicationContext
+        try {
+            val status = TorrentStreamer.getInstance(context).getStatus()
+            val map = Arguments.createMap().apply {
+                putDouble("progress", status.progress.toDouble())
+                putDouble("speed", status.downloadRate.toDouble())
+                putInt("peers", status.numPeers)
+                putBoolean("active", status.active)
+            }
+            promise.resolve(map)
+        } catch (e: Exception) {
+            promise.reject("TORRENT_STATUS_ERROR", e.message, e)
+        }
     }
 }

@@ -1,8 +1,10 @@
 package com.anonymous.zunornandroid.cloudstream
 
+import com.anonymous.zunornandroid.R
 import android.animation.Animator
 import android.animation.AnimatorListenerAdapter
 import android.app.PendingIntent
+import android.app.Dialog
 import android.content.Intent
 import android.content.pm.ActivityInfo
 import androidx.activity.OnBackPressedCallback
@@ -82,6 +84,11 @@ class PlayerActivity : AppCompatActivity() {
     private lateinit var errorRetryBtn: TextView
     private lateinit var errorBackBtn: TextView
 
+    private lateinit var brightnessSliderLayout: LinearLayout
+    private lateinit var volumeSliderLayout: LinearLayout
+    private lateinit var brightnessSeekBar: SeekBar
+    private lateinit var volumeSeekBar: SeekBar
+
     private lateinit var logoContainer: FrameLayout
     private var clipDrawable: android.graphics.drawable.ClipDrawable? = null
     private var logoUrl: String = ""
@@ -92,6 +99,8 @@ class PlayerActivity : AppCompatActivity() {
     private var isControlsVisible = true
     private var isSeeking = false
     private var isBuffering = false
+    private var isMuted = false
+    private var lastVolumeLevel = 1.0f
     private val hideHandler = Handler(Looper.getMainLooper())
     private val HIDE_DELAY = 4000L
     private var lastBrightness = -1f
@@ -180,6 +189,8 @@ class PlayerActivity : AppCompatActivity() {
         errorOverlay = createErrorOverlay()
         root.addView(errorOverlay, matchParent())
         errorOverlay.visibility = View.GONE
+
+        createSideSliders()
 
         setContentView(root)
         window.decorView.post { immersiveMode() }
@@ -412,49 +423,61 @@ class PlayerActivity : AppCompatActivity() {
 
     private fun createErrorOverlay(): FrameLayout {
         val container = FrameLayout(this)
-        container.setBackgroundColor(Color.parseColor("#DD000000"))
+        container.setBackgroundColor(Color.parseColor("#F2050505")) // 95% pitch black
 
-        val content = LinearLayout(this).apply {
+        val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
+            setPadding(dp(32), dp(24), dp(32), dp(24))
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor("#730F0F14")) // rgba(15, 15, 20, 0.45)
+                cornerRadius = dp(20).toFloat()
+                setStroke(dp(1), Color.parseColor("#26FFFFFF")) // rgba(255, 255, 255, 0.15)
+            }
         }
         val params = FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.WRAP_CONTENT,
+            dp(360),
             FrameLayout.LayoutParams.WRAP_CONTENT
         )
         params.gravity = Gravity.CENTER
-        container.addView(content, params)
+        container.addView(card, params)
 
         val errorIcon = TextView(this).apply {
             text = "!"
-            setTextColor(Color.parseColor("#FF5555"))
-            textSize = 48f
+            setTextColor(Color.parseColor("#FF4A7D")) // Rose color
+            textSize = 42f
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER
         }
-        content.addView(errorIcon)
+        card.addView(errorIcon)
 
         errorMessageTv = TextView(this).apply {
-            setTextColor(Color.parseColor("#CCFFFFFF"))
-            textSize = 15f
+            setTextColor(Color.parseColor("#A0A0A5")) // theme.colors.textSecondary
+            textSize = 14f
             gravity = Gravity.CENTER
-            setPadding(dp(32), dp(8), dp(32), dp(8))
+            setPadding(0, dp(8), 0, dp(16))
         }
-        content.addView(errorMessageTv)
+        card.addView(errorMessageTv)
 
         val btnRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
         }
-        content.addView(btnRow)
+        card.addView(btnRow)
 
         errorRetryBtn = TextView(this).apply {
             text = "Retry"
             setTextColor(Color.WHITE)
-            textSize = 15f
+            textSize = 14f
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER
-            setBackgroundColor(Color.parseColor("#E50914"))
-            setPadding(dp(32), dp(12), dp(32), dp(12))
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor("#0047FF")) // Electric Blue
+                cornerRadius = dp(10).toFloat()
+            }
+            setPadding(dp(28), dp(10), dp(28), dp(10))
         }
+        addPremiumTouchAnimation(errorRetryBtn)
         val retryLp = LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.WRAP_CONTENT,
             LinearLayout.LayoutParams.WRAP_CONTENT
@@ -465,11 +488,16 @@ class PlayerActivity : AppCompatActivity() {
         errorBackBtn = TextView(this).apply {
             text = "Back"
             setTextColor(Color.WHITE)
-            textSize = 15f
+            textSize = 14f
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER
-            setBackgroundColor(Color.parseColor("#444444"))
-            setPadding(dp(32), dp(12), dp(32), dp(12))
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor("#26FFFFFF")) // Semi-transparent glass background
+                cornerRadius = dp(10).toFloat()
+            }
+            setPadding(dp(28), dp(10), dp(28), dp(10))
         }
+        addPremiumTouchAnimation(errorBackBtn)
         btnRow.addView(errorBackBtn)
 
         return container
@@ -742,7 +770,7 @@ class PlayerActivity : AppCompatActivity() {
 
         loadingSpinner = ProgressBar(this, null, android.R.attr.progressBarStyleLarge).apply {
             isIndeterminate = true
-            val c = Color.parseColor("#E50914")
+            val c = Color.parseColor("#0047FF")
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
                 indeterminateTintList = android.content.res.ColorStateList.valueOf(c)
             }
@@ -811,7 +839,7 @@ class PlayerActivity : AppCompatActivity() {
         val spinner = ProgressBar(this, null, android.R.attr.progressBarStyleSmall).apply {
             isIndeterminate = true
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                indeterminateTintList = android.content.res.ColorStateList.valueOf(Color.WHITE)
+                indeterminateTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#0047FF"))
             }
         }
         val params = FrameLayout.LayoutParams(dp(24), dp(24))
@@ -822,70 +850,7 @@ class PlayerActivity : AppCompatActivity() {
     }
 
     private fun createCenterControls(): View {
-        val container = FrameLayout(this)
-        container.setBackgroundColor(Color.TRANSPARENT)
-
-        val row = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER
-        }
-        val lp = FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.WRAP_CONTENT,
-            FrameLayout.LayoutParams.WRAP_CONTENT
-        )
-        lp.gravity = Gravity.CENTER
-        container.addView(row, lp)
-
-        skipBackBtn = ImageView(this).apply {
-            setImageResource(android.R.drawable.ic_media_rew)
-            setPadding(dp(12), dp(12), dp(12), dp(12))
-            setColorFilter(Color.WHITE)
-            setOnClickListener {
-                player?.let { p ->
-                    p.seekTo((p.currentPosition - 10000).coerceAtLeast(0))
-                }
-                showSeekFeedback("⏪", 10)
-                resetHideTimer()
-            }
-        }
-        row.addView(skipBackBtn, LinearLayout.LayoutParams(dp(52), dp(52)))
-
-        playPauseCenter = ImageView(this).apply {
-            setImageResource(android.R.drawable.ic_media_play)
-            setPadding(dp(18), dp(18), dp(18), dp(18))
-            setColorFilter(Color.WHITE)
-            background = GradientDrawable().apply {
-                shape = GradientDrawable.OVAL
-                setSize(dp(64), dp(64))
-                setColor(Color.parseColor("#99000000"))
-            }
-            setOnClickListener {
-                player?.let { p ->
-                    if (p.isPlaying) { p.pause() } else { p.play() }
-                }
-                resetHideTimer()
-            }
-        }
-        row.addView(playPauseCenter, LinearLayout.LayoutParams(dp(64), dp(64)).apply {
-            setMargins(dp(28), 0, dp(28), 0)
-        })
-
-        skipForwardBtn = ImageView(this).apply {
-            setImageResource(android.R.drawable.ic_media_ff)
-            setPadding(dp(12), dp(12), dp(12), dp(12))
-            setColorFilter(Color.WHITE)
-            setOnClickListener {
-                player?.let { p ->
-                    val dur = p.duration
-                    p.seekTo((p.currentPosition + 10000).coerceAtMost(if (dur > 0) dur else p.currentPosition + 10000))
-                }
-                showSeekFeedback("⏩", 10)
-                resetHideTimer()
-            }
-        }
-        row.addView(skipForwardBtn, LinearLayout.LayoutParams(dp(52), dp(52)))
-
-        return container
+        return View(this).apply { visibility = View.GONE }
     }
 
     private fun createTopBar(title: String): View {
@@ -898,14 +863,13 @@ class PlayerActivity : AppCompatActivity() {
             )
             background = GradientDrawable(
                 GradientDrawable.Orientation.TOP_BOTTOM,
-                intArrayOf(Color.parseColor("#CC000000"), Color.TRANSPARENT)
+                intArrayOf(Color.parseColor("#99000000"), Color.TRANSPARENT)
             )
         }
         container.addView(gradient)
 
-        val bar = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
+        val bar = FrameLayout(this).apply {
+            setPadding(dp(20), dp(16), dp(20), dp(16))
         }
         val barLp = FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.MATCH_PARENT,
@@ -914,68 +878,51 @@ class PlayerActivity : AppCompatActivity() {
         barLp.gravity = Gravity.TOP
         container.addView(bar, barLp)
 
-        val backBtn = TextView(this).apply {
-            text = "\u2190"
-            textSize = 26f
-            setTextColor(Color.WHITE)
-            gravity = Gravity.CENTER
-            setPadding(dp(12), dp(12), dp(16), dp(12))
+        // Left side: Back capsule (Back arrow + Title)
+        val backCapsule = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(14), dp(8), dp(14), dp(8))
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor("#730F0F14"))
+                cornerRadius = dp(18).toFloat()
+                setStroke(dp(1), Color.parseColor("#26FFFFFF"))
+            }
             setOnClickListener { finish() }
         }
-        bar.addView(backBtn, LinearLayout.LayoutParams(dp(52), dp(52)))
+        addPremiumTouchAnimation(backCapsule)
+
+        val backIcon = ImageView(this).apply {
+            setImageResource(R.drawable.ic_arrow_back)
+            setColorFilter(Color.WHITE)
+        }
+        backCapsule.addView(backIcon, LinearLayout.LayoutParams(dp(20), dp(20)))
 
         titleTv = TextView(this).apply {
             text = title
             setTextColor(Color.WHITE)
-            textSize = 16f
-            gravity = Gravity.CENTER_VERTICAL
+            textSize = 14f
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            setPadding(dp(8), 0, 0, 0)
             isSelected = true
             ellipsize = android.text.TextUtils.TruncateAt.MARQUEE
             setSingleLine()
+            maxWidth = dp(320)
         }
-        bar.addView(titleTv, LinearLayout.LayoutParams(
-            0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f
-        ).apply { setMargins(dp(4), 0, dp(4), 0) })
+        backCapsule.addView(titleTv)
 
-        prevEpBtn = ImageView(this).apply {
-            setImageResource(android.R.drawable.ic_media_previous)
-            setPadding(dp(8), dp(8), dp(8), dp(8))
-            setColorFilter(Color.WHITE)
-            setOnClickListener { playPreviousEpisode() }
+        val leftLp = FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.WRAP_CONTENT,
+            FrameLayout.LayoutParams.WRAP_CONTENT
+        ).apply {
+            gravity = Gravity.LEFT or Gravity.CENTER_VERTICAL
         }
-        bar.addView(prevEpBtn, LinearLayout.LayoutParams(dp(44), dp(44)))
+        bar.addView(backCapsule, leftLp)
 
-        nextEpBtn = ImageView(this).apply {
-            setImageResource(android.R.drawable.ic_media_next)
-            setPadding(dp(8), dp(8), dp(8), dp(8))
-            setColorFilter(Color.WHITE)
-            setOnClickListener { playNextEpisode() }
-        }
-        bar.addView(nextEpBtn, LinearLayout.LayoutParams(dp(44), dp(44)))
-
-        sleepTimerBtn = ImageView(this).apply {
-            setImageResource(android.R.drawable.ic_lock_idle_alarm)
-            setPadding(dp(8), dp(8), dp(8), dp(8))
-            setColorFilter(Color.parseColor("#FFFFFF"))
-            setOnClickListener { showSleepTimerDialog() }
-        }
-        bar.addView(sleepTimerBtn, LinearLayout.LayoutParams(dp(44), dp(44)))
-
-        sourcesBtn = ImageView(this).apply {
-            setImageResource(android.R.drawable.ic_menu_sort_by_size)
-            setPadding(dp(8), dp(8), dp(8), dp(8))
-            setColorFilter(Color.WHITE)
-            setOnClickListener { showSourcePicker() }
-        }
-        bar.addView(sourcesBtn, LinearLayout.LayoutParams(dp(44), dp(44)))
-
-        subtitleBtn = ImageView(this).apply {
-            setImageResource(android.R.drawable.ic_menu_info_details)
-            setPadding(dp(8), dp(8), dp(8), dp(8))
-            setColorFilter(Color.parseColor("#E50914"))
-            setOnClickListener { cycleSubtitles() }
-        }
-        bar.addView(subtitleBtn, LinearLayout.LayoutParams(dp(44), dp(44)))
+        // Initialize dummy views for unused fields to prevent compile/null issues
+        sourcesBtn = ImageView(this)
+        subtitleBtn = ImageView(this)
+        sleepTimerBtn = ImageView(this)
 
         return container
     }
@@ -986,17 +933,25 @@ class PlayerActivity : AppCompatActivity() {
 
         val gradient = View(this).apply {
             layoutParams = FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT, dp(96)
+                FrameLayout.LayoutParams.MATCH_PARENT, dp(240)
             )
             background = GradientDrawable(
                 GradientDrawable.Orientation.BOTTOM_TOP,
-                intArrayOf(Color.parseColor("#CC000000"), Color.TRANSPARENT)
+                intArrayOf(
+                    Color.parseColor("#FF050505"), // Solid black
+                    Color.parseColor("#E6050505"), // 90% black
+                    Color.parseColor("#B3050505"), // 70% black
+                    Color.parseColor("#73050505"), // 45% black
+                    Color.parseColor("#26050505"), // 15% black
+                    Color.TRANSPARENT             // Transparent
+                )
             )
         }
         container.addView(gradient)
 
         val bar = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), 0, dp(20), dp(16))
         }
         val barLp = FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.MATCH_PARENT,
@@ -1005,165 +960,669 @@ class PlayerActivity : AppCompatActivity() {
         barLp.gravity = Gravity.BOTTOM
         container.addView(bar, barLp)
 
+        // 1. Progress / Seek Row
+        val progressRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        bar.addView(progressRow, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        ))
+
+        seekBar = SeekBar(this, null, android.R.attr.seekBarStyle).apply {
+            progressTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#0047FF"))
+            progressBackgroundTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#33FFFFFF"))
+            secondaryProgressTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#665580FF"))
+            thumbTintList = android.content.res.ColorStateList.valueOf(Color.WHITE)
+            max = 1000
+            setPadding(0, dp(8), 0, dp(8))
+        }
+        val sbParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        progressRow.addView(seekBar, sbParams)
+
+        // 2. Time Row
         val timeRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(4), 0, dp(12))
         }
         bar.addView(timeRow, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT,
             LinearLayout.LayoutParams.WRAP_CONTENT
         ))
 
-        val spacer = View(this).apply { layoutParams = LinearLayout.LayoutParams(dp(16), 1) }
-        timeRow.addView(spacer)
-
         currentTimeTv = TextView(this).apply {
             text = "00:00"
-            setTextColor(Color.WHITE)
+            setTextColor(Color.parseColor("#A0A0A5"))
             textSize = 12f
-            gravity = Gravity.CENTER
         }
-        timeRow.addView(currentTimeTv, LinearLayout.LayoutParams(dp(48), LinearLayout.LayoutParams.WRAP_CONTENT))
+        timeRow.addView(currentTimeTv)
 
-        seekBar = SeekBar(this, null, android.R.attr.seekBarStyle).apply {
-            progressTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#E50914"))
-            progressBackgroundTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#66FFFFFF"))
-            secondaryProgressTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#44FFFFFF"))
-            max = 1000
+        val timeSpacer = View(this).apply {
+            layoutParams = LinearLayout.LayoutParams(0, 1, 1f)
         }
-        timeRow.addView(seekBar, LinearLayout.LayoutParams(0, dp(32), 1f))
+        timeRow.addView(timeSpacer)
 
         endTimeTv = TextView(this).apply {
             text = "00:00"
-            setTextColor(Color.WHITE)
+            setTextColor(Color.parseColor("#A0A0A5"))
             textSize = 12f
+        }
+        timeRow.addView(endTimeTv)
+
+        // 3. Button / Control Row
+        val buttonRow = FrameLayout(this).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        }
+        bar.addView(buttonRow)
+
+        // --- Left Container ---
+        val leftContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+
+        // Episodes Button (Visible for series only)
+        val episodesBtn = createIconButton(R.drawable.ic_episodes) {
+            showEpisodesDialog()
+        }
+        val mediaType = intent.getStringExtra("mediaType") ?: "movie"
+        val isSeries = (mediaType == "series" || mediaType == "show") && episodesArray != null && episodesArray!!.length() > 0
+        episodesBtn.visibility = if (isSeries) View.VISIBLE else View.GONE
+        leftContainer.addView(episodesBtn)
+
+        // Settings Button
+        val settingsBtn = createIconButton(R.drawable.ic_settings) {
+            showSettingsDialog()
+        }
+        leftContainer.addView(settingsBtn, LinearLayout.LayoutParams(dp(40), dp(40)).apply {
+            if (isSeries) leftMargin = dp(12)
+        })
+
+        val leftLp = FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.WRAP_CONTENT,
+            FrameLayout.LayoutParams.WRAP_CONTENT
+        ).apply {
+            gravity = Gravity.LEFT or Gravity.CENTER_VERTICAL
+        }
+        buttonRow.addView(leftContainer, leftLp)
+
+        // --- Center Container ---
+        val centerContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+
+        // Prev Episode Button
+        prevEpBtn = ImageView(this).apply {
+            setImageResource(R.drawable.ic_skip_previous)
+            setColorFilter(Color.WHITE)
+            setPadding(dp(8), dp(8), dp(8), dp(8))
+            setOnClickListener { playPreviousEpisode() }
+        }
+        addPremiumTouchAnimation(prevEpBtn)
+        centerContainer.addView(prevEpBtn, LinearLayout.LayoutParams(dp(40), dp(40)).apply {
+            rightMargin = dp(12)
+        })
+
+        // Rewind 10s
+        val rewindBtn = ImageView(this).apply {
+            setImageResource(R.drawable.ic_rewind)
+            setColorFilter(Color.WHITE)
+            setPadding(dp(8), dp(8), dp(8), dp(8))
+            setOnClickListener {
+                player?.let { p ->
+                    p.seekTo((p.currentPosition - 10000).coerceAtLeast(0))
+                }
+                showSeekFeedback("⏪", 10)
+                resetHideTimer()
+            }
+        }
+        addPremiumTouchAnimation(rewindBtn)
+        centerContainer.addView(rewindBtn, LinearLayout.LayoutParams(dp(40), dp(40)))
+
+        // Play / Pause Button
+        playPauseCenter = ImageView(this).apply {
+            setImageResource(R.drawable.ic_play)
+            setPadding(dp(14), dp(14), dp(14), dp(14))
+            setColorFilter(Color.WHITE)
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(Color.parseColor("#730F0F14"))
+                setStroke(dp(1), Color.parseColor("#26FFFFFF"))
+            }
+            setOnClickListener {
+                player?.let { p ->
+                    if (p.isPlaying) { p.pause() } else { p.play() }
+                }
+                resetHideTimer()
+            }
+        }
+        addPremiumTouchAnimation(playPauseCenter)
+        centerContainer.addView(playPauseCenter, LinearLayout.LayoutParams(dp(54), dp(54)).apply {
+            leftMargin = dp(20)
+            rightMargin = dp(20)
+        })
+
+        // Fast Forward 10s
+        val ffBtn = ImageView(this).apply {
+            setImageResource(R.drawable.ic_fast_forward)
+            setColorFilter(Color.WHITE)
+            setPadding(dp(8), dp(8), dp(8), dp(8))
+            setOnClickListener {
+                player?.let { p ->
+                    val dur = p.duration
+                    p.seekTo((p.currentPosition + 10000).coerceAtMost(if (dur > 0) dur else p.currentPosition + 10000))
+                }
+                showSeekFeedback("⏩", 10)
+                resetHideTimer()
+            }
+        }
+        addPremiumTouchAnimation(ffBtn)
+        centerContainer.addView(ffBtn, LinearLayout.LayoutParams(dp(40), dp(40)))
+
+        // Next Episode Button
+        nextEpBtn = ImageView(this).apply {
+            setImageResource(R.drawable.ic_skip_next)
+            setColorFilter(Color.WHITE)
+            setPadding(dp(8), dp(8), dp(8), dp(8))
+            setOnClickListener { playNextEpisode() }
+        }
+        addPremiumTouchAnimation(nextEpBtn)
+        centerContainer.addView(nextEpBtn, LinearLayout.LayoutParams(dp(40), dp(40)).apply {
+            leftMargin = dp(12)
+        })
+
+        val centerLp = FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.WRAP_CONTENT,
+            FrameLayout.LayoutParams.WRAP_CONTENT
+        ).apply {
             gravity = Gravity.CENTER
         }
-        timeRow.addView(endTimeTv, LinearLayout.LayoutParams(dp(48), LinearLayout.LayoutParams.WRAP_CONTENT))
+        buttonRow.addView(centerContainer, centerLp)
 
-        val spacer2 = View(this).apply { layoutParams = LinearLayout.LayoutParams(dp(16), 1) }
-        timeRow.addView(spacer2)
+        // --- Right Container ---
+        val rightContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+
+        // Volume Button
+        val volumeBtn = ImageView(this).apply {
+            setImageResource(R.drawable.ic_volume)
+            setColorFilter(Color.WHITE)
+            setPadding(dp(8), dp(8), dp(8), dp(8))
+            tag = "volume_icon"
+            setOnClickListener { toggleMute() }
+        }
+        addPremiumTouchAnimation(volumeBtn)
+        rightContainer.addView(volumeBtn, LinearLayout.LayoutParams(dp(40), dp(40)))
+
+        // Fullscreen Button
+        val fullscreenBtn = ImageView(this).apply {
+            setImageResource(R.drawable.ic_fullscreen)
+            setColorFilter(Color.WHITE)
+            setPadding(dp(8), dp(8), dp(8), dp(8))
+            setOnClickListener { cycleResizeMode() }
+        }
+        addPremiumTouchAnimation(fullscreenBtn)
+        rightContainer.addView(fullscreenBtn, LinearLayout.LayoutParams(dp(40), dp(40)).apply {
+            leftMargin = dp(12)
+        })
+
+        val rightLp = FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.WRAP_CONTENT,
+            FrameLayout.LayoutParams.WRAP_CONTENT
+        ).apply {
+            gravity = Gravity.RIGHT or Gravity.CENTER_VERTICAL
+        }
+        buttonRow.addView(rightContainer, rightLp)
+
+        // Assign to lateinit variables
+        skipBackBtn = rewindBtn
+        skipForwardBtn = ffBtn
 
         return container
     }
 
-    private fun showSleepTimerDialog() {
-        val items = arrayOf("15 minutes", "30 minutes", "60 minutes", "End of episode", "Off")
-        val dialog = AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog)
-        dialog.setTitle("Sleep Timer")
-        dialog.setItems(items) { _, which ->
-            sleepHandler.removeCallbacks(sleepRunnable)
-            when (which) {
-                0 -> { sleepTimerEnd = System.currentTimeMillis() + 15 * 60 * 1000; showToastLabel("Sleep: 15 min") }
-                1 -> { sleepTimerEnd = System.currentTimeMillis() + 30 * 60 * 1000; showToastLabel("Sleep: 30 min") }
-                2 -> { sleepTimerEnd = System.currentTimeMillis() + 60 * 60 * 1000; showToastLabel("Sleep: 60 min") }
-                3 -> { sleepTimerEndOfEpisode = true; showToastLabel("Sleep: End of episode") }
-                4 -> { sleepTimerEnd = -1; sleepTimerEndOfEpisode = false; showToastLabel("Sleep: Off") }
-            }
-            if (which in 0..2) {
-                val delay = (sleepTimerEnd - System.currentTimeMillis()).coerceAtLeast(0)
-                sleepHandler.postDelayed(sleepRunnable, delay)
-            }
+    private fun createIconButton(iconRes: Int, onClick: () -> Unit): ImageView {
+        val btn = ImageView(this).apply {
+            setImageResource(iconRes)
+            setColorFilter(Color.WHITE)
+            setPadding(dp(8), dp(8), dp(8), dp(8))
+            setOnClickListener { onClick() }
         }
-        dialog.show()
-        resetHideTimer()
+        addPremiumTouchAnimation(btn)
+        return btn
     }
 
-    private fun updateCenterPlayPauseIcon() {
-        player?.let { p ->
-            playPauseCenter.setImageResource(
-                if (p.isPlaying) android.R.drawable.ic_media_pause
-                else android.R.drawable.ic_media_play
-            )
+    private fun addPremiumTouchAnimation(view: View) {
+        view.setOnTouchListener { v, event ->
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    v.animate().scaleX(0.92f).scaleY(0.92f).setDuration(100).start()
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    v.animate().scaleX(1f).scaleY(1f).setDuration(100).start()
+                }
+            }
+            false
         }
     }
 
-    private fun updateBuffering(buffering: Boolean) {
-        isBuffering = buffering
-        if (buffering && isControlsVisible) {
-            bufferingView.visibility = View.VISIBLE
+    private fun toggleMute() {
+        val exo = player ?: return
+        val volumeIcon = bottomBar.findViewWithTag<ImageView>("volume_icon")
+        if (isMuted) {
+            exo.volume = lastVolumeLevel
+            isMuted = false
+            volumeIcon?.setImageResource(R.drawable.ic_volume)
+            showToastLabel("Volume: On")
         } else {
-            bufferingView.visibility = View.GONE
+            lastVolumeLevel = exo.volume
+            exo.volume = 0f
+            isMuted = true
+            volumeIcon?.setImageResource(R.drawable.ic_volume_off)
+            showToastLabel("Volume: Muted")
         }
     }
 
-    private fun showControlsAfterLoad() {
-        Handler(Looper.getMainLooper()).postDelayed({
-            showControls()
-        }, 200)
+    private fun cycleResizeMode() {
+        playerView.let { pv ->
+            val modes = intArrayOf(
+                AspectRatioFrameLayout.RESIZE_MODE_FIT,
+                AspectRatioFrameLayout.RESIZE_MODE_ZOOM,
+                AspectRatioFrameLayout.RESIZE_MODE_FILL
+            )
+            val current = pv.resizeMode
+            val nextIdx = (modes.indexOf(current) + 1) % modes.size
+            pv.resizeMode = modes[nextIdx]
+            
+            val modeText = when (modes[nextIdx]) {
+                AspectRatioFrameLayout.RESIZE_MODE_FIT -> "Fit to Screen"
+                AspectRatioFrameLayout.RESIZE_MODE_ZOOM -> "Zoomed / Crop"
+                AspectRatioFrameLayout.RESIZE_MODE_FILL -> "Stretch / Fill"
+                else -> "Fit to Screen"
+            }
+            showToastLabel(modeText)
+        }
     }
 
-    private fun showControls() {
-        isControlsVisible = true
-        topBar.animate().cancel()
-        bottomBar.animate().cancel()
-        centerControls.animate().cancel()
-        topBar.alpha = 0f
-        bottomBar.alpha = 0f
-        centerControls.alpha = 0f
-        topBar.visibility = View.VISIBLE
-        bottomBar.visibility = View.VISIBLE
-        centerControls.visibility = View.VISIBLE
-        topBar.animate().alpha(1f).setDuration(fadeDuration).setInterpolator(AccelerateDecelerateInterpolator()).start()
-        bottomBar.animate().alpha(1f).setDuration(fadeDuration).setInterpolator(AccelerateDecelerateInterpolator()).start()
-        centerControls.animate().alpha(1f).setDuration(fadeDuration).setInterpolator(AccelerateDecelerateInterpolator()).start()
-        updateBuffering(isBuffering)
+    private fun startDownload(url: String) {
+        if (url.startsWith("magnet:") || url.contains("torrent")) {
+            showToastLabel("Cannot download torrent streams directly")
+            return
+        }
+        try {
+            val uri = Uri.parse(url)
+            val request = android.app.DownloadManager.Request(uri).apply {
+                setTitle(getCurrentEpisodeTitle())
+                setDescription("Downloading video stream")
+                setNotificationVisibility(android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                setDestinationInExternalPublicDir(android.os.Environment.DIRECTORY_DOWNLOADS, "${getCurrentEpisodeTitle()}.mp4")
+                
+                val headers = try { JSONObject(currentHeadersJson) } catch (_: Exception) { null }
+                headers?.keys()?.forEach { key ->
+                    addRequestHeader(key, headers.getString(key))
+                }
+            }
+            val dm = getSystemService(DOWNLOAD_SERVICE) as android.app.DownloadManager
+            dm.enqueue(request)
+            showToastLabel("Download started in background")
+        } catch (e: Exception) {
+            showToastLabel("Download failed: ${e.message}")
+        }
+    }
+
+    private fun showSettingsDialog() {
+        PlayerSettingsDialog().show()
         resetHideTimer()
     }
 
-    private fun hideControls() {
-        isControlsVisible = false
-        topBar.animate().cancel()
-        bottomBar.animate().cancel()
-        centerControls.animate().cancel()
-        topBar.animate().alpha(0f).setDuration(fadeDuration).setInterpolator(AccelerateDecelerateInterpolator())
-            .withEndAction { topBar.visibility = View.GONE }
-        bottomBar.animate().alpha(0f).setDuration(fadeDuration).setInterpolator(AccelerateDecelerateInterpolator())
-            .withEndAction { bottomBar.visibility = View.GONE }
-        centerControls.animate().alpha(0f).setDuration(fadeDuration).setInterpolator(AccelerateDecelerateInterpolator())
-            .withEndAction { centerControls.visibility = View.GONE }
-        bufferingView.visibility = View.GONE
-        hideHandler.removeCallbacks(hideRunnable)
+    private fun showEpisodesDialog() {
+        EpisodesDialog().show()
+        resetHideTimer()
     }
 
-    private fun toggleControls() {
-        if (isControlsVisible) hideControls() else showControls()
-    }
+    private inner class PlayerSettingsDialog : Dialog(this@PlayerActivity, android.R.style.Theme_DeviceDefault_Dialog) {
+        private var activeCategory = "Quality"
+        private lateinit var optionsContainer: LinearLayout
+        private lateinit var categoryList: LinearLayout
 
-    private fun resetHideTimer() {
-        hideHandler.removeCallbacks(hideRunnable)
-        if (isControlsVisible) {
-            player?.let { p ->
-                if (p.isPlaying) {
-                    hideHandler.postDelayed(hideRunnable, HIDE_DELAY)
+        override fun onCreate(savedInstanceState: Bundle?) {
+            super.onCreate(savedInstanceState)
+            requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
+
+            val dialogWindow = window
+            dialogWindow?.setBackgroundDrawable(GradientDrawable().apply {
+                setColor(Color.parseColor("#F2100E14"))
+                cornerRadius = dp(20).toFloat()
+                setStroke(dp(1), Color.parseColor("#26FFFFFF"))
+            })
+
+            val root = LinearLayout(this@PlayerActivity).apply {
+                orientation = LinearLayout.HORIZONTAL
+            }
+            setContentView(root)
+            dialogWindow?.setLayout(dp(540), dp(300))
+
+            categoryList = LinearLayout(this@PlayerActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER_HORIZONTAL
+                setPadding(0, dp(16), 0, dp(16))
+                background = GradientDrawable().apply {
+                    setColor(Color.parseColor("#33000000"))
+                }
+            }
+            root.addView(categoryList, LinearLayout.LayoutParams(dp(180), LinearLayout.LayoutParams.MATCH_PARENT))
+
+            val divider = View(this@PlayerActivity).apply {
+                setBackgroundColor(Color.parseColor("#26FFFFFF"))
+            }
+            root.addView(divider, LinearLayout.LayoutParams(dp(1), LinearLayout.LayoutParams.MATCH_PARENT))
+
+            val scrollView = android.widget.ScrollView(this@PlayerActivity).apply {
+                isFillViewport = true
+            }
+            optionsContainer = LinearLayout(this@PlayerActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(20), dp(16), dp(20), dp(16))
+            }
+            scrollView.addView(optionsContainer, FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT
+            ))
+            root.addView(scrollView, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f))
+
+            refreshCategories()
+            showCategoryOptions()
+        }
+
+        private fun refreshCategories() {
+            categoryList.removeAllViews()
+            val categories = mutableListOf("Quality", "Subtitles", "Sleep Timer", "Playback Speed")
+            
+            categories.forEach { cat ->
+                val tab = TextView(this@PlayerActivity).apply {
+                    text = cat.uppercase()
+                    setTextColor(if (activeCategory == cat) Color.parseColor("#5580FF") else Color.parseColor("#8E8D92"))
+                    textSize = 12f
+                    typeface = android.graphics.Typeface.DEFAULT_BOLD
+                    gravity = Gravity.CENTER
+                    setPadding(dp(16), dp(12), dp(16), dp(12))
+                    background = if (activeCategory == cat) GradientDrawable().apply {
+                        setColor(Color.parseColor("#225580FF"))
+                        cornerRadius = dp(8).toFloat()
+                    } else null
+                    setOnClickListener {
+                        activeCategory = cat
+                        refreshCategories()
+                        showCategoryOptions()
+                    }
+                }
+                addPremiumTouchAnimation(tab)
+                categoryList.addView(tab, LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    setMargins(dp(12), dp(4), dp(12), dp(4))
+                })
+            }
+        }
+
+        private fun showCategoryOptions() {
+            optionsContainer.removeAllViews()
+            when (activeCategory) {
+                "Quality" -> populateQualityOptions()
+                "Subtitles" -> populateSubtitleOptions()
+                "Sleep Timer" -> populateSleepTimerOptions()
+                "Playback Speed" -> populateSpeedOptions()
+            }
+        }
+
+        private fun populateQualityOptions() {
+            val sources = allSources
+            if (sources == null || sources.length() == 0) {
+                val emptyTv = TextView(this@PlayerActivity).apply {
+                    text = "No quality options available"
+                    setTextColor(Color.WHITE)
+                    textSize = 14f
+                    gravity = Gravity.CENTER
+                }
+                optionsContainer.addView(emptyTv)
+                return
+            }
+
+            for (i in 0 until sources.length()) {
+                val s = sources.getJSONObject(i)
+                val q = s.optString("quality", "?")
+                val t = s.optString("type", "Direct")
+                val labelText = "$q — $t"
+                val isSelected = (i == currentSourceIndex)
+
+                val row = createOptionRow(labelText, isSelected) {
+                    currentSourceIndex = i
+                    switchToSource(i)
+                    dismiss()
+                }
+                optionsContainer.addView(row)
+            }
+        }
+
+        private fun populateSubtitleOptions() {
+            val subs = allSubtitles
+            val totalSubs = (subs?.length() ?: 0)
+            
+            val isOffSelected = (currentSubtitleIndex < 0)
+            val offRow = createOptionRow("Subtitle Off", isOffSelected) {
+                currentSubtitleIndex = -1
+                switchToSource(currentSourceIndex)
+                subBtnTint(true)
+                showToastLabel("Subtitles: Off")
+                dismiss()
+            }
+            optionsContainer.addView(offRow)
+
+            if (subs != null) {
+                for (i in 0 until totalSubs) {
+                    val sub = subs.getJSONObject(i)
+                    val lang = sub.optString("lang", "?")
+                    val isSelected = (i == currentSubtitleIndex)
+
+                    val row = createOptionRow(lang, isSelected) {
+                        currentSubtitleIndex = i
+                        switchToSource(currentSourceIndex)
+                        subBtnTint(false)
+                        showToastLabel("Subtitles: $lang")
+                        dismiss()
+                    }
+                    optionsContainer.addView(row)
                 }
             }
         }
+
+        private fun populateSleepTimerOptions() {
+            val items = arrayOf("Off", "15 minutes", "30 minutes", "60 minutes", "End of episode")
+            items.forEachIndexed { idx, label ->
+                val isSelected = when (idx) {
+                    0 -> !sleepTimerEndOfEpisode && sleepTimerEnd == -1L
+                    1 -> !sleepTimerEndOfEpisode && sleepTimerEnd > 0L && (sleepTimerEnd - System.currentTimeMillis() <= 15 * 60 * 1000 + 5000)
+                    2 -> !sleepTimerEndOfEpisode && sleepTimerEnd > 0L && (sleepTimerEnd - System.currentTimeMillis() > 15 * 60 * 1000 && sleepTimerEnd - System.currentTimeMillis() <= 30 * 60 * 1000 + 5000)
+                    3 -> !sleepTimerEndOfEpisode && sleepTimerEnd > 0L && (sleepTimerEnd - System.currentTimeMillis() > 30 * 60 * 1000)
+                    4 -> sleepTimerEndOfEpisode
+                    else -> false
+                }
+
+                val row = createOptionRow(label, isSelected) {
+                    sleepHandler.removeCallbacks(sleepRunnable)
+                    when (idx) {
+                        0 -> { sleepTimerEnd = -1; sleepTimerEndOfEpisode = false; showToastLabel("Sleep Timer: Off") }
+                        1 -> { sleepTimerEnd = System.currentTimeMillis() + 15 * 60 * 1000; showToastLabel("Sleep Timer: 15 min") }
+                        2 -> { sleepTimerEnd = System.currentTimeMillis() + 30 * 60 * 1000; showToastLabel("Sleep Timer: 30 min") }
+                        3 -> { sleepTimerEnd = System.currentTimeMillis() + 60 * 60 * 1000; showToastLabel("Sleep Timer: 60 min") }
+                        4 -> { sleepTimerEndOfEpisode = true; showToastLabel("Sleep Timer: End of episode") }
+                    }
+                    if (idx in 1..3) {
+                        val delay = (sleepTimerEnd - System.currentTimeMillis()).coerceAtLeast(0)
+                        sleepHandler.postDelayed(sleepRunnable, delay)
+                    }
+                    dismiss()
+                }
+                optionsContainer.addView(row)
+            }
+        }
+
+        private fun populateSpeedOptions() {
+            val speeds = arrayOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f)
+            val currentSpeed = player?.playbackParameters?.speed ?: 1.0f
+
+            speeds.forEach { speed ->
+                val label = if (speed == 1.0f) "1.0x (Normal)" else "${speed}x"
+                val isSelected = abs(currentSpeed - speed) < 0.05f
+
+                val row = createOptionRow(label, isSelected) {
+                    player?.setPlaybackSpeed(speed)
+                    showToastLabel("Speed: $label")
+                    dismiss()
+                }
+                optionsContainer.addView(row)
+            }
+        }
+
+        private fun createOptionRow(text: String, isSelected: Boolean, onClick: () -> Unit): LinearLayout {
+            val row = LinearLayout(this@PlayerActivity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(12), dp(10), dp(12), dp(10))
+                background = if (isSelected) GradientDrawable().apply {
+                    setColor(Color.parseColor("#14FFFFFF"))
+                    cornerRadius = dp(8).toFloat()
+                } else null
+                setOnClickListener { onClick() }
+            }
+            addPremiumTouchAnimation(row)
+
+            val tv = TextView(this@PlayerActivity).apply {
+                this.text = text
+                setTextColor(if (isSelected) Color.parseColor("#5580FF") else Color.WHITE)
+                textSize = 14f
+                typeface = if (isSelected) android.graphics.Typeface.DEFAULT_BOLD else android.graphics.Typeface.DEFAULT
+            }
+            row.addView(tv, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+
+            if (isSelected) {
+                val check = TextView(this@PlayerActivity).apply {
+                    this.text = "✓"
+                    setTextColor(Color.parseColor("#5580FF"))
+                    textSize = 14f
+                    typeface = android.graphics.Typeface.DEFAULT_BOLD
+                }
+                row.addView(check)
+            }
+
+            return row
+        }
     }
 
-    private val hideRunnable = Runnable { hideControls() }
+    private inner class EpisodesDialog : Dialog(this@PlayerActivity, android.R.style.Theme_DeviceDefault_Dialog) {
+        override fun onCreate(savedInstanceState: Bundle?) {
+            super.onCreate(savedInstanceState)
+            requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
 
-    private fun showSourcePicker() {
-        val sources = allSources ?: return
-        if (sources.length() == 0) return
+            val dialogWindow = window
+            dialogWindow?.setBackgroundDrawable(GradientDrawable().apply {
+                setColor(Color.parseColor("#F2100E14"))
+                cornerRadius = dp(20).toFloat()
+                setStroke(dp(1), Color.parseColor("#26FFFFFF"))
+            })
 
-        val items = mutableListOf<String>()
-        for (i in 0 until sources.length()) {
-            val s = sources.getJSONObject(i)
-            val q = s.optString("quality", "?")
-            val t = s.optString("type", "Direct")
-            items.add("$q — $t")
+            val root = LinearLayout(this@PlayerActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(20), dp(16), dp(20), dp(16))
+            }
+            setContentView(root)
+            dialogWindow?.setLayout(dp(440), dp(300))
+
+            val header = TextView(this@PlayerActivity).apply {
+                text = "SELECT EPISODE"
+                setTextColor(Color.WHITE)
+                textSize = 15f
+                typeface = android.graphics.Typeface.DEFAULT_BOLD
+                setPadding(0, 0, 0, dp(12))
+            }
+            root.addView(header)
+
+            val divider = View(this@PlayerActivity).apply {
+                setBackgroundColor(Color.parseColor("#26FFFFFF"))
+            }
+            root.addView(divider, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(1)).apply {
+                bottomMargin = dp(8)
+            })
+
+            val scrollView = android.widget.ScrollView(this@PlayerActivity).apply {
+                isFillViewport = true
+            }
+            val listContainer = LinearLayout(this@PlayerActivity).apply {
+                orientation = LinearLayout.VERTICAL
+            }
+            scrollView.addView(listContainer)
+            root.addView(scrollView, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                0, 1f
+            ))
+
+            val episodes = episodesArray
+            if (episodes != null) {
+                for (i in 0 until episodes.length()) {
+                    val ep = episodes.getJSONObject(i)
+                    val label = ep.optString("label", "Episode ${i + 1}")
+                    val isSelected = (i == currentEpisodeIndex)
+
+                    val row = LinearLayout(this@PlayerActivity).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                        gravity = Gravity.CENTER_VERTICAL
+                        setPadding(dp(12), dp(10), dp(12), dp(10))
+                        background = if (isSelected) GradientDrawable().apply {
+                            setColor(Color.parseColor("#14FFFFFF"))
+                            cornerRadius = dp(8).toFloat()
+                        } else null
+                        setOnClickListener {
+                            currentEpisodeIndex = i
+                            val mediaRef = ep.optString("mediaRef", "")
+                            if (mediaRef.isNotEmpty()) {
+                                resolveAndPlay(providerName ?: "", mediaRef)
+                            }
+                            dismiss()
+                        }
+                    }
+                    addPremiumTouchAnimation(row)
+
+                    val tv = TextView(this@PlayerActivity).apply {
+                        this.text = label
+                        setTextColor(if (isSelected) Color.parseColor("#5580FF") else Color.WHITE)
+                        textSize = 14f
+                        typeface = if (isSelected) android.graphics.Typeface.DEFAULT_BOLD else android.graphics.Typeface.DEFAULT
+                    }
+                    row.addView(tv, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+
+                    if (isSelected) {
+                        val check = TextView(this@PlayerActivity).apply {
+                            this.text = "✓"
+                            setTextColor(Color.parseColor("#5580FF"))
+                            textSize = 14f
+                            typeface = android.graphics.Typeface.DEFAULT_BOLD
+                        }
+                        row.addView(check)
+                    }
+
+                    listContainer.addView(row)
+                }
+            }
         }
-
-        val dialog = AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog)
-        dialog.setTitle("Select Source")
-        dialog.setSingleChoiceItems(items.toTypedArray(), currentSourceIndex) { d, which ->
-            currentSourceIndex = which
-            switchToSource(which)
-            d.dismiss()
-        }
-        dialog.setNegativeButton("Cancel", null)
-        dialog.show()
     }
 
     private fun switchToSource(index: Int) {
@@ -1191,21 +1650,97 @@ class PlayerActivity : AppCompatActivity() {
         setupExoPlayer(url, headersJson, subtitleUrl)
     }
 
-    private fun cycleSubtitles() {
-        val subs = allSubtitles ?: return
-        if (subs.length() == 0) return
-
-        currentSubtitleIndex = (currentSubtitleIndex + 2) % (subs.length() + 1) - 1
-
-        switchToSource(currentSourceIndex)
-
-        subBtnTint(currentSubtitleIndex < 0)
-        val label = if (currentSubtitleIndex < 0) "Sub: Off" else "Sub: ${subs.getJSONObject(currentSubtitleIndex).optString("lang", "?")}"
-        showToastLabel(label)
+    private fun updateCenterPlayPauseIcon() {
+        player?.let { p ->
+            playPauseCenter.setImageResource(
+                if (p.isPlaying) R.drawable.ic_pause
+                else R.drawable.ic_play
+            )
+        }
     }
 
+    private fun updateBuffering(buffering: Boolean) {
+        isBuffering = buffering
+        if (buffering && isControlsVisible) {
+            bufferingView.visibility = View.VISIBLE
+        } else {
+            bufferingView.visibility = View.GONE
+        }
+    }
+
+    private fun showControlsAfterLoad() {
+        Handler(Looper.getMainLooper()).postDelayed({
+            showControls()
+        }, 200)
+    }
+
+    private fun showControls() {
+        isControlsVisible = true
+        topBar.animate().cancel()
+        bottomBar.animate().cancel()
+        centerControls.animate().cancel()
+        brightnessSliderLayout.animate().cancel()
+        volumeSliderLayout.animate().cancel()
+        topBar.alpha = 0f
+        bottomBar.alpha = 0f
+        centerControls.alpha = 0f
+        brightnessSliderLayout.alpha = 0f
+        volumeSliderLayout.alpha = 0f
+        topBar.visibility = View.VISIBLE
+        bottomBar.visibility = View.VISIBLE
+        centerControls.visibility = View.VISIBLE
+        brightnessSliderLayout.visibility = View.VISIBLE
+        volumeSliderLayout.visibility = View.VISIBLE
+        topBar.animate().alpha(1f).setDuration(fadeDuration).setInterpolator(AccelerateDecelerateInterpolator()).start()
+        bottomBar.animate().alpha(1f).setDuration(fadeDuration).setInterpolator(AccelerateDecelerateInterpolator()).start()
+        centerControls.animate().alpha(1f).setDuration(fadeDuration).setInterpolator(AccelerateDecelerateInterpolator()).start()
+        brightnessSliderLayout.animate().alpha(1f).setDuration(fadeDuration).start()
+        volumeSliderLayout.animate().alpha(1f).setDuration(fadeDuration).start()
+        syncSliderValues()
+        updateBuffering(isBuffering)
+        resetHideTimer()
+    }
+
+    private fun hideControls() {
+        isControlsVisible = false
+        topBar.animate().cancel()
+        bottomBar.animate().cancel()
+        centerControls.animate().cancel()
+        brightnessSliderLayout.animate().cancel()
+        volumeSliderLayout.animate().cancel()
+        topBar.animate().alpha(0f).setDuration(fadeDuration).setInterpolator(AccelerateDecelerateInterpolator())
+            .withEndAction { topBar.visibility = View.GONE }
+        bottomBar.animate().alpha(0f).setDuration(fadeDuration).setInterpolator(AccelerateDecelerateInterpolator())
+            .withEndAction { bottomBar.visibility = View.GONE }
+        centerControls.animate().alpha(0f).setDuration(fadeDuration).setInterpolator(AccelerateDecelerateInterpolator())
+            .withEndAction { centerControls.visibility = View.GONE }
+        brightnessSliderLayout.animate().alpha(0f).setDuration(fadeDuration)
+            .withEndAction { brightnessSliderLayout.visibility = View.GONE }
+        volumeSliderLayout.animate().alpha(0f).setDuration(fadeDuration)
+            .withEndAction { volumeSliderLayout.visibility = View.GONE }
+        bufferingView.visibility = View.GONE
+        hideHandler.removeCallbacks(hideRunnable)
+    }
+
+    private fun toggleControls() {
+        if (isControlsVisible) hideControls() else showControls()
+    }
+
+    private fun resetHideTimer() {
+        hideHandler.removeCallbacks(hideRunnable)
+        if (isControlsVisible) {
+            player?.let { p ->
+                if (p.isPlaying) {
+                    hideHandler.postDelayed(hideRunnable, HIDE_DELAY)
+                }
+            }
+        }
+    }
+
+    private val hideRunnable = Runnable { hideControls() }
+
     private fun subBtnTint(isOff: Boolean) {
-        subtitleBtn.setColorFilter(if (isOff) Color.WHITE else Color.parseColor("#E50914"))
+        subtitleBtn.setColorFilter(if (isOff) Color.WHITE else Color.parseColor("#0047FF"))
     }
 
     private fun showToastLabel(text: String) {
@@ -1214,8 +1749,12 @@ class PlayerActivity : AppCompatActivity() {
             setTextColor(Color.WHITE)
             textSize = 14f
             gravity = Gravity.CENTER
-            setBackgroundColor(Color.parseColor("#CC000000"))
-            setPadding(dp(16), dp(8), dp(16), dp(8))
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor("#E6141218"))
+                cornerRadius = dp(12).toFloat()
+                setStroke(dp(1), Color.parseColor("#26FFFFFF"))
+            }
+            setPadding(dp(20), dp(10), dp(20), dp(10))
         }
         val params = FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.WRAP_CONTENT,
@@ -1347,6 +1886,125 @@ class PlayerActivity : AppCompatActivity() {
             .start()
     }
 
+    private fun syncSliderValues() {
+        // Sync brightness slider
+        val lp = window.attributes
+        val bright = if (lp.screenBrightness < 0) 0.5f else lp.screenBrightness
+        brightnessSeekBar.progress = (bright * 100).toInt().coerceIn(0, 100)
+
+        // Sync volume slider
+        val am = audioManager ?: return
+        val maxVol = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+        val curVol = am.getStreamVolume(AudioManager.STREAM_MUSIC)
+        volumeSeekBar.max = maxVol
+        volumeSeekBar.progress = curVol
+    }
+
+    private fun createSideSliders() {
+        val sliderHeight = dp(140)
+        val sliderWidth = dp(36)
+        val containerWidth = dp(52)
+        val containerHeight = dp(200)
+
+        // ─── Brightness Slider (Left side) ───
+        brightnessSliderLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(dp(4), dp(12), dp(4), dp(16))
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor("#99100E14"))
+                cornerRadius = dp(20).toFloat()
+                setStroke(dp(1), Color.parseColor("#26FFFFFF"))
+            }
+        }
+        val brightLp = FrameLayout.LayoutParams(containerWidth, containerHeight).apply {
+            gravity = Gravity.LEFT or Gravity.CENTER_VERTICAL
+            leftMargin = dp(16)
+        }
+
+        val brightIcon = TextView(this).apply {
+            text = "☀"
+            setTextColor(Color.parseColor("#A0A0A5"))
+            textSize = 14f
+            gravity = Gravity.CENTER
+        }
+        brightnessSliderLayout.addView(brightIcon, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT
+        ).apply { bottomMargin = dp(4) })
+
+        brightnessSeekBar = SeekBar(this, null, android.R.attr.seekBarStyle).apply {
+            rotation = -90f
+            max = 100
+            progressTintList = android.content.res.ColorStateList.valueOf(Color.WHITE)
+            progressBackgroundTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#33FFFFFF"))
+            thumbTintList = android.content.res.ColorStateList.valueOf(Color.WHITE)
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(sb: SeekBar?, progress: Int, fromUser: Boolean) {
+                    if (fromUser) {
+                        val newBright = (progress / 100f).coerceIn(0.01f, 1f)
+                        val wlp = window.attributes
+                        wlp.screenBrightness = newBright
+                        window.attributes = wlp
+                        lastBrightness = newBright
+                    }
+                }
+                override fun onStartTrackingTouch(sb: SeekBar?) { resetHideTimer() }
+                override fun onStopTrackingTouch(sb: SeekBar?) { resetHideTimer() }
+            })
+        }
+        brightnessSliderLayout.addView(brightnessSeekBar, LinearLayout.LayoutParams(sliderHeight, sliderWidth))
+        root.addView(brightnessSliderLayout, brightLp)
+        brightnessSliderLayout.visibility = View.GONE
+
+        // ─── Volume Slider (Right side) ───
+        volumeSliderLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(dp(4), dp(12), dp(4), dp(16))
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor("#99100E14"))
+                cornerRadius = dp(20).toFloat()
+                setStroke(dp(1), Color.parseColor("#26FFFFFF"))
+            }
+        }
+        val volLp = FrameLayout.LayoutParams(containerWidth, containerHeight).apply {
+            gravity = Gravity.RIGHT or Gravity.CENTER_VERTICAL
+            rightMargin = dp(16)
+        }
+
+        val volIcon = TextView(this).apply {
+            text = "\uD83D\uDD0A"
+            setTextColor(Color.parseColor("#A0A0A5"))
+            textSize = 14f
+            gravity = Gravity.CENTER
+        }
+        volumeSliderLayout.addView(volIcon, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT
+        ).apply { bottomMargin = dp(4) })
+
+        val am = audioManager
+        val maxVol = am?.getStreamMaxVolume(AudioManager.STREAM_MUSIC) ?: 15
+        volumeSeekBar = SeekBar(this, null, android.R.attr.seekBarStyle).apply {
+            rotation = -90f
+            max = maxVol
+            progressTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#0047FF"))
+            progressBackgroundTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#33FFFFFF"))
+            thumbTintList = android.content.res.ColorStateList.valueOf(Color.WHITE)
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(sb: SeekBar?, progress: Int, fromUser: Boolean) {
+                    if (fromUser) {
+                        am?.setStreamVolume(AudioManager.STREAM_MUSIC, progress, 0)
+                    }
+                }
+                override fun onStartTrackingTouch(sb: SeekBar?) { resetHideTimer() }
+                override fun onStopTrackingTouch(sb: SeekBar?) { resetHideTimer() }
+            })
+        }
+        volumeSliderLayout.addView(volumeSeekBar, LinearLayout.LayoutParams(sliderHeight, sliderWidth))
+        root.addView(volumeSliderLayout, volLp)
+        volumeSliderLayout.visibility = View.GONE
+    }
+
     private fun immersiveMode() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             @Suppress("DEPRECATION")
@@ -1475,15 +2133,8 @@ class PlayerActivity : AppCompatActivity() {
             val old = historyArr.getJSONObject(i)
             val oldId = old.optString("imdbId")
             if (oldId == id) {
-                if (mediaType == "movie") {
-                    continue
-                } else {
-                    val oldSeason = old.optInt("season")
-                    val oldEpisode = old.optInt("episode")
-                    if (oldSeason == season && oldEpisode == episode) {
-                        continue
-                    }
-                }
+                // Remove any previous entry for this movie/show to keep only the latest one
+                continue
             }
             newArr.put(old)
         }

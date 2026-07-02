@@ -141,13 +141,46 @@ export default function FavoritesScreen({ navigation }: Props) {
           <View style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(15, 15, 20, 0.38)' }]} />
         </Animated.View>
         
-        {/* Balanced spacer on left (matches settings back button shape/width) */}
-        <View style={styles.headerSpacer} />
+        {navigation.canGoBack() ? (
+          <TouchableOpacity style={styles.navButton} onPress={() => navigation.goBack()}>
+            <BlurView intensity={35} tint="dark" style={styles.navButtonBlur}>
+              <Ionicons name="arrow-back" size={20} color="#fff" />
+            </BlurView>
+          </TouchableOpacity>
+        ) : (
+          <View style={styles.headerSpacer} />
+        )}
         
         <Text style={styles.headerTitle}>Favorites</Text>
         
         <View style={styles.headerSpacer} />
       </Animated.View>
+
+      {/* Premium Edge Fades */}
+      <LinearGradient
+        colors={["#050505", "rgba(5, 5, 5, 0.8)", "transparent"]}
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          right: 0,
+          height: insets.top + 15,
+          zIndex: 45,
+        }}
+        pointerEvents="none"
+      />
+      <LinearGradient
+        colors={["transparent", "rgba(5, 5, 5, 0.85)", "#050505"]}
+        style={{
+          position: "absolute",
+          bottom: 0,
+          left: 0,
+          right: 0,
+          height: 100,
+          zIndex: 45,
+        }}
+        pointerEvents="none"
+      />
     </SafeAreaView>
   );
 }
@@ -178,6 +211,17 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 16,
     zIndex: 50,
+  },
+  navButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    overflow: 'hidden',
+  },
+  navButtonBlur: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   headerSpacer: {
     width: 36,

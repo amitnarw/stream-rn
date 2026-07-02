@@ -79,11 +79,29 @@ const EXIT = {
   duration: 380,
   easing: Easing.bezier(0.4, 0, 1, 1),
 };
-
 const EXIT_SHRINK = {
   duration: 300,
   easing: Easing.bezier(0.25, 1, 0.5, 1),
 };
+
+function cleanGeneralError(err: any): string {
+  if (!err) return "Something went wrong. Please try again.";
+  const msg = err.message || String(err);
+  const m = msg.toLowerCase();
+  if (m.includes("offline") || m.includes("network") || m.includes("internet")) {
+    return "No internet connection. Please check your Wi-Fi or cellular network.";
+  }
+  if (m.includes("sockettimeoutexception") || m.includes("timeout") || m.includes("connect")) {
+    return "The server is taking too long to respond. Tap Retry to try again.";
+  }
+  if (m.includes("illegalargumentexception") || m.includes("json") || m.includes("nullpointer")) {
+    return "We couldn't read the server response. This catalog might be temporarily down.";
+  }
+  if (m.includes("unresolvedaddress") || m.includes("unknownhost")) {
+    return "Access blocked by your network provider. Connecting to a VPN may help.";
+  }
+  return "Failed to load details. Tap Retry to reload.";
+}
 
 export function TransitionProvider({ children }: { children: React.ReactNode }) {
   const [phase, setPhase] = useState<TransitionPhase>('idle');
@@ -118,6 +136,15 @@ export function TransitionProvider({ children }: { children: React.ReactNode }) 
       if (requestId === requestIdRef.current) {
         setDetail(result);
         
+        // Enrich cast/runtimes from TVmaze/TMDB in the background without blocking the UI
+        bridge.enrichDetail(result).then(enriched => {
+          if (requestId === requestIdRef.current) {
+            setDetail(enriched);
+          }
+        }).catch(err => {
+          console.warn("Background details enrichment failed:", err);
+        });
+        
         // If provider has no recommendations, fetch tag-based related items on the same provider
         if (!result.recommendations || result.recommendations.length === 0) {
           const firstTag = result.tags?.[0];
@@ -139,11 +166,7 @@ export function TransitionProvider({ children }: { children: React.ReactNode }) 
       }
     } catch (e: any) {
       if (requestId === requestIdRef.current) {
-        setError(
-          e instanceof bridge.OfflineError
-            ? 'No internet connection. Please check your network.'
-            : e.message || 'Failed to load details.'
-        );
+        setError(cleanGeneralError(e));
       }
     } finally {
       if (requestId === requestIdRef.current) {

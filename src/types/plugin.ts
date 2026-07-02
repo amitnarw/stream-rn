@@ -24,12 +24,14 @@ export interface EpisodeItem {
   image?: string;
   season?: number;
   overview?: string;
+  runtime?: number;
 }
 
 export interface Actor {
   name: string;
   image: string | null;
   role: string | null;
+  imdbId?: string | null;
 }
 
 export interface Trailer {

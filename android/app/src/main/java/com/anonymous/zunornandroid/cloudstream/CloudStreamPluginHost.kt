@@ -47,6 +47,9 @@ class CloudStreamPluginHost(val appContext: ReactApplicationContext) {
                 val oldClient = clientField.get(appInstance) as? okhttp3.OkHttpClient
                 if (oldClient != null) {
                     val patchedClient = oldClient.newBuilder()
+                        .connectTimeout(3, java.util.concurrent.TimeUnit.SECONDS)
+                        .readTimeout(3, java.util.concurrent.TimeUnit.SECONDS)
+                        .writeTimeout(3, java.util.concurrent.TimeUnit.SECONDS)
                         .addInterceptor { chain ->
                             val request = chain.request()
                             val host = request.url.host
@@ -57,6 +60,63 @@ class CloudStreamPluginHost(val appContext: ReactApplicationContext) {
                             }
                             chain.proceed(request)
                         }
+                        .dns(object : okhttp3.Dns {
+                            private val dohClient = okhttp3.OkHttpClient.Builder()
+                                .connectTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
+                                .readTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
+                                .build()
+
+                            private fun resolveViaDoH(hostname: String): List<java.net.InetAddress>? {
+                                return try {
+                                    val request = okhttp3.Request.Builder()
+                                        .url("https://1.1.1.1/dns-query?name=${hostname}&type=A")
+                                        .header("Accept", "application/dns-json")
+                                        .build()
+                                    val response = dohClient.newCall(request).execute()
+                                    if (!response.isSuccessful) return null
+                                    val body = response.body?.string() ?: return null
+                                    val json = org.json.JSONObject(body)
+                                    val answers = json.optJSONArray("Answer") ?: return null
+                                    val addresses = mutableListOf<java.net.InetAddress>()
+                                    for (i in 0 until answers.length()) {
+                                        val answer = answers.getJSONObject(i)
+                                        val type = answer.optInt("type", 0)
+                                        val data = answer.optString("data", "")
+                                        // type 1 = A record (IPv4), type 28 = AAAA (IPv6)
+                                        if ((type == 1 || type == 28) && data.isNotBlank()) {
+                                            try {
+                                                addresses.add(java.net.InetAddress.getByName(data))
+                                            } catch (_: Exception) {}
+                                        }
+                                    }
+                                    if (addresses.isEmpty()) null else addresses
+                                } catch (e: Exception) {
+                                    Log.w(TAG, "DoH lookup failed for $hostname: ${e.message}")
+                                    null
+                                }
+                            }
+
+                            override fun lookup(hostname: String): List<java.net.InetAddress> {
+                                return try {
+                                    val systemAddresses = okhttp3.Dns.SYSTEM.lookup(hostname)
+                                    // Block known ISP redirect/block pages by their IPs
+                                    for (addr in systemAddresses) {
+                                        val ip = addr.hostAddress
+                                        if (ip == "49.44.79.236") {
+                                            Log.w(TAG, "ISP block detected for $hostname (redirected to $ip), retrying via DoH...")
+                                            return resolveViaDoH(hostname)
+                                                ?: throw java.io.IOException("DNS blocked and DoH also failed for $hostname")
+                                        }
+                                    }
+                                    systemAddresses
+                                } catch (e: java.net.UnknownHostException) {
+                                    // System DNS resolution failed — ISP may be blocking. Try DoH.
+                                    Log.w(TAG, "System DNS failed for $hostname, retrying via Cloudflare DoH...")
+                                    resolveViaDoH(hostname)
+                                        ?: throw java.io.IOException("Could not resolve $hostname (DNS blocked, DoH also failed)")
+                                }
+                            }
+                        })
                         .build()
                     clientField.set(appInstance, patchedClient)
                     Log.i(TAG, "Successfully patched NiceHttp OkHttpClient with domain-block interceptor")
@@ -418,6 +478,11 @@ class CloudStreamPluginHost(val appContext: ReactApplicationContext) {
                     if (link.url.isNotEmpty()) {
                         val headers = JSONObject()
                         if (link.referer.isNotEmpty()) headers.put("Referer", link.referer)
+                        try {
+                            for ((k, v) in link.headers) {
+                                headers.put(k, v)
+                            }
+                        } catch (_: Exception) {}
                         val q = link.quality
                         val res = if (q in 144..4320) "${q}p" else null
                         val label = if (res != null) "${link.name} · $res" else link.name

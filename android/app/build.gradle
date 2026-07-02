@@ -189,6 +189,11 @@ dependencies {
     implementation("org.jsoup:jsoup:1.18.3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+    implementation("com.frostwire:jlibtorrent:1.2.19.0")
+    implementation("com.frostwire:jlibtorrent-android-arm:1.2.19.0")
+    implementation("com.frostwire:jlibtorrent-android-arm64:1.2.19.0")
+    implementation("com.frostwire:jlibtorrent-android-x86:1.2.19.0")
+    implementation("com.frostwire:jlibtorrent-android-x86_64:1.2.19.0")
 
     // ExoPlayer via Media3
     implementation("androidx.media3:media3-exoplayer:1.5.1")

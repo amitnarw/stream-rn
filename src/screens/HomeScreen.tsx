@@ -24,6 +24,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BlurView, BlurTargetView } from "expo-blur";
 import { LinearGradient } from "expo-linear-gradient";
+import { Ionicons } from "@expo/vector-icons";
 import type { HomeSection, MediaItem } from "../types/plugin";
 import * as bridge from "../api/cloudStreamBridge";
 import { useTransition, useTransitionActions } from "../context/TransitionContext";
@@ -33,6 +34,25 @@ import MediaCard from "../components/MediaCard";
 import { ContinueCard } from "../components/ContinueCard";
 
 import { theme } from "../theme";
+
+function cleanGeneralError(err: any): string {
+  if (!err) return "Something went wrong. Please try again.";
+  const msg = err.message || String(err);
+  const m = msg.toLowerCase();
+  if (m.includes("offline") || m.includes("network") || m.includes("internet")) {
+    return "No internet connection. Please check your Wi-Fi or cellular network.";
+  }
+  if (m.includes("sockettimeoutexception") || m.includes("timeout") || m.includes("connect")) {
+    return "The server is taking too long to respond. Tap Retry to try again.";
+  }
+  if (m.includes("illegalargumentexception") || m.includes("json") || m.includes("nullpointer")) {
+    return "We couldn't read the server response. This catalog might be temporarily down.";
+  }
+  if (m.includes("unresolvedaddress") || m.includes("unknownhost")) {
+    return "Access blocked by your network provider. Connecting to a VPN may help.";
+  }
+  return "Failed to load details. Tap Retry to reload.";
+}
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
@@ -317,12 +337,14 @@ interface SectionRowProps {
   section: HomeSection;
   navigation: any;
   goDetail: (item: MediaItem, layout: CardLayout) => void;
+  onDeleteHistoryItem?: (id: string) => void;
 }
 
 const SectionRow = React.memo(function SectionRow({
   section,
   navigation,
   goDetail,
+  onDeleteHistoryItem,
 }: SectionRowProps) {
   const { phase } = useTransition();
   const isCW = section.name === "Continue Watching";
@@ -330,7 +352,7 @@ const SectionRow = React.memo(function SectionRow({
   const renderItem = useCallback(
     ({ item }: { item: any }) =>
       isCW ? (
-        <ContinueCard item={item} onPress={goDetail} />
+        <ContinueCard item={item} onPress={goDetail} onDelete={onDeleteHistoryItem} />
       ) : (
         <MediaCard
           item={item as MediaItem}
@@ -339,7 +361,7 @@ const SectionRow = React.memo(function SectionRow({
           style={{ marginRight: 8, marginHorizontal: 0, marginBottom: 0 }}
         />
       ),
-    [isCW, goDetail],
+    [isCW, goDetail, onDeleteHistoryItem],
   );
 
   const handleSeeAll = useCallback(() => {
@@ -392,7 +414,11 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      await loadSections(true);
+      await bridge.loadPlugins();
+      await Promise.all([
+        refreshHistoryOnly(),
+        loadSections(true)
+      ]);
     } catch (_) {}
     setRefreshing(false);
   }, [activeTab]);
@@ -588,11 +614,43 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
     extrapolate: "clamp",
   });
 
+  async function refreshHistoryOnly() {
+    try {
+      const hist = await bridge.getPlaybackHistory();
+      setSections((prevSecs) => {
+        const filtered = prevSecs.filter((s) => s.name !== "Continue Watching");
+        if (hist && hist.length > 0) {
+          const cwSection = {
+            name: "Continue Watching",
+            items: hist.map((h: any) => ({
+              provider: "Cinemeta",
+              url: h.mediaType + "/" + h.imdbId,
+              title: h.videoTitle,
+              posterUrl: h.posterUrl,
+              type: h.mediaType,
+              position: h.position,
+              duration: h.duration,
+              season: h.season,
+              episode: h.episode,
+              imdbId: h.imdbId,
+            })) as any,
+          };
+          return [cwSection, ...filtered];
+        }
+        return filtered;
+      });
+    } catch (_) {}
+  }
+
   useEffect(() => {
     init();
     const unsub = navigation.addListener('focus', () => {
       // Restore blur target whenever the screen regains focus
       setGlobalBlurTarget(blurTargetRef.current);
+      
+      // Update Continue Watching in background on screen focus
+      refreshHistoryOnly();
+
       // Only re-fetch sections when we have no data (e.g. after an error).
       // Re-fetching every time the user comes back from a nested screen
       // (SeeAll, detail, etc.) sets sectionsLoading=true → shows a skeleton
@@ -614,11 +672,7 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
       await bridge.loadPlugins();
       await loadSections();
     } catch (e: any) {
-      setError(
-        e instanceof bridge.OfflineError
-          ? "No internet connection."
-          : e.message || "Failed to load.",
-      );
+      setError(cleanGeneralError(e));
     } finally {
       // Premium Fade out of skeleton loading overlay
       Animated.timing(skeletonOpacity, {
@@ -660,6 +714,7 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
               duration: h.duration,
               season: h.season,
               episode: h.episode,
+              imdbId: h.imdbId,
             })) as any,
           });
         }
@@ -682,11 +737,7 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
         setFallbackRecommendations(unique.slice(0, 10));
       }
     } catch (e: any) {
-      setSectionError(
-        e instanceof bridge.OfflineError
-          ? "No internet connection."
-          : e.message || "Failed to load.",
-      );
+      setSectionError(cleanGeneralError(e));
     } finally {
       setSectionsLoading(false);
     }
@@ -706,17 +757,31 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
     [openFromCard],
   );
 
+  const handleDeleteHistoryItem = useCallback(async (id: string) => {
+    try {
+      const success = await bridge.deletePlaybackHistoryItem(id);
+      if (success) {
+        refreshHistoryOnly();
+      }
+    } catch (_) {}
+  }, []);
+
   const renderedSections = useMemo(() => {
     if (sectionError) {
       return (
-        <View style={styles.center}>
-          <Text style={styles.errText}>{sectionError}</Text>
-          <TouchableOpacity
-            style={styles.retryBtn}
-            onPress={() => loadSections()}
-          >
-            <Text style={styles.retryTxt}>Retry</Text>
-          </TouchableOpacity>
+        <View style={styles.errorContainer}>
+          <BlurView intensity={20} tint="dark" style={styles.errorCard}>
+            <Ionicons name="wifi-outline" size={40} color={theme.colors.rose} style={{ marginBottom: 12 }} />
+            <Text style={styles.errorTitle}>Connection Interrupted</Text>
+            <Text style={styles.errText}>{sectionError}</Text>
+            <TouchableOpacity
+              style={styles.retryBtn}
+              onPress={() => loadSections()}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.retryTxt}>Try Again</Text>
+            </TouchableOpacity>
+          </BlurView>
         </View>
       );
     }
@@ -740,6 +805,7 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
           section={section}
           navigation={navigation}
           goDetail={goDetail}
+          onDeleteHistoryItem={handleDeleteHistoryItem}
         />
       ));
   }, [
@@ -753,6 +819,19 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
 
   return (
     <View style={styles.root}>
+      {/* Custom Glassmorphic Pull-to-Refresh Indicator */}
+      {refreshing && (
+        <Animated.View
+          entering={FadeInUp.duration(300).easing(Easing.out(Easing.quad))}
+          exiting={FadeOut.duration(200)}
+          style={[styles.customRefreshIndicator, { top: insets.top + 65 }]}
+        >
+          <BlurView intensity={80} tint="dark" style={StyleSheet.absoluteFillObject} />
+          <ActivityIndicator size="small" color="#0047FF" style={{ marginRight: 8 }} />
+          <Text style={styles.customRefreshText}>REFRESHING FEED</Text>
+        </Animated.View>
+      )}
+
       <View style={{ flex: 1 }}>
         {/* Background Ambient Poster Glow */}
         <BlurTargetView
@@ -865,11 +944,15 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
 
           {/* ── Content ── */}
           {error ? (
-            <View style={styles.center}>
-              <Text style={styles.errText}>{error}</Text>
-              <TouchableOpacity style={styles.retryBtn} onPress={init}>
-                <Text style={styles.retryTxt}>Retry</Text>
-              </TouchableOpacity>
+            <View style={[styles.errorContainer, { marginTop: 150 }]}>
+              <BlurView intensity={20} tint="dark" style={styles.errorCard}>
+                <Ionicons name="alert-circle-outline" size={42} color={theme.colors.rose} style={{ marginBottom: 12 }} />
+                <Text style={styles.errorTitle}>Unable to Load Feed</Text>
+                <Text style={styles.errText}>{error}</Text>
+                <TouchableOpacity style={styles.retryBtn} onPress={init} activeOpacity={0.8}>
+                  <Text style={styles.retryTxt}>Try Again</Text>
+                </TouchableOpacity>
+              </BlurView>
             </View>
           ) : (
             sections.length > 0 && (
@@ -878,9 +961,10 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
                   <RefreshControl
                     refreshing={refreshing}
                     onRefresh={onRefresh}
-                    tintColor={theme.colors.accent}
-                    colors={[theme.colors.accent]}
-                    progressBackgroundColor="rgba(20, 18, 24, 0.95)"
+                    tintColor="transparent"
+                    colors={["transparent"]}
+                    progressBackgroundColor="transparent"
+                    progressViewOffset={insets.top + 65}
                   />
                 }
                 showsVerticalScrollIndicator={false}
@@ -1075,6 +1159,32 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
           <HomeSkeletonScreen />
         </Animated.View>
       )}
+
+      {/* Premium Edge Fades */}
+      <LinearGradient
+        colors={["#050505", "rgba(5, 5, 5, 0.8)", "transparent"]}
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          right: 0,
+          height: insets.top + 15,
+          zIndex: 45,
+        }}
+        pointerEvents="none"
+      />
+      <LinearGradient
+        colors={["transparent", "rgba(5, 5, 5, 0.85)", "#050505"]}
+        style={{
+          position: "absolute",
+          bottom: 0,
+          left: 0,
+          right: 0,
+          height: 100,
+          zIndex: 45,
+        }}
+        pointerEvents="none"
+      />
     </View>
   );
 }
@@ -1107,8 +1217,8 @@ const styles = StyleSheet.create({
   // category tabs — floating capsule with animated glass background
   headerContainer: {
     position: "absolute",
-    left: 20,
-    right: 20,
+    left: SCREEN_WIDTH * 0.025,
+    right: SCREEN_WIDTH * 0.025,
     height: 48,
     borderRadius: 24,
     overflow: "hidden",
@@ -1265,11 +1375,35 @@ const styles = StyleSheet.create({
     alignItems: "center",
     padding: 24,
   },
-  errText: {
-    color: "#fca5a5",
-    fontSize: 14,
+  errorContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 28,
+  },
+  errorCard: {
+    backgroundColor: "rgba(20, 18, 24, 0.65)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
+    borderRadius: 20,
+    padding: 24,
+    width: "100%",
+    alignItems: "center",
+    overflow: "hidden",
+  },
+  errorTitle: {
+    color: "#ffffff",
+    fontSize: 16,
+    fontWeight: "700",
+    marginBottom: 8,
     textAlign: "center",
-    marginBottom: 12,
+  },
+  errText: {
+    color: "#8E8D92",
+    fontSize: 13,
+    textAlign: "center",
+    marginBottom: 16,
+    lineHeight: 18,
   },
   retryBtn: {
     backgroundColor: theme.colors.accent,
@@ -1278,4 +1412,28 @@ const styles = StyleSheet.create({
     borderRadius: 20,
   },
   retryTxt: { color: "#fff", fontWeight: "700" },
+  customRefreshIndicator: {
+    position: 'absolute',
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(20, 18, 24, 0.75)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+    zIndex: 100,
+    elevation: 6,
+    shadowColor: '#0047FF',
+    shadowOpacity: 0.15,
+    shadowRadius: 10,
+    overflow: 'hidden',
+  },
+  customRefreshText: {
+    color: '#E5E2E3',
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 1.5,
+  },
 });

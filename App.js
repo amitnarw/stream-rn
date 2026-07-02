@@ -165,13 +165,13 @@ function TabNavigator({ navigation }) {
             <TabIcon name="home" focused={activeTab === 0} />
           </TouchableOpacity>
           <TouchableOpacity style={tabStyles.tabButton} onPress={() => handleTabPress(1)} activeOpacity={0.7}>
-            <TabIcon name="compass" focused={activeTab === 1} />
+            <TabIcon name="search" focused={activeTab === 1} />
           </TouchableOpacity>
           <TouchableOpacity style={tabStyles.tabButton} onPress={() => handleTabPress(2)} activeOpacity={0.7}>
             <TabIcon name="heart" focused={activeTab === 2} />
           </TouchableOpacity>
           <TouchableOpacity style={tabStyles.tabButton} onPress={() => handleTabPress(3)} activeOpacity={0.7}>
-            <TabIcon name="person" focused={activeTab === 3} />
+            <TabIcon name="settings" focused={activeTab === 3} />
           </TouchableOpacity>
         </View>
       </View>

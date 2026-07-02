@@ -13,6 +13,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import type { MediaItem } from '../types/plugin';
 import MediaCard from '../components/MediaCard';
+import { ContinueCard } from '../components/ContinueCard';
+import * as bridge from '../api/cloudStreamBridge';
 import { useTransition, useTransitionActions } from '../context/TransitionContext';
 import type { CardLayout } from '../context/TransitionContext';
 import { theme } from '../theme';
@@ -33,6 +35,9 @@ export default function SeeAllScreen({ route, navigation }: Props) {
   const insets = useSafeAreaInsets();
   const scrollY = useRef(new Animated.Value(0)).current;
 
+  // Local state to support live item deletion
+  const [dataItems, setDataItems] = useState<any[]>(items);
+
   useEffect(() => {
     const handle = requestIdleCallback(() => {
       setIsReady(true);
@@ -40,8 +45,21 @@ export default function SeeAllScreen({ route, navigation }: Props) {
     return () => cancelIdleCallback(handle);
   }, []);
 
+  useEffect(() => {
+    setDataItems(items);
+  }, [items]);
+
   const handleMediaPress = (item: MediaItem, layout: CardLayout) => {
     openFromCard(item, layout);
+  };
+
+  const handleDeleteHistoryItem = async (id: string) => {
+    try {
+      const success = await bridge.deletePlaybackHistoryItem(id);
+      if (success) {
+        setDataItems(prev => prev.filter(x => x.imdbId !== id));
+      }
+    } catch (_) {}
   };
 
   const scrollThreshold = 80;
@@ -114,8 +132,8 @@ export default function SeeAllScreen({ route, navigation }: Props) {
         </View>
       ) : (
         <Animated.FlatList
-          data={items}
-          keyExtractor={(_, i) => String(i)}
+          data={dataItems}
+          keyExtractor={(item, i) => item.url || String(i)}
           contentContainerStyle={[
             styles.grid,
             {
@@ -129,9 +147,21 @@ export default function SeeAllScreen({ route, navigation }: Props) {
             { useNativeDriver: true }
           )}
           scrollEventThrottle={16}
-          renderItem={({ item }) => (
-            <MediaCard item={item} onPress={handleMediaPress} />
-          )}
+          renderItem={({ item }) => {
+            if (title === 'Continue Watching') {
+              return (
+                <View style={{ width: CARD_WIDTH, marginBottom: 12, marginRight: 8 }}>
+                  <ContinueCard 
+                    item={item} 
+                    onPress={handleMediaPress} 
+                    onDelete={handleDeleteHistoryItem} 
+                    width={CARD_WIDTH}
+                  />
+                </View>
+              );
+            }
+            return <MediaCard item={item} onPress={handleMediaPress} />;
+          }}
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
               <Text style={styles.emptyText}>No items found in this section.</Text>
@@ -139,6 +169,32 @@ export default function SeeAllScreen({ route, navigation }: Props) {
           }
         />
       )}
+
+      {/* Premium Edge Fades */}
+      <LinearGradient
+        colors={["#050505", "rgba(5, 5, 5, 0.8)", "transparent"]}
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          right: 0,
+          height: insets.top + 15,
+          zIndex: 45,
+        }}
+        pointerEvents="none"
+      />
+      <LinearGradient
+        colors={["transparent", "rgba(5, 5, 5, 0.85)", "#050505"]}
+        style={{
+          position: "absolute",
+          bottom: 0,
+          left: 0,
+          right: 0,
+          height: 100,
+          zIndex: 45,
+        }}
+        pointerEvents="none"
+      />
     </SafeAreaView>
   );
 }
@@ -197,7 +253,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     flex: 1,
     textAlign: 'center',
-    marginRight: 36, // offset to center title due to back button
   },
   grid: {
     paddingHorizontal: 12,

@@ -20,7 +20,7 @@ import {
   View,
   Pressable,
   Animated as RNAnimated,
-  Alert,
+  Modal,
 } from "react-native";
 import Animated, {
   Extrapolation,
@@ -55,6 +55,7 @@ import type {
 import * as bridge from "../api/cloudStreamBridge";
 import { useTransition } from "../context/TransitionContext";
 import type { CardLayout } from "../context/TransitionContext";
+import { CustomModal } from "../components/CustomModal";
 
 function getHighQualityImageUrl(
   url: string | null | undefined,
@@ -88,6 +89,66 @@ function getHighQualityImageUrl(
   }
 
   return url;
+}
+
+/** Returns true if the raw error string looks like an ISP/network-level block */
+function isIspBlock(err: string | undefined): boolean {
+  if (!err) return false;
+  const e = err.toLowerCase();
+  return (
+    e.includes("unresolvedaddress") ||
+    e.includes("unknownhost") ||
+    e.includes("dns blocked") ||
+    e.includes("isp block") ||
+    e.includes("sockettimeoutexception") ||
+    e.includes("connect") ||
+    e.includes("timeout")
+  );
+}
+
+function cleanErrorMessage(err: string | undefined): string {
+  if (!err) return "";
+  const e = err.toLowerCase();
+  if (
+    e.includes("sockettimeoutexception") ||
+    e.includes("timeout") ||
+    e.includes("connect")
+  ) {
+    return "Blocked or unreachable";
+  }
+  if (
+    e.includes("illegalargumentexception") ||
+    e.includes("json") ||
+    e.includes("nullpointer")
+  ) {
+    return "Server responded incorrectly";
+  }
+  if (
+    e.includes("unresolvedaddress") ||
+    e.includes("unknownhost") ||
+    e.includes("dns")
+  ) {
+    return "Blocked by your network";
+  }
+  return "Failed to load links";
+}
+
+function cleanTorrentError(err: string | undefined): string {
+  if (!err) return "Torrent failed to start.";
+  const e = err.toLowerCase();
+  if (e.includes("metadata resolution timed out") || e.includes("no peers found") || e.includes("bad magnet")) {
+    return "No seeders found \u2014 this torrent link may be dead. Try a different source.";
+  }
+  if (e.includes("failed to add torrent handle")) {
+    return "Could not start the torrent download. Try again.";
+  }
+  if (e.includes("no files found")) {
+    return "Torrent has no playable video files.";
+  }
+  if (e.includes("network") || e.includes("connection")) {
+    return "Network error while starting torrent. Check your connection.";
+  }
+  return "Torrent failed to start. Try a different source.";
 }
 
 function SkeletonPlaceholder({ style }: { style: any }) {
@@ -183,7 +244,9 @@ function ActorAvatar({
   }, [name]);
 
   if (imageUrl) {
-    return <Image source={{ uri: imageUrl, cache: 'force-cache' }} style={style} />;
+    return (
+      <Image source={{ uri: imageUrl, cache: "force-cache" }} style={style} />
+    );
   }
 
   return (
@@ -201,6 +264,7 @@ interface HeroEpisodeRowProps {
   posterUrl: string | undefined;
   isSerial: boolean;
   title: string;
+  fallbackDuration?: number | null;
 }
 
 const HeroEpisodeRow = React.memo(
@@ -212,6 +276,7 @@ const HeroEpisodeRow = React.memo(
     posterUrl,
     isSerial,
     title,
+    fallbackDuration,
   }: HeroEpisodeRowProps) {
     return (
       <TouchableOpacity
@@ -222,7 +287,10 @@ const HeroEpisodeRow = React.memo(
       >
         <View style={styles.episodeThumbContainer}>
           <Image
-            source={{ uri: ep.image || posterUrl || undefined, cache: 'force-cache' }}
+            source={{
+              uri: ep.image || posterUrl || undefined,
+              cache: "force-cache",
+            }}
             style={styles.episodeThumb}
             resizeMode="cover"
           />
@@ -251,6 +319,9 @@ const HeroEpisodeRow = React.memo(
           {isSerial && (
             <Text style={styles.episodeMeta}>
               Episode {String(ep.episode).padStart(2, "0")}
+              {ep.runtime || fallbackDuration
+                ? ` • ${ep.runtime || fallbackDuration}m`
+                : ""}
             </Text>
           )}
           <Text style={styles.episodeTitle} numberOfLines={2}>
@@ -274,28 +345,30 @@ const HeroEpisodeRow = React.memo(
 
 function getQualityBadgeBg(quality: string) {
   const q = quality.toLowerCase();
-  if (q.includes('4k') || q.includes('2160')) return '#ff4a7d';
-  if (q.includes('1080')) return '#0047FF';
-  if (q.includes('720')) return '#2ecc71';
-  if (q.includes('480') || q.includes('360')) return '#f39c12';
-  return 'rgba(255, 255, 255, 0.08)';
+  if (q.includes("4k") || q.includes("2160")) return "#ff4a7d";
+  if (q.includes("1080")) return "#0047FF";
+  if (q.includes("720")) return "#2ecc71";
+  if (q.includes("480") || q.includes("360")) return "#f39c12";
+  return "rgba(255, 255, 255, 0.08)";
 }
 
 function getDomain(url: string) {
   try {
-    const domain = url.match(/^(?:https?:\/\/)?(?:[^@\n]+@)?(?:www\.)?([^:\/\n?]+)/im);
-    return domain ? domain[1] : '';
+    const domain = url.match(
+      /^(?:https?:\/\/)?(?:[^@\n]+@)?(?:www\.)?([^:\/\n?]+)/im,
+    );
+    return domain ? domain[1] : "";
   } catch {
-    return '';
+    return "";
   }
 }
 
 function getProtocolLabel(type: string, url: string) {
   const t = type.toLowerCase();
-  if (t === 'hls' || url.includes('.m3u8')) return 'M3U8';
-  if (t === 'torrent' || url.startsWith('magnet:')) return 'TORRENT';
-  if (t === 'dash' || url.includes('.mpd')) return 'DASH';
-  return 'DIRECT';
+  if (t === "hls" || url.includes(".m3u8")) return "M3U8";
+  if (t === "torrent" || url.startsWith("magnet:")) return "TORRENT";
+  if (t === "dash" || url.includes(".mpd")) return "DASH";
+  return "DIRECT";
 }
 
 export default function DetailScreen() {
@@ -328,10 +401,10 @@ export default function DetailScreen() {
     updateDetailInPlace,
   } = useTransition();
 
-
-
   const [playingEpisode, setPlayingEpisode] = useState<number | null>(null);
-  const [resolvingProgress, setResolvingProgress] = useState<bridge.PlaybackProgress[]>([]);
+  const [resolvingProgress, setResolvingProgress] = useState<
+    bridge.PlaybackProgress[]
+  >([]);
   const [isResolving, setIsResolving] = useState(false);
   const [linksError, setLinksError] = useState<string | null>(null);
   const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(false);
@@ -360,11 +433,32 @@ export default function DetailScreen() {
   );
   const [showSourcePicker, setShowSourcePicker] = useState(false);
   const [selectedSourceIndex, setSelectedSourceIndex] = useState(0);
+  const [isTorrentBuffering, setIsTorrentBuffering] = useState(false);
+  const [torrentStatus, setTorrentStatus] =
+    useState<bridge.TorrentStatus | null>(null);
+  const [torrentErrorModal, setTorrentErrorModal] = useState<{ visible: boolean; message: string }>({ visible: false, message: '' });
+  const torrentIntervalRef = useRef<any>(null);
 
   const closeSourcePicker = () => {
     setShowSourcePicker(false);
     setPlayingEpisode(null);
+    bridge.cancelPlaybackResolution();
+    setIsTorrentBuffering(false);
+    if (torrentIntervalRef.current) {
+      clearInterval(torrentIntervalRef.current);
+    }
+    bridge.stopTorrentStream().catch(() => {});
   };
+
+  useEffect(() => {
+    return () => {
+      bridge.cancelPlaybackResolution();
+      if (torrentIntervalRef.current) {
+        clearInterval(torrentIntervalRef.current);
+      }
+      bridge.stopTorrentStream().catch(() => {});
+    };
+  }, []);
 
   useEffect(() => {
     if (showSourcePicker) {
@@ -375,7 +469,7 @@ export default function DetailScreen() {
 
       const backHandler = BackHandler.addEventListener(
         "hardwareBackPress",
-        backAction
+        backAction,
       );
 
       return () => backHandler.remove();
@@ -384,14 +478,22 @@ export default function DetailScreen() {
 
   // Dynamic Tab states for source plugins
   const [allProviders, setAllProviders] = useState<PluginProvider[]>(
-    ['4K HDHUB', 'Goojara', 'YTS', 'CloudPlay', 'Movies4u', 'Movierulzhd', 'HDHub4u'].map(name => ({
+    [
+      "4K HDHUB",
+      "Goojara",
+      "YTS",
+      "CloudPlay",
+      "Movies4u",
+      "Movierulzhd",
+      "HDHub4u",
+    ].map((name) => ({
       id: name,
       name,
-      url: '',
-      hasMainPage: true
-    }))
+      url: "",
+      hasMainPage: true,
+    })),
   );
-  const [activeProviderTab, setActiveProviderTab] = useState('All');
+  const [activeProviderTab, setActiveProviderTab] = useState("All");
 
   useEffect(() => {
     async function loadProviders() {
@@ -413,10 +515,10 @@ export default function DetailScreen() {
       skeletonOpacity.value = withRepeat(
         withSequence(
           withTiming(0.7, { duration: 800, easing: Easing.ease }),
-          withTiming(0.3, { duration: 800, easing: Easing.ease })
+          withTiming(0.3, { duration: 800, easing: Easing.ease }),
         ),
         -1,
-        true
+        true,
       );
     } else {
       skeletonOpacity.value = 0.3;
@@ -432,7 +534,10 @@ export default function DetailScreen() {
   const renderSkeleton = () => (
     <ScrollView style={styles.sheetList} scrollEnabled={false}>
       {[1, 2, 3, 4].map((key) => (
-        <Animated.View key={key} style={[styles.skeletonStreamRow, skeletonAnimatedStyle]}>
+        <Animated.View
+          key={key}
+          style={[styles.skeletonStreamRow, skeletonAnimatedStyle]}
+        >
           <View style={styles.skeletonRowInfo}>
             <View style={styles.skeletonQualityRow}>
               <View style={styles.skeletonBadgeLarge} />
@@ -570,31 +675,47 @@ export default function DetailScreen() {
   const providerName = detail?.provider || item?.provider || "Cinemeta";
 
   const providerTabs = useMemo(() => {
-    if (providerName === 'Cinemeta') {
+    if (providerName === "Cinemeta") {
       if (resolvingProgress.length > 0) {
         // Always show All + all providers, regardless of resolving state.
         // This keeps tabs stable — they don't disappear when resolving ends.
-        return ['All', ...resolvingProgress.map(p => p.providerName)];
+        return ["All", ...resolvingProgress.map((p) => p.providerName)];
       }
       // Fallback to allProviders (loaded at mount)
-      const list = ['All'];
-      allProviders.forEach(p => { list.push(p.name); });
+      const list = ["All"];
+      allProviders.forEach((p) => {
+        list.push(p.name);
+      });
       return list;
     } else {
-      return ['All', providerName];
+      return ["All", providerName];
     }
   }, [allProviders, providerName, resolvingProgress]);
 
   const filteredSources = useMemo(() => {
-    if (activeProviderTab === 'All') return sources;
-    return sources.filter(s => s.provider === activeProviderTab);
+    const list = activeProviderTab.toLowerCase() === "all"
+      ? sources
+      : sources.filter((s) => s.provider.toLowerCase() === activeProviderTab.toLowerCase());
+    // Always render: direct/HLS links first, torrent/magnet links last (sorted by seeders desc)
+    return [...list].sort((x, y) => {
+      const xIsTorrent = x.type === 'torrent' || x.url.startsWith('magnet:');
+      const yIsTorrent = y.type === 'torrent' || y.url.startsWith('magnet:');
+      if (xIsTorrent && !yIsTorrent) return 1;
+      if (!xIsTorrent && yIsTorrent) return -1;
+      if (xIsTorrent && yIsTorrent) {
+        const xSeed = (x as any).seeders ?? 0;
+        const ySeed = (y as any).seeders ?? 0;
+        return ySeed - xSeed;
+      }
+      return 0;
+    });
   }, [sources, activeProviderTab]);
 
   // If the active tab disappears from the list (e.g. provider had no sources),
   // fall back to 'All' so the user doesn't see a blank filtered view
   useEffect(() => {
     if (providerTabs.length > 0 && !providerTabs.includes(activeProviderTab)) {
-      setActiveProviderTab('All');
+      setActiveProviderTab("All");
     }
   }, [providerTabs, activeProviderTab]);
 
@@ -603,8 +724,6 @@ export default function DetailScreen() {
     // Individual provider status is still tracked in resolvingProgress for tab labels.
     return isResolving;
   }, [isResolving]);
-
-
 
   const allEpisodes = useMemo(() => detail?.episodes ?? [], [detail?.episodes]);
 
@@ -766,7 +885,7 @@ export default function DetailScreen() {
       setIsResolving(true);
       setShowSourcePicker(true);
       setSelectedSourceIndex(0);
-      setActiveProviderTab('All');
+      setActiveProviderTab("All");
 
       try {
         const result = await bridge.loadLinks(
@@ -777,8 +896,8 @@ export default function DetailScreen() {
           },
           (newSource) => {
             // Stream sources into UI immediately as each provider returns them
-            setSources(prev => {
-              if (prev.some(s => s.url === newSource.url)) return prev;
+            setSources((prev) => {
+              if (prev.some((s) => s.url === newSource.url)) return prev;
               return [...prev, newSource];
             });
           },
@@ -786,14 +905,16 @@ export default function DetailScreen() {
             // onAllDone: ALL providers have completed — now safe to stop loading
             setIsResolving(false);
             setPlayingEpisode(null);
-          }
+          },
         );
 
         setSubtitles(result.subtitles);
         // Merge snapshot sources into live-streamed ones (never overwrite)
-        setSources(prev => {
-          const merged = new Map(prev.map(s => [s.url, s]));
-          (result.sources ?? []).forEach(s => { if (!merged.has(s.url)) merged.set(s.url, s); });
+        setSources((prev) => {
+          const merged = new Map(prev.map((s) => [s.url, s]));
+          (result.sources ?? []).forEach((s) => {
+            if (!merged.has(s.url)) merged.set(s.url, s);
+          });
           return [...merged.values()];
         });
       } catch (e: any) {
@@ -811,29 +932,20 @@ export default function DetailScreen() {
     [detail, providerName],
   );
 
-
   if (phase === "idle" || !item) return null;
 
   function onSourceSelect(source: VideoSource) {
-    const originalIndex = sources.findIndex(s => s.url === source.url);
+    const originalIndex = sources.findIndex((s) => s.url === source.url);
     if (originalIndex === -1) return;
 
-    const protocol = getProtocolLabel(source.type, source.url);
-    if (protocol === 'TORRENT') {
-      Alert.alert(
-        "Unsupported Source",
-        "Tamilblasters provides torrent/magnet links. Torrent streaming is not supported. Please select a direct HTTP, M3U8, or DASH link from other providers.",
-        [{ text: "OK" }]
-      );
-      return;
-    }
+    const currentEp = displayedEpisodes.find((_, i) => playingEpisode === i);
+    const title = detail?.isSerial
+      ? `${detail?.title} - ${currentEp?.label ?? `Episode ${currentEp?.episode ?? 1}`}`
+      : `${detail?.title ?? ""}`;
+    const subUrl = subtitles.length > 0 ? subtitles[0].url : "";
 
     setSelectedSourceIndex(originalIndex);
-    setShowSourcePicker(false);
     setPlayingEpisode(null);
-    const subUrl = subtitles.length > 0 ? subtitles[0].url : "";
-    const currentEp = displayedEpisodes.find((_, i) => playingEpisode === i);
-    const title = `${detail?.title} - ${currentEp?.label ?? ""}`;
 
     const episodesPayload = allEpisodes.map((e) => ({
       episode: e.episode,
@@ -841,6 +953,85 @@ export default function DetailScreen() {
       mediaRef: e.mediaRef,
       season: e.season,
     }));
+
+    const protocol = getProtocolLabel(source.type, source.url);
+    const isTorrent =
+      protocol === "TORRENT" ||
+      source.url.startsWith("magnet:") ||
+      source.type === "torrent";
+
+    if (isTorrent) {
+      try {
+        setIsTorrentBuffering(true);
+        setTorrentStatus({ progress: 0, speed: 0, peers: 0, active: true });
+
+        bridge
+          .startTorrentStream(source.url)
+          .then((info) => {
+            console.log(
+              "[ZunoPlugin] Native torrent stream info resolved:",
+              info,
+            );
+
+            if (torrentIntervalRef.current) {
+              clearInterval(torrentIntervalRef.current);
+            }
+
+            const intervalId = setInterval(async () => {
+              try {
+                const status = await bridge.getTorrentStatus();
+                setTorrentStatus(status);
+
+                // 1.5% represents full indexing download (moov atom / header container tables)
+                if (status.progress >= 1.5 && status.active) {
+                  clearInterval(intervalId);
+                  setIsTorrentBuffering(false);
+
+                  // Play local HTTP range server stream URL!
+                  bridge.playStream(
+                    info.streamUrl,
+                    source.headers,
+                    title,
+                    subUrl,
+                    [
+                      {
+                        quality: "Torrent Stream",
+                        url: info.streamUrl,
+                        type: source.type,
+                        headers: source.headers,
+                        provider: source.provider,
+                        host: "127.0.0.1",
+                      },
+                    ],
+                    subtitles,
+                    JSON.stringify(episodesPayload),
+                    playingEpisode ?? -1,
+                    detail?.imdbId || "",
+                    detail?.isSerial ? "series" : "movie",
+                    detail?.posterUrl || "",
+                    currentEp?.season || 1,
+                    currentEp?.episode || 1,
+                    currentEp?.label || "",
+                    detail?.logoUrl || "",
+                  );
+                }
+              } catch (err) {
+                console.warn("[ZunoPlugin] Error polling torrent status:", err);
+              }
+            }, 500);
+
+            torrentIntervalRef.current = intervalId;
+          })
+          .catch((err) => {
+            setIsTorrentBuffering(false);
+            setTorrentErrorModal({ visible: true, message: cleanTorrentError(err.message) });
+          });
+      } catch (e: any) {
+        setIsTorrentBuffering(false);
+        setTorrentErrorModal({ visible: true, message: cleanTorrentError(e.message) });
+      }
+      return;
+    }
 
     bridge.playStream(
       source.url,
@@ -920,54 +1111,102 @@ export default function DetailScreen() {
         )}
       </View>
 
-      {/* Cast Section */}
       {detail.cast && detail.cast.length > 0 && (
         <View style={styles.castSection}>
-          <Text style={styles.sectionTitle}>Cast</Text>
-          <ScrollView
-            horizontal
-            nestedScrollEnabled={true}
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.castList}
-          >
-            {detail.cast.map((actor, idx) => {
-              const initials = actor.name
-                .split(" ")
-                .map((s) => s[0])
-                .join("")
-                .toUpperCase()
-                .slice(0, 2);
-              return (
-                <View key={`actor-${idx}`} style={styles.castCard}>
-                  {actor.image ? (
-                    <Image
-                      source={{ uri: actor.image, cache: 'force-cache' }}
-                      style={styles.castImage}
-                    />
-                  ) : (
-                    <ActorAvatar
-                      name={actor.name}
-                      initials={initials}
-                      style={styles.castImage}
-                    />
-                  )}
-                  <Text style={styles.castName} numberOfLines={1}>
-                    {actor.name}
-                  </Text>
-                  {actor.role ? (
-                    <Text style={styles.castRole} numberOfLines={1}>
-                      {actor.role}
+          <Text style={styles.sectionTitle}>Cast ({detail.cast.length})</Text>
+          <View style={styles.castScrollContainer}>
+            <ScrollView
+              horizontal
+              nestedScrollEnabled={true}
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.castList}
+            >
+              {detail.cast.map((actor, idx) => {
+                const initials = actor.name
+                  .split(" ")
+                  .map((s) => s[0])
+                  .join("")
+                  .toUpperCase()
+                  .slice(0, 2);
+                const handleCastPress = () => {
+                  if (actor.imdbId) {
+                    Linking.openURL(
+                      `https://www.imdb.com/name/${actor.imdbId}/`,
+                    ).catch(() => {});
+                  }
+                };
+                return (
+                  <TouchableOpacity
+                    key={`actor-${idx}`}
+                    style={styles.castCard}
+                    onPress={handleCastPress}
+                    activeOpacity={actor.imdbId ? 0.7 : 1}
+                    disabled={!actor.imdbId}
+                  >
+                    {actor.image ? (
+                      <Image
+                        source={{ uri: actor.image, cache: "force-cache" }}
+                        style={styles.castImage}
+                      />
+                    ) : (
+                      <ActorAvatar
+                        name={actor.name}
+                        initials={initials}
+                        style={styles.castImage}
+                      />
+                    )}
+                    <Text style={styles.castName} numberOfLines={1}>
+                      {actor.name}
                     </Text>
-                  ) : null}
-                </View>
-              );
-            })}
-          </ScrollView>
+                    {actor.role ? (
+                      <Text style={styles.castRole} numberOfLines={1}>
+                        {actor.role}
+                      </Text>
+                    ) : null}
+                    {actor.imdbId && (
+                      <View style={styles.castImdbBadge}>
+                        <Text style={styles.castImdbBadgeText}>IMDb</Text>
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+
+            {/* Left and Right Edge Fades for Cast scroll */}
+            <LinearGradient
+              colors={["rgba(15, 15, 20, 0.95)", "transparent"]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={{
+                position: "absolute",
+                left: 0,
+                top: 0,
+                bottom: 0,
+                width: 16,
+                zIndex: 10,
+              }}
+              pointerEvents="none"
+            />
+            <LinearGradient
+              colors={["transparent", "rgba(15, 15, 20, 0.95)"]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={{
+                position: "absolute",
+                right: 0,
+                top: 0,
+                bottom: 0,
+                width: 20,
+                zIndex: 10,
+              }}
+              pointerEvents="none"
+            />
+          </View>
         </View>
       )}
     </View>
   ) : null;
-
 
   return (
     <View
@@ -992,7 +1231,7 @@ export default function DetailScreen() {
                 <Image
                   source={{
                     uri: item?.posterUrl || detail?.posterUrl || undefined,
-                    cache: 'force-cache',
+                    cache: "force-cache",
                   }}
                   style={[StyleSheet.absoluteFillObject, { opacity: 0.45 }]}
                   resizeMode="cover"
@@ -1002,7 +1241,7 @@ export default function DetailScreen() {
 
               {posterUrl ? (
                 <Image
-                  source={{ uri: posterUrl, cache: 'force-cache' }}
+                  source={{ uri: posterUrl, cache: "force-cache" }}
                   style={styles.image}
                   resizeMode="cover"
                 />
@@ -1107,359 +1346,456 @@ export default function DetailScreen() {
             </Animated.View>
           </View>
 
-              {/* Fixed Header Content (Rendered OUTSIDE ScrollView to prevent jitter/glitching) */}
-              <Animated.View
-                style={[styles.fixedHeaderContainer, fixedHeaderAnimatedStyle]}
-                pointerEvents="box-none"
+          {/* Fixed Header Content (Rendered OUTSIDE ScrollView to prevent jitter/glitching) */}
+          <Animated.View
+            style={[styles.fixedHeaderContainer, fixedHeaderAnimatedStyle]}
+            pointerEvents="box-none"
+          >
+            {/* Watch Trailer Button in Center */}
+            {detail?.trailers && detail.trailers.length > 0 && (
+              <TouchableOpacity
+                style={styles.trailerButton}
+                activeOpacity={0.8}
+                onPress={playTrailer}
+                disabled={trailerDisabled}
               >
-                {/* Watch Trailer Button in Center */}
-                {detail?.trailers && detail.trailers.length > 0 && (
-                  <TouchableOpacity
-                    style={styles.trailerButton}
-                    activeOpacity={0.8}
-                    onPress={playTrailer}
-                    disabled={trailerDisabled}
-                  >
-                    <View style={styles.trailerCircle}>
-                      {phase === "open" || phase === "closing" ? (
-                        <BlurView
-                          intensity={90}
-                          tint="dark"
-                          style={StyleSheet.absoluteFillObject}
-                          blurTarget={{ current: blurTarget }}
-                          blurMethod="dimezisBlurView"
-                        />
-                      ) : (
-                        <View
-                          style={[
-                            StyleSheet.absoluteFillObject,
-                            { backgroundColor: "rgba(15, 15, 20, 0.85)" },
-                          ]}
-                        />
-                      )}
-                      <Ionicons
-                        name="play"
-                        size={24}
-                        color="#fff"
-                        style={{ marginLeft: 3 }}
-                      />
-                    </View>
-                    <Text style={styles.trailerLabel}>TRAILER</Text>
-                  </TouchableOpacity>
-                )}
-
-                {/* Video Metadata Pill at Bottom */}
-                <View style={styles.pillBottom} pointerEvents="none">
-                  <View style={styles.pillBackground}>
-                    {phase === "open" || phase === "closing" ? (
-                      <BlurView
-                        intensity={90}
-                        tint="dark"
-                        style={StyleSheet.absoluteFillObject}
-                        blurTarget={{ current: blurTarget }}
-                        blurMethod="dimezisBlurView"
-                      />
-                    ) : (
-                      <View
-                        style={[
-                          StyleSheet.absoluteFillObject,
-                          { backgroundColor: "rgba(15, 15, 20, 0.85)" },
-                        ]}
-                      />
-                    )}
-                    {detail?.year ? (
-                      <>
-                        <Text style={styles.pillText}>{detail.year}</Text>
-                        <View style={styles.pillDot} />
-                      </>
-                    ) : null}
-                    <Text style={styles.pillText}>
-                      {detail?.isSerial
-                        ? `${availableSeasons.length} Season${availableSeasons.length !== 1 ? "s" : ""} • ${allEpisodes.length} Episode${allEpisodes.length !== 1 ? "s" : ""}`
-                        : "Movie"}
-                    </Text>
-                    <View style={styles.pillDot} />
-                    <Text style={styles.pillText}>HD</Text>
-                  </View>
+                <View style={styles.trailerCircle}>
+                  {phase === "open" || phase === "closing" ? (
+                    <BlurView
+                      intensity={90}
+                      tint="dark"
+                      style={StyleSheet.absoluteFillObject}
+                      blurTarget={{ current: blurTarget }}
+                      blurMethod="dimezisBlurView"
+                    />
+                  ) : (
+                    <View
+                      style={[
+                        StyleSheet.absoluteFillObject,
+                        { backgroundColor: "rgba(15, 15, 20, 0.85)" },
+                      ]}
+                    />
+                  )}
+                  <Ionicons
+                    name="play"
+                    size={24}
+                    color="#fff"
+                    style={{ marginLeft: 3 }}
+                  />
                 </View>
-              </Animated.View>
+                <Text style={styles.trailerLabel}>TRAILER</Text>
+              </TouchableOpacity>
+            )}
 
-              {/* Swipe Touch Catcher (covers top 45%, outside ScrollView, animated) */}
-              <Animated.View
-                style={[styles.touchCatcher, touchCatcherAnimatedStyle]}
-                {...panResponder.panHandlers}
-                pointerEvents={showSeasonDropdown ? "none" : "auto"}
+            {/* Video Metadata Pill at Bottom */}
+            <View style={styles.pillBottom} pointerEvents="none">
+              <View style={styles.pillBackground}>
+                {phase === "open" || phase === "closing" ? (
+                  <BlurView
+                    intensity={90}
+                    tint="dark"
+                    style={StyleSheet.absoluteFillObject}
+                    blurTarget={{ current: blurTarget }}
+                    blurMethod="dimezisBlurView"
+                  />
+                ) : (
+                  <View
+                    style={[
+                      StyleSheet.absoluteFillObject,
+                      { backgroundColor: "rgba(15, 15, 20, 0.85)" },
+                    ]}
+                  />
+                )}
+                {detail?.year ? (
+                  <>
+                    <Text style={styles.pillText}>{detail.year}</Text>
+                    <View style={styles.pillDot} />
+                  </>
+                ) : null}
+                <Text style={styles.pillText}>
+                  {detail?.isSerial
+                    ? `${availableSeasons.length} Season${availableSeasons.length !== 1 ? "s" : ""} • ${allEpisodes.length} Episode${allEpisodes.length !== 1 ? "s" : ""}`
+                    : "Movie"}
+                </Text>
+                <View style={styles.pillDot} />
+                <Text style={styles.pillText}>HD</Text>
+              </View>
+            </View>
+          </Animated.View>
+
+          {/* Swipe Touch Catcher (covers top 45%, outside ScrollView, animated) */}
+          <Animated.View
+            style={[styles.touchCatcher, touchCatcherAnimatedStyle]}
+            {...panResponder.panHandlers}
+            pointerEvents={showSeasonDropdown ? "none" : "auto"}
+          />
+
+          {/* Scrollable Details */}
+          <Animated.ScrollView
+            ref={scrollViewRef as any}
+            style={[styles.fullScreenScroll, contentStyle]}
+            contentContainerStyle={{ flexGrow: 1 }}
+            showsVerticalScrollIndicator={false}
+            onScroll={scrollHandler}
+            scrollEventThrottle={16}
+          >
+            <View style={{ flexGrow: 1 }}>
+              {showSeasonDropdown && (
+                <Pressable
+                  style={[StyleSheet.absoluteFillObject, { zIndex: 99 }]}
+                  onPress={() => setShowSeasonDropdown(false)}
+                />
+              )}
+              {/* Spacer for Fixed Header Content */}
+              <View
+                style={{ height: SCREEN_HEIGHT * 0.45 }}
+                pointerEvents="none"
               />
 
-              {/* Scrollable Details */}
-              <Animated.ScrollView
-                ref={scrollViewRef as any}
-                style={[styles.fullScreenScroll, contentStyle]}
-                contentContainerStyle={{ flexGrow: 1 }}
-                showsVerticalScrollIndicator={false}
-                onScroll={scrollHandler}
-                scrollEventThrottle={16}
-              >
-                <Pressable
-                  style={{ flexGrow: 1 }}
-                  onPress={() => {
-                    if (showSeasonDropdown) {
-                      setShowSeasonDropdown(false);
-                    }
-                  }}
-                >
-                  {/* Spacer for Fixed Header Content */}
-                  <View
-                    style={{ height: SCREEN_HEIGHT * 0.45 }}
-                    pointerEvents="none"
-                  />
+              {/* Bottom Sheet Content */}
+              {(phase === "opening" ||
+                phase === "open" ||
+                phase === "closing") && (
+                <Animated.View style={styles.sheetContentWrap}>
+                  <View style={styles.bottomSheetBackground}>
+                    <View style={styles.blurContainer}>
+                      {posterUrl ? (
+                        <Image
+                          source={{ uri: posterUrl, cache: "force-cache" }}
+                          style={StyleSheet.absoluteFillObject}
+                          blurRadius={35}
+                          resizeMode="cover"
+                        />
+                      ) : null}
+                      <LinearGradient
+                        colors={["rgba(15,15,20,0.55)", "rgba(5,5,10,0.9)"]}
+                        style={StyleSheet.absoluteFillObject}
+                      />
+                    </View>
+                  </View>
 
-                  {/* Bottom Sheet Content */}
-                  {(phase === "opening" ||
-                    phase === "open" ||
-                    phase === "closing") && (
-                    <Animated.View style={styles.sheetContentWrap}>
-                      <View style={styles.bottomSheetBackground}>
-                        <View style={styles.blurContainer}>
-                          {posterUrl ? (
-                            <Image
-                              source={{ uri: posterUrl, cache: 'force-cache' }}
-                              style={StyleSheet.absoluteFillObject}
-                              blurRadius={35}
-                              resizeMode="cover"
-                            />
-                          ) : null}
-                          <LinearGradient
-                            colors={["rgba(15,15,20,0.55)", "rgba(5,5,10,0.9)"]}
-                            style={StyleSheet.absoluteFillObject}
-                          />
-                        </View>
+                  {loading ? (
+                    phase === "open" ? (
+                      <DetailsSkeleton />
+                    ) : null
+                  ) : error ? (
+                    <View style={styles.errorContainer}>
+                      <BlurView
+                        intensity={20}
+                        tint="dark"
+                        style={styles.errorCard}
+                      >
+                        <Ionicons
+                          name="alert-circle-outline"
+                          size={42}
+                          color={theme.colors.rose}
+                          style={{ marginBottom: 12 }}
+                        />
+                        <Text style={styles.errorTitle}>
+                          Failed to Load Details
+                        </Text>
+                        <Text style={styles.errorText}>{error}</Text>
+                        <TouchableOpacity
+                          style={styles.retryBtn}
+                          onPress={reloadDetail}
+                          activeOpacity={0.8}
+                        >
+                          <Text style={styles.retryBtnText}>Try Again</Text>
+                        </TouchableOpacity>
+                      </BlurView>
+                    </View>
+                  ) : (
+                    <Animated.View
+                      entering={FadeInUp.duration(450)}
+                      style={[
+                        styles.scrollContent,
+                        { paddingBottom: insets.bottom + 100 },
+                      ]}
+                    >
+                      {/* Title & Season */}
+                      <View style={[styles.titleContainer, { zIndex: 100 }]}>
+                        <Text style={styles.mainTitle} numberOfLines={2}>
+                          {title}
+                        </Text>
+                        {detail?.isSerial && availableSeasons.length > 0 ? (
+                          <View
+                            style={{
+                              position: "relative",
+                              alignItems: "center",
+                            }}
+                          >
+                            <TouchableOpacity
+                              style={styles.seasonSelector}
+                              activeOpacity={0.7}
+                              onPress={() =>
+                                setShowSeasonDropdown(!showSeasonDropdown)
+                              }
+                            >
+                              <Text style={styles.seasonText}>
+                                {selectedSeason
+                                  ? `Season ${selectedSeason}`
+                                  : "Episodes"}
+                              </Text>
+                              <Text style={styles.seasonIcon}>▼</Text>
+                            </TouchableOpacity>
+
+                            {/* Floating Modern Dropdown */}
+                            {showSeasonDropdown && (
+                              <Animated.View
+                                entering={FadeIn.duration(200)}
+                                exiting={FadeOut.duration(150)}
+                                style={styles.floatingDropdown}
+                              >
+                                <LinearGradient
+                                  colors={["#1c1c22", "#0f0f12"]}
+                                  style={StyleSheet.absoluteFillObject}
+                                />
+                                <ScrollView
+                                  showsVerticalScrollIndicator={false}
+                                  style={{ maxHeight: 220 }}
+                                >
+                                  {availableSeasons.map((season) => (
+                                    <TouchableOpacity
+                                      key={`season-${season}`}
+                                      style={[
+                                        styles.dropdownItem,
+                                        selectedSeason === season &&
+                                          styles.dropdownItemSelected,
+                                      ]}
+                                      onPress={() => {
+                                        setSelectedSeason(season);
+                                        setShowSeasonDropdown(false);
+                                      }}
+                                    >
+                                      <View style={styles.dropdownItemLeft}>
+                                        <View
+                                          style={[
+                                            styles.seasonNumberBox,
+                                            selectedSeason === season &&
+                                              styles.seasonNumberBoxSelected,
+                                          ]}
+                                        >
+                                          <Text
+                                            style={[
+                                              styles.seasonNumberText,
+                                              selectedSeason === season &&
+                                                styles.seasonNumberTextSelected,
+                                            ]}
+                                          >
+                                            {String(season).padStart(2, "0")}
+                                          </Text>
+                                        </View>
+                                        <Text
+                                          style={[
+                                            styles.dropdownItemText,
+                                            selectedSeason === season &&
+                                              styles.dropdownItemTextSelected,
+                                          ]}
+                                        >
+                                          Season {season}
+                                        </Text>
+                                      </View>
+                                      {selectedSeason === season && (
+                                        <Text style={styles.checkmark}>✓</Text>
+                                      )}
+                                    </TouchableOpacity>
+                                  ))}
+                                </ScrollView>
+                              </Animated.View>
+                            )}
+                          </View>
+                        ) : null}
                       </View>
 
-                      {loading ? (
-                        phase === "open" ? (
-                          <DetailsSkeleton />
-                        ) : null
-                      ) : error ? (
-                        <View style={styles.centerState}>
-                          <Text style={styles.errorText}>{error}</Text>
-                          <TouchableOpacity
-                            style={styles.primaryButton}
-                            onPress={reloadDetail}
+                      {/* Description */}
+                      {detail?.description ? (
+                        <View style={styles.descriptionContainer}>
+                          <Text
+                            style={styles.descriptionText}
+                            numberOfLines={
+                              isDescriptionExpanded ? undefined : 3
+                            }
                           >
-                            <Text style={styles.primaryButtonText}>Retry</Text>
-                          </TouchableOpacity>
+                            {detail.description}
+                          </Text>
                         </View>
-                      ) : (
+                      ) : null}
+
+                      {/* Always Visible: SEE MORE / SEE LESS Toggle in center in capitals */}
+                      <TouchableOpacity
+                        onPress={() => {
+                          setIsDescriptionExpanded(!isDescriptionExpanded);
+                        }}
+                        style={styles.seeMoreBtn}
+                      >
+                        <Text style={styles.seeMoreText}>
+                          {isDescriptionExpanded ? "SEE LESS" : "SEE MORE"}
+                        </Text>
+                      </TouchableOpacity>
+
+                      {detail && (
                         <Animated.View
-                          entering={FadeInUp.duration(450)}
                           style={[
-                            styles.scrollContent,
-                            { paddingBottom: insets.bottom + 100 },
+                            styles.expandedDetails,
+                            expandedAnimatedStyle,
                           ]}
                         >
-                          {/* Title & Season */}
-                          <View style={[styles.titleContainer, { zIndex: 100 }]}>
-                            <Text style={styles.mainTitle} numberOfLines={2}>
-                              {title}
-                            </Text>
-                            {detail?.isSerial && availableSeasons.length > 0 ? (
-                              <View
-                                style={{
-                                  position: "relative",
-                                  alignItems: "center",
-                                }}
-                              >
-                                <TouchableOpacity
-                                  style={styles.seasonSelector}
-                                  activeOpacity={0.7}
-                                  onPress={() =>
-                                    setShowSeasonDropdown(!showSeasonDropdown)
-                                  }
-                                >
-                                  <Text style={styles.seasonText}>
-                                    {selectedSeason
-                                      ? `Season ${selectedSeason}`
-                                      : "Episodes"}
-                                  </Text>
-                                  <Text style={styles.seasonIcon}>▼</Text>
-                                </TouchableOpacity>
-
-                                {/* Floating Modern Dropdown */}
-                                {showSeasonDropdown && (
-                                  <Animated.View
-                                    entering={FadeIn.duration(200)}
-                                    exiting={FadeOut.duration(150)}
-                                    style={styles.floatingDropdown}
-                                  >
-                                    <LinearGradient
-                                      colors={["#1c1c22", "#0f0f12"]}
-                                      style={StyleSheet.absoluteFillObject}
-                                    />
-                                    <ScrollView
-                                      showsVerticalScrollIndicator={false}
-                                      style={{ maxHeight: 220 }}
-                                    >
-                                      {availableSeasons.map((season) => (
-                                        <TouchableOpacity
-                                          key={`season-${season}`}
-                                          style={[
-                                            styles.dropdownItem,
-                                            selectedSeason === season &&
-                                              styles.dropdownItemSelected,
-                                          ]}
-                                          onPress={() => {
-                                            setSelectedSeason(season);
-                                            setShowSeasonDropdown(false);
-                                          }}
-                                        >
-                                          <View style={styles.dropdownItemLeft}>
-                                            <View
-                                              style={[
-                                                styles.seasonNumberBox,
-                                                selectedSeason === season &&
-                                                  styles.seasonNumberBoxSelected,
-                                              ]}
-                                            >
-                                              <Text
-                                                style={[
-                                                  styles.seasonNumberText,
-                                                  selectedSeason === season &&
-                                                    styles.seasonNumberTextSelected,
-                                                ]}
-                                              >
-                                                {String(season).padStart(2, "0")}
-                                              </Text>
-                                            </View>
-                                            <Text
-                                              style={[
-                                                styles.dropdownItemText,
-                                                selectedSeason === season &&
-                                                  styles.dropdownItemTextSelected,
-                                              ]}
-                                            >
-                                              Season {season}
-                                            </Text>
-                                          </View>
-                                          {selectedSeason === season && (
-                                            <Text style={styles.checkmark}>✓</Text>
-                                          )}
-                                        </TouchableOpacity>
-                                      ))}
-                                    </ScrollView>
-                                  </Animated.View>
-                                )}
-                              </View>
-                            ) : null}
-                          </View>
-
-                          {/* Description */}
-                          {detail?.description ? (
-                            <View style={styles.descriptionContainer}>
-                              <Text
-                                style={styles.descriptionText}
-                                numberOfLines={
-                                  isDescriptionExpanded ? undefined : 3
-                                }
-                              >
-                                {detail.description}
-                              </Text>
-                            </View>
-                          ) : null}
-
-                          {/* Always Visible: SEE MORE / SEE LESS Toggle in center in capitals */}
-                          <TouchableOpacity
-                            onPress={() => {
-                              setIsDescriptionExpanded(!isDescriptionExpanded);
-                            }}
-                            style={styles.seeMoreBtn}
-                          >
-                            <Text style={styles.seeMoreText}>
-                              {isDescriptionExpanded ? "SEE LESS" : "SEE MORE"}
-                            </Text>
-                          </TouchableOpacity>
-
-                          {detail && (
-                            <Animated.View
-                              style={[
-                                styles.expandedDetails,
-                                expandedAnimatedStyle,
-                              ]}
-                            >
-                              {expandedContent}
-                            </Animated.View>
-                          )}
-
-                          {linksError ? (
-                            <Text style={styles.linksError}>{linksError}</Text>
-                          ) : null}
-
-                          {/* Episodes List Title */}
-                          <Text style={styles.sectionTitle}>
-                            {detail?.isSerial ? "Episodes List" : "Play Video"}
-                          </Text>
-
-                          {/* Episodes — FlatList with scrollEnabled=false so outer ScrollView drives scrolling */}
-                          <FlatList
-                            data={displayedEpisodes}
-                            keyExtractor={(ep, index) => `${ep.mediaRef}-${index}`}
-                            renderItem={({ item: ep, index }) => (
-                              <HeroEpisodeRow
-                                ep={ep}
-                                index={index}
-                                playingEpisode={playingEpisode}
-                                playEpisode={playEpisode}
-                                posterUrl={
-                                  detail?.posterUrl || item.posterUrl || undefined
-                                }
-                                isSerial={!!detail?.isSerial}
-                                title={title}
-                              />
-                            )}
-                            scrollEnabled={false}
-                            nestedScrollEnabled={false}
-                            ListEmptyComponent={
-                              <Text style={styles.empty}>
-                                No episodes available
-                              </Text>
-                            }
-                            initialNumToRender={10}
-                            maxToRenderPerBatch={5}
-                            style={styles.episodesList}
-                          />
-
-                          {/* Recommendations Row */}
-                          {recommendations.length > 0 && (
-                            <View style={styles.recommendationsSection}>
-                              <Text style={styles.recommendationsTitle}>
-                                More Like This
-                              </Text>
-                              <ScrollView
-                                horizontal
-                                nestedScrollEnabled={true}
-                                showsHorizontalScrollIndicator={false}
-                                contentContainerStyle={styles.recommendationsList}
-                              >
-                                {recommendations.map((recItem, idx) => (
-                                  <RecommendationCard
-                                    key={`rec-${idx}-${recItem.url}`}
-                                    item={recItem}
-                                    onPress={(clickedItem) =>
-                                      updateDetailInPlace(clickedItem)
-                                    }
-                                  />
-                                ))}
-                              </ScrollView>
-                            </View>
-                          )}
+                          {expandedContent}
                         </Animated.View>
+                      )}
+
+                      {linksError ? (
+                        <Text style={styles.linksError}>{linksError}</Text>
+                      ) : null}
+
+                      {/* Episodes List Title */}
+                      <Text style={styles.sectionTitle}>
+                        {detail?.isSerial ? "Episodes List" : "Play Video"}
+                      </Text>
+
+                      {/* Episodes — FlatList with scrollEnabled=false so outer ScrollView drives scrolling */}
+                      <FlatList
+                        data={displayedEpisodes}
+                        keyExtractor={(ep, index) => `${ep.mediaRef}-${index}`}
+                        renderItem={({ item: ep, index }) => (
+                          <HeroEpisodeRow
+                            ep={ep}
+                            index={index}
+                            playingEpisode={playingEpisode}
+                            playEpisode={playEpisode}
+                            posterUrl={
+                              detail?.posterUrl || item.posterUrl || undefined
+                            }
+                            isSerial={!!detail?.isSerial}
+                            title={title}
+                            fallbackDuration={detail?.duration}
+                          />
+                        )}
+                        scrollEnabled={false}
+                        nestedScrollEnabled={false}
+                        ListEmptyComponent={
+                          <Text style={styles.empty}>
+                            No episodes available
+                          </Text>
+                        }
+                        initialNumToRender={10}
+                        maxToRenderPerBatch={5}
+                        style={styles.episodesList}
+                      />
+
+                      {/* Recommendations Row */}
+                      {recommendations.length > 0 && (
+                        <View style={styles.recommendationsSection}>
+                          <Text style={styles.recommendationsTitle}>
+                            More Like This
+                          </Text>
+                          <ScrollView
+                            horizontal
+                            nestedScrollEnabled={true}
+                            showsHorizontalScrollIndicator={false}
+                            contentContainerStyle={styles.recommendationsList}
+                          >
+                            {recommendations.map((recItem, idx) => (
+                              <RecommendationCard
+                                key={`rec-${idx}-${recItem.url}`}
+                                item={recItem}
+                                onPress={(clickedItem) =>
+                                  updateDetailInPlace(clickedItem)
+                                }
+                              />
+                            ))}
+                          </ScrollView>
+                        </View>
                       )}
                     </Animated.View>
                   )}
-                </Pressable>
-              </Animated.ScrollView>
+                </Animated.View>
+              )}
+            </View>
+          </Animated.ScrollView>
         </Animated.View>
       </Animated.View>
+
+      {/* Torrent Buffering Overlay */}
+      {isTorrentBuffering && (
+        <Modal
+          transparent
+          animationType="fade"
+          visible={isTorrentBuffering}
+          onRequestClose={() => {
+            setIsTorrentBuffering(false);
+            if (torrentIntervalRef.current) {
+              clearInterval(torrentIntervalRef.current);
+            }
+            bridge.stopTorrentStream().catch(() => {});
+          }}
+        >
+          <View style={styles.torrentModalContainer}>
+            <BlurView
+              intensity={90}
+              tint="dark"
+              style={StyleSheet.absoluteFillObject}
+            />
+
+            <View style={styles.torrentContentCard}>
+              <ActivityIndicator size="large" color="#0047FF" />
+
+              <Text style={styles.torrentTitleText}>
+                Connecting to Peers...
+              </Text>
+              <Text style={styles.torrentSubTitleText}>
+                {torrentStatus?.peers && torrentStatus.peers > 0
+                  ? `Found ${torrentStatus.peers} seeders`
+                  : "Searching for healthy seeds..."}
+              </Text>
+
+              {/* Progress bar */}
+              <View style={styles.torrentProgressTrack}>
+                <View
+                  style={[
+                    styles.torrentProgressFill,
+                    {
+                      width: `${Math.min(100, Math.max(0, ((torrentStatus?.progress ?? 0) / 1.5) * 100))}%`,
+                    },
+                  ]}
+                />
+              </View>
+
+              <View style={styles.torrentStatsRow}>
+                <Text style={styles.torrentStatsText}>
+                  Progress:{" "}
+                  {Math.min(
+                    100,
+                    Math.round(((torrentStatus?.progress ?? 0) / 1.5) * 100),
+                  )}
+                  %
+                </Text>
+                <Text style={styles.torrentStatsText}>
+                  Speed:{" "}
+                  {torrentStatus?.speed
+                    ? `${(torrentStatus.speed / 1024).toFixed(0)} kB/s`
+                    : "0 kB/s"}
+                </Text>
+              </View>
+
+              {/* Cancel Button */}
+              <TouchableOpacity
+                style={styles.torrentCancelButton}
+                onPress={() => {
+                  setIsTorrentBuffering(false);
+                  if (torrentIntervalRef.current) {
+                    clearInterval(torrentIntervalRef.current);
+                  }
+                  bridge.stopTorrentStream().catch(() => {});
+                }}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.torrentCancelText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+      )}
 
       {/* Source Picker Bottom Sheet Overlay */}
       {showSourcePicker && (
@@ -1478,7 +1814,11 @@ export default function DetailScreen() {
               <View style={styles.sheetHandle} />
               <View style={styles.sheetHeaderRow}>
                 {isResolving && (
-                  <ActivityIndicator size="small" color="#0047FF" style={{ marginRight: 8 }} />
+                  <ActivityIndicator
+                    size="small"
+                    color="#0047FF"
+                    style={{ marginRight: 8 }}
+                  />
                 )}
                 <Text style={styles.sheetTitle}>Select Source</Text>
                 <TouchableOpacity
@@ -1500,62 +1840,115 @@ export default function DetailScreen() {
                   >
                     {providerTabs.map((tab) => {
                       const isActive = activeProviderTab === tab;
-                      
-                      // Calculate tab status decorations
-                       const prog = resolvingProgress.find(p => p.providerName === tab);
-                       let tabLabel = tab;
-                       const tabSubLabel = prog?.errorReason || '';
-                       const isSearching = (tab === 'All' && isResolving) || (prog?.status === 'searching');
 
-                       if (tab === 'All') {
-                         const totalFound = resolvingProgress.reduce(
-                           (acc, curr) => acc + (curr.status === 'found' ? curr.linksCount : 0),
-                           0
-                         );
-                         tabLabel = totalFound > 0 ? `All (${totalFound})` : 'All';
-                       } else if (prog) {
-                         if (prog.status === 'searching') {
-                           tabLabel = tab;
-                         } else if (prog.status === 'found' && prog.linksCount > 0) {
-                           tabLabel = `${tab} (${prog.linksCount})`;
-                         } else if (prog.status === 'none') {
-                           tabLabel = `${tab} (0)`;
-                         } else if (prog.status === 'error') {
-                           tabLabel = `${tab} ⚠`;
-                         }
-                       }
+                      // Calculate tab status decorations
+                      const prog = resolvingProgress.find(
+                        (p) => p.providerName === tab,
+                      );
+                      let tabLabel = tab;
+                      const tabSubLabel = cleanErrorMessage(prog?.errorReason);
+                      const isSearching =
+                        (tab === "All" && isResolving) ||
+                        prog?.status === "searching";
+
+                      const tabSourcesCount = sources.filter(
+                        (s) => s.provider.toLowerCase() === tab.toLowerCase(),
+                      ).length;
+                      if (tab === "All") {
+                        tabLabel =
+                          sources.length > 0
+                            ? `All (${sources.length})`
+                            : "All";
+                      } else if (prog) {
+                        if (prog.status === "searching") {
+                          tabLabel =
+                            tabSourcesCount > 0
+                              ? `${tab} (${tabSourcesCount})`
+                              : tab;
+                        } else if (prog.status === "found") {
+                          tabLabel = `${tab} (${tabSourcesCount})`;
+                        } else if (prog.status === "none") {
+                          tabLabel = `${tab} (0)`;
+                        } else if (prog.status === "error") {
+                          tabLabel =
+                            tabSourcesCount > 0
+                              ? `${tab} (${tabSourcesCount})`
+                              : `${tab} ⚠`;
+                        }
+                      }
 
                       return (
-                         <TouchableOpacity
-                           key={tab}
-                           style={[styles.tabButton, isActive && styles.tabButtonActive, { flexDirection: 'row', alignItems: 'center' }]}
-                           onPress={() => setActiveProviderTab(tab)}
-                           activeOpacity={0.7}
-                         >
-                           {isSearching && (
-                             <ActivityIndicator 
-                               size="small" 
-                               color={isActive ? "#ffffff" : "#0047FF"} 
-                               style={{ marginRight: 6 }} 
-                             />
-                           )}
-                           <Text style={[styles.tabText, isActive && styles.tabTextActive]}>
-                             {tabLabel}
-                           </Text>
-                           {tabSubLabel && !isActive && (
-                             <Text style={styles.tabSubText} numberOfLines={1}>{tabSubLabel}</Text>
-                           )}
-                         </TouchableOpacity>
+                        <TouchableOpacity
+                          key={tab}
+                          style={[
+                            styles.tabButton,
+                            isActive && styles.tabButtonActive,
+                            { flexDirection: "row", alignItems: "center" },
+                          ]}
+                          onPress={() => setActiveProviderTab(tab)}
+                          activeOpacity={0.7}
+                        >
+                          {isSearching && (
+                            <ActivityIndicator
+                              size="small"
+                              color={isActive ? "#ffffff" : "#0047FF"}
+                              style={{ marginRight: 6 }}
+                            />
+                          )}
+                          <Text
+                            style={[
+                              styles.tabText,
+                              isActive && styles.tabTextActive,
+                            ]}
+                          >
+                            {tabLabel}
+                          </Text>
+                        </TouchableOpacity>
                       );
                     })}
                   </ScrollView>
+
+                  {/* Left & Right Edge Fades for Tabs ScrollView */}
+                  <LinearGradient
+                    colors={["#141417", "transparent"]}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 0 }}
+                    style={{
+                      position: "absolute",
+                      left: 0,
+                      top: 0,
+                      bottom: 0,
+                      width: 24,
+                      zIndex: 10,
+                    }}
+                    pointerEvents="none"
+                  />
+                  <LinearGradient
+                    colors={["transparent", "#141417"]}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 0 }}
+                    style={{
+                      position: "absolute",
+                      right: 0,
+                      top: 0,
+                      bottom: 0,
+                      width: 24,
+                      zIndex: 10,
+                    }}
+                    pointerEvents="none"
+                  />
                 </View>
               )}
 
-              {/* Live search indicator below tabs */}
+              {/* DoH bypass notice — only shown when ISP blocking was detected */}
+
               {isTabResolving && filteredSources.length > 0 && (
                 <View style={styles.listSearchingIndicator}>
-                  <ActivityIndicator size="small" color="#0047FF" style={{ marginRight: 8 }} />
+                  <ActivityIndicator
+                    size="small"
+                    color="#0047FF"
+                    style={{ marginRight: 8 }}
+                  />
                   <Text style={styles.listSearchingText}>
                     Searching for more links... ({filteredSources.length} found)
                   </Text>
@@ -1565,24 +1958,92 @@ export default function DetailScreen() {
               {isTabResolving && filteredSources.length === 0 ? (
                 <View style={styles.searchLoaderContainer}>
                   <ActivityIndicator size="large" color="#0047FF" />
-                  <Text style={styles.searchLoaderText}>Searching for links...</Text>
+                  <Text style={styles.searchLoaderText}>
+                    Searching for links...
+                  </Text>
                   <Text style={styles.searchLoaderSubtext}>
-                    Checking all providers in parallel. Found sources will appear here instantly.
+                    Checking all providers in parallel. Found sources will
+                    appear here instantly.
                   </Text>
                 </View>
               ) : !isTabResolving && filteredSources.length === 0 ? (
                 <View style={styles.noSourcesContainer}>
-                  <Ionicons name="alert-circle-outline" size={48} color={theme.colors.rose} style={{ opacity: 0.8 }} />
-                  <Text style={styles.noSourcesText}>No links found for this provider</Text>
-                  <Text style={styles.noSourcesSubtext}>Try another provider or clear the Playback Links cache in settings.</Text>
                   {(() => {
-                    const activeProg = resolvingProgress.find(p => p.providerName === activeProviderTab);
-                    if (activeProg?.errorReason && activeProviderTab !== 'All') {
+                    const allBlocked =
+                      resolvingProgress.length > 0 &&
+                      resolvingProgress.filter(
+                        (p) => p.status === "error" || p.status === "none",
+                      ).length > 0 &&
+                      resolvingProgress.every(
+                        (p) =>
+                          p.status === "none" ||
+                          p.status === "searching" ||
+                          isIspBlock(p.errorReason),
+                      );
+                    return (
+                      <>
+                        <Ionicons
+                          name={
+                            allBlocked
+                              ? "lock-closed-outline"
+                              : "alert-circle-outline"
+                          }
+                          size={48}
+                          color={theme.colors.rose}
+                          style={{ opacity: 0.8 }}
+                        />
+                        <Text style={styles.noSourcesText}>
+                          {allBlocked
+                            ? "Content blocked by your network"
+                            : "No links found"}
+                        </Text>
+                        <Text style={styles.noSourcesSubtext}>
+                          {allBlocked
+                            ? "Your internet provider (Jio/Airtel/etc.) is blocking these sources.\nConnect to a VPN and try again."
+                            : "Try another provider tab or clear the Playback Links cache in Settings."}
+                        </Text>
+                      </>
+                    );
+                  })()}
+                  {(() => {
+                    const activeProg = resolvingProgress.find(
+                      (p) => p.providerName === activeProviderTab,
+                    );
+                    if (
+                      activeProg?.errorReason &&
+                      activeProviderTab !== "All"
+                    ) {
+                      const blocked = isIspBlock(activeProg.errorReason);
                       return (
-                        <View style={{ marginTop: 12, backgroundColor: "rgba(255,74,125,0.08)", borderRadius: 8, padding: 10, maxWidth: 280 }}>
-                          <Text style={{ color: "#ffb4ab", fontSize: 11, textAlign: "center" }}>
-                            {activeProg.errorReason}
-                          </Text>
+                        <View
+                          style={
+                            blocked
+                              ? styles.vpnNoticeCard
+                              : styles.errorReasonCard
+                          }
+                        >
+                          {blocked ? (
+                            <>
+                              <Ionicons
+                                name="lock-closed-outline"
+                                size={18}
+                                color={theme.colors.rose}
+                                style={{ marginBottom: 6 }}
+                              />
+                              <Text style={styles.vpnNoticeTitle}>
+                                Blocked by your network
+                              </Text>
+                              <Text style={styles.vpnNoticeText}>
+                                This source is blocked by your internet provider
+                                (Jio/Airtel/etc.).
+                                {"\n"}Connect to a VPN to access it.
+                              </Text>
+                            </>
+                          ) : (
+                            <Text style={styles.errorReasonText}>
+                              {cleanErrorMessage(activeProg.errorReason)}
+                            </Text>
+                          )}
                         </View>
                       );
                     }
@@ -1591,77 +2052,220 @@ export default function DetailScreen() {
                 </View>
               ) : null}
 
+              {/* Torrent stream error modal */}
+              <CustomModal
+                visible={torrentErrorModal.visible}
+                onClose={() => setTorrentErrorModal({ visible: false, message: '' })}
+                title="Torrent Unavailable"
+                message={torrentErrorModal.message}
+                glowColors={['rgba(255, 74, 125, 0.15)', 'transparent']}
+                iconName="alert-circle"
+                iconColor="#ff4a7d"
+                iconBgColor="rgba(255, 74, 125, 0.12)"
+              />
+
               {/* Always show source list when sources exist, even while still resolving */}
               {filteredSources.length > 0 && (
-                <ScrollView
-                  showsVerticalScrollIndicator={false}
-                  style={styles.sheetList}
-                >
-                  {filteredSources.map((source, idx) => {
-                    const isSplitted = source.quality.includes(' · ');
-                    const hostName = source.host || (isSplitted ? source.quality.split(' · ')[0] : source.quality) || 'Direct';
-                    const qualityTag = (isSplitted ? source.quality.split(' · ')[1] : 'Auto');
-                    const hasHeaders = source.headers && Object.keys(source.headers).length > 0;
-                    const protocolLabel = getProtocolLabel(source.type, source.url);
+                <View style={styles.sheetListContainer}>
+                  <ScrollView
+                    showsVerticalScrollIndicator={false}
+                    style={styles.sheetList}
+                    contentContainerStyle={{
+                      paddingTop: 12,
+                      paddingBottom: 24,
+                    }}
+                  >
+                    {filteredSources.map((source, idx) => {
+                      const isSplitted = source.quality.includes(" · ");
+                      const hostName =
+                        source.host ||
+                        (isSplitted
+                          ? source.quality.split(" · ")[0]
+                          : source.quality) ||
+                        "Direct";
+                      const qualityTag = isSplitted
+                        ? source.quality.split(" · ")[1]
+                        : "Auto";
+                      const hasHeaders =
+                        source.headers &&
+                        Object.keys(source.headers).length > 0;
+                      const protocolLabel = getProtocolLabel(
+                        source.type,
+                        source.url,
+                      );
 
-                    // Extract size dynamically from the quality or title string if present
-                    const sizeMatch = source.quality.match(/\[?(\d+(?:\.\d+)?\s*(?:GB|MB|kb|gigabytes|megabytes))\]?/i);
-                    const sizeTag = sizeMatch ? sizeMatch[1] : null;
-                    const showProviderBadge = activeProviderTab === 'All';
+                      // Extract size dynamically from the quality or title string if present
+                      const sizeMatch = source.quality.match(
+                        /\[?(\d+(?:\.\d+)?\s*(?:GB|MB|kb|gigabytes|megabytes))\]?/i,
+                      );
+                      const sizeTag = sizeMatch ? sizeMatch[1] : null;
+                      const showProviderBadge = activeProviderTab === "All";
 
-                    return (
-                      <TouchableOpacity
-                        key={`source-${idx}`}
-                        style={styles.sheetRow}
-                        onPress={() => onSourceSelect(source)}
-                        activeOpacity={0.7}
-                      >
-                        <View style={styles.sheetRowInfo}>
-                          <View style={[styles.sheetQualityRow, { flexWrap: 'wrap', gap: 6 }]}>
-                            {/* Host Name - Normal Text (No Background Badge) */}
-                            <Text style={[styles.sheetQuality, { marginRight: 4 }]}>
-                              {hostName}
-                            </Text>
-
-                            {/* Quality Badge */}
-                            <View style={[styles.sheetBadge, { backgroundColor: getQualityBadgeBg(qualityTag) }]}>
-                              <Text style={[styles.sheetBadgeText, { color: '#ffffff', fontWeight: 'bold' }]}>
-                                {qualityTag}
+                      return (
+                        <TouchableOpacity
+                          key={`source-${idx}`}
+                          style={styles.sheetRow}
+                          onPress={() => onSourceSelect(source)}
+                          activeOpacity={0.7}
+                        >
+                          <View style={styles.sheetRowInfo}>
+                            <View
+                              style={[
+                                styles.sheetQualityRow,
+                                { flexWrap: "wrap", gap: 6 },
+                              ]}
+                            >
+                              {/* Host Name - Normal Text (No Background Badge) */}
+                              <Text
+                                style={[
+                                  styles.sheetQuality,
+                                  { marginRight: 4 },
+                                ]}
+                              >
+                                {hostName}
                               </Text>
-                            </View>
 
-                            {/* Protocol Badge */}
-                            <View style={styles.sheetBadge}>
-                              <Text style={styles.sheetBadgeText}>
-                                {protocolLabel}
-                              </Text>
-                            </View>
-
-                            {/* Size Badge */}
-                            {sizeTag ? (
-                              <View style={[styles.sheetBadge, { backgroundColor: '#f39c12' }]}>
-                                <Text style={[styles.sheetBadgeText, { color: '#ffffff', fontWeight: 'bold' }]}>
-                                  {sizeTag}
+                              {/* Quality Badge */}
+                              <View
+                                style={[
+                                  styles.sheetBadge,
+                                  {
+                                    backgroundColor:
+                                      getQualityBadgeBg(qualityTag),
+                                  },
+                                ]}
+                              >
+                                <Text
+                                  style={[
+                                    styles.sheetBadgeText,
+                                    { color: "#ffffff", fontWeight: "bold" },
+                                  ]}
+                                >
+                                  {qualityTag}
                                 </Text>
                               </View>
-                            ) : null}
 
-                            {/* Provider Badge (only in "All" tab) */}
-                            {showProviderBadge && source.provider ? (
-                              <View style={[styles.sheetBadge, { backgroundColor: 'rgba(255, 255, 255, 0.05)', borderColor: 'rgba(255, 255, 255, 0.12)', borderWidth: 1 }]}>
-                                <Text style={[styles.sheetBadgeText, { color: '#ffffff', opacity: 0.8 }]}>
-                                  {source.provider.toUpperCase()}
+                              {/* Protocol Badge */}
+                              <View style={styles.sheetBadge}>
+                                <Text style={styles.sheetBadgeText}>
+                                  {protocolLabel}
                                 </Text>
                               </View>
-                            ) : null}
 
+                              {/* Size Badge */}
+                              {sizeTag && (
+                                <View
+                                  style={[
+                                    styles.sheetBadge,
+                                    {
+                                      backgroundColor: "rgba(255,255,255,0.06)",
+                                    },
+                                  ]}
+                                >
+                                  <Text style={styles.sheetBadgeText}>
+                                    {sizeTag}
+                                  </Text>
+                                </View>
+                              )}
 
+                              {/* Provider Badge */}
+                              {showProviderBadge && (
+                                <View
+                                  style={[
+                                    styles.sheetBadge,
+                                    {
+                                      backgroundColor: "rgba(85,128,255,0.1)",
+                                      borderColor: "rgba(85,128,255,0.2)",
+                                      borderWidth: 0.5,
+                                    },
+                                  ]}
+                                >
+                                  <Text
+                                    style={[
+                                      styles.sheetBadgeText,
+                                      { color: "#5580FF", fontWeight: "600" },
+                                    ]}
+                                  >
+                                    {source.provider}
+                                  </Text>
+                                </View>
+                              )}
+
+                              {/* Custom Headers Badge */}
+                              {hasHeaders && (
+                                <View
+                                  style={[
+                                    styles.sheetBadge,
+                                    {
+                                      backgroundColor: "rgba(0,71,255,0.08)",
+                                      borderColor: "rgba(0,71,255,0.2)",
+                                      borderWidth: 0.5,
+                                    },
+                                  ]}
+                                >
+                                  <Text
+                                    style={[
+                                      styles.sheetBadgeText,
+                                      { color: theme.colors.accentLight },
+                                    ]}
+                                  >
+                                    Headers
+                                  </Text>
+                                </View>
+                              )}
+
+                              {/* Subtitles Available Indicator */}
+                              {subtitles.length > 0 && idx === 0 ? (
+                                <View
+                                  style={[
+                                    styles.sheetBadge,
+                                    {
+                                      backgroundColor: "rgba(255,255,255,0.05)",
+                                    },
+                                  ]}
+                                >
+                                  <Text style={styles.sheetBadgeText}>
+                                    Subs
+                                  </Text>
+                                </View>
+                              ) : null}
+                            </View>
                           </View>
-                        </View>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </ScrollView>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </ScrollView>
+
+                  {/* Top & Bottom Edge Fades for sheetList */}
+                  <LinearGradient
+                    colors={["#141417", "transparent"]}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 0, y: 1 }}
+                    style={{
+                      position: "absolute",
+                      left: 0,
+                      right: 0,
+                      top: 0,
+                      height: 16,
+                      zIndex: 10,
+                    }}
+                    pointerEvents="none"
+                  />
+                  <LinearGradient
+                    colors={["transparent", "#141417"]}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 0, y: 1 }}
+                    style={{
+                      position: "absolute",
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      height: 24,
+                      zIndex: 10,
+                    }}
+                    pointerEvents="none"
+                  />
+                </View>
               )}
 
               {subtitles.length > 0 && (
@@ -1672,10 +2276,45 @@ export default function DetailScreen() {
                   </Text>
                 </View>
               )}
+
+              {/* VPN Tip Banner at bottom */}
+              <View style={styles.sheetVpnTip}>
+                <Text style={styles.sheetVpnTipText}>
+                  Tip: Use a VPN app (e.g. ProtonVPN or WARP) if links fail to
+                  load.
+                </Text>
+              </View>
             </View>
           </Animated.View>
         </Animated.View>
       )}
+
+      {/* Premium Edge Fades */}
+      <Animated.View
+        style={[StyleSheet.absoluteFillObject, fadeStyle, { zIndex: 96 }]}
+        pointerEvents="none"
+      >
+        <LinearGradient
+          colors={["#050505", "rgba(5, 5, 5, 0.8)", "transparent"]}
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            right: 0,
+            height: insets.top + 15,
+          }}
+        />
+        <LinearGradient
+          colors={["transparent", "rgba(5, 5, 5, 0.85)", "#050505"]}
+          style={{
+            position: "absolute",
+            bottom: 0,
+            left: 0,
+            right: 0,
+            height: 100,
+          }}
+        />
+      </Animated.View>
     </View>
   );
 }
@@ -1790,7 +2429,7 @@ function RecommendationCard({
       <Animated.View style={animatedStyle}>
         {item.posterUrl ? (
           <Image
-            source={{ uri: item.posterUrl, cache: 'force-cache' }}
+            source={{ uri: item.posterUrl, cache: "force-cache" }}
             style={styles.recPoster}
             resizeMode="cover"
           />
@@ -2008,21 +2647,47 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "500",
   },
+  errorContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 28,
+    paddingTop: 100,
+  },
+  errorCard: {
+    backgroundColor: "rgba(20, 18, 24, 0.65)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
+    borderRadius: 20,
+    padding: 24,
+    width: "100%",
+    alignItems: "center",
+    overflow: "hidden",
+  },
+  errorTitle: {
+    color: "#ffffff",
+    fontSize: 16,
+    fontWeight: "700",
+    marginBottom: 8,
+    textAlign: "center",
+  },
   errorText: {
-    color: "#ffb4ab",
-    fontSize: 15,
+    color: "#8E8D92",
+    fontSize: 13,
     textAlign: "center",
     marginBottom: 16,
+    lineHeight: 18,
   },
-  primaryButton: {
-    backgroundColor: "rgba(255,255,255,0.1)",
-    paddingHorizontal: 24,
+  retryBtn: {
+    backgroundColor: theme.colors.accent,
+    paddingHorizontal: 28,
     paddingVertical: 10,
     borderRadius: 20,
   },
-  primaryButtonText: {
+  retryBtnText: {
     color: "#fff",
-    fontWeight: "600",
+    fontWeight: "700",
+    fontSize: 14,
   },
   titleContainer: {
     alignItems: "center",
@@ -2352,6 +3017,10 @@ const styles = StyleSheet.create({
   castSection: {
     marginBottom: 24,
   },
+  castScrollContainer: {
+    position: "relative",
+    overflow: "hidden",
+  },
   castList: {
     paddingRight: 12,
   },
@@ -2390,6 +3059,21 @@ const styles = StyleSheet.create({
     fontSize: 10,
     textAlign: "center",
     marginTop: 1,
+  },
+  castImdbBadge: {
+    marginTop: 4,
+    backgroundColor: "rgba(245, 197, 24, 0.15)",
+    borderWidth: 1,
+    borderColor: "rgba(245, 197, 24, 0.35)",
+    borderRadius: 4,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+  },
+  castImdbBadgeText: {
+    color: "#f5c518",
+    fontSize: 8,
+    fontWeight: "700",
+    letterSpacing: 0.5,
   },
   skeletonContainer: {
     paddingTop: 32,
@@ -2518,6 +3202,30 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  sheetVpnTip: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(85, 128, 255, 0.04)",
+    borderWidth: 1,
+    borderColor: "rgba(85, 128, 255, 0.12)",
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    marginHorizontal: 16,
+    marginTop: 8,
+    marginBottom: 4,
+  },
+  sheetVpnTipText: {
+    color: "#8E8D92",
+    fontSize: 10,
+    flex: 1,
+  },
+  sheetListContainer: {
+    flex: 1,
+    position: "relative",
+    overflow: "hidden",
+    paddingHorizontal: 16,
+  },
   sheetList: {
     flex: 1,
   },
@@ -2613,17 +3321,17 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     paddingBottom: 16,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.08)',
+    borderBottomColor: "rgba(255, 255, 255, 0.08)",
   },
   progressHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     marginBottom: 10,
   },
   progressTitle: {
-    color: 'rgba(255, 255, 255, 0.7)',
+    color: "rgba(255, 255, 255, 0.7)",
     fontSize: 13,
-    fontWeight: '600',
+    fontWeight: "600",
   },
   progressChipsList: {
     gap: 8,
@@ -2634,69 +3342,106 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
-    backgroundColor: 'rgba(255, 255, 255, 0.04)',
-    alignItems: 'center',
-    justifyContent: 'center',
+    borderColor: "rgba(255, 255, 255, 0.12)",
+    backgroundColor: "rgba(255, 255, 255, 0.04)",
+    alignItems: "center",
+    justifyContent: "center",
   },
   chipSearching: {
-    borderColor: 'rgba(85, 128, 255, 0.35)',
-    backgroundColor: 'rgba(85, 128, 255, 0.08)',
+    borderColor: "rgba(85, 128, 255, 0.35)",
+    backgroundColor: "rgba(85, 128, 255, 0.08)",
   },
   chipFound: {
-    borderColor: 'rgba(46, 204, 113, 0.45)',
-    backgroundColor: 'rgba(46, 204, 113, 0.12)',
+    borderColor: "rgba(46, 204, 113, 0.45)",
+    backgroundColor: "rgba(46, 204, 113, 0.12)",
   },
   chipNone: {
-    borderColor: 'rgba(255, 255, 255, 0.05)',
-    backgroundColor: 'rgba(255, 255, 255, 0.01)',
+    borderColor: "rgba(255, 255, 255, 0.05)",
+    backgroundColor: "rgba(255, 255, 255, 0.01)",
   },
   chipError: {
-    borderColor: 'rgba(255, 74, 125, 0.35)',
-    backgroundColor: 'rgba(255, 74, 125, 0.08)',
+    borderColor: "rgba(255, 74, 125, 0.35)",
+    backgroundColor: "rgba(255, 74, 125, 0.08)",
   },
   chipText: {
-    color: '#ffffff',
+    color: "#ffffff",
     fontSize: 11,
-    fontWeight: '600',
+    fontWeight: "600",
   },
   chipTextNone: {
-    color: 'rgba(255, 255, 255, 0.35)',
+    color: "rgba(255, 255, 255, 0.35)",
   },
   chipTextFound: {
-    color: '#2ecc71',
+    color: "#2ecc71",
   },
   chipTextError: {
-    color: '#ff4a7d',
+    color: "#ff4a7d",
+  },
+  vpnNoticeCard: {
+    marginTop: 16,
+    backgroundColor: "rgba(255, 74, 125, 0.08)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 74, 125, 0.25)",
+    borderRadius: 14,
+    padding: 16,
+    maxWidth: 300,
+    alignItems: "center",
+  },
+  vpnNoticeTitle: {
+    color: "#ffffff",
+    fontSize: 13,
+    fontWeight: "700",
+    marginBottom: 6,
+    textAlign: "center",
+  },
+  vpnNoticeText: {
+    color: "#A0A0A5",
+    fontSize: 12,
+    textAlign: "center",
+    lineHeight: 18,
+  },
+  errorReasonCard: {
+    marginTop: 12,
+    backgroundColor: "rgba(255, 74, 125, 0.06)",
+    borderRadius: 8,
+    padding: 10,
+    maxWidth: 280,
+  },
+  errorReasonText: {
+    color: "#ffb4ab",
+    fontSize: 11,
+    textAlign: "center",
   },
   noSourcesContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 48,
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
     paddingHorizontal: 32,
   },
   noSourcesText: {
-    color: '#ffffff',
+    color: "#ffffff",
     fontSize: 16,
-    fontWeight: '700',
+    fontWeight: "700",
     marginTop: 12,
-    textAlign: 'center',
+    textAlign: "center",
   },
   noSourcesSubtext: {
-    color: '#8e8d92',
+    color: "#8e8d92",
     fontSize: 13,
     marginTop: 6,
-    textAlign: 'center',
+    textAlign: "center",
     lineHeight: 18,
   },
   tabsContainer: {
-    paddingHorizontal: 16,
     paddingVertical: 10,
     borderBottomWidth: 1,
     borderBottomColor: "rgba(255,255,255,0.08)",
+    overflow: "hidden",
+    position: "relative",
   },
   tabsScrollContent: {
     gap: 8,
+    paddingHorizontal: 28, // extra room so first/last tab aren't hidden behind the fade overlays
   },
   tabButton: {
     paddingHorizontal: 16,
@@ -2761,6 +3506,25 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     backgroundColor: "rgba(255,255,255,0.05)",
   },
+  dohNotice: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginHorizontal: 16,
+    marginBottom: 6,
+    marginTop: 4,
+    paddingVertical: 7,
+    paddingHorizontal: 12,
+    backgroundColor: "rgba(85, 128, 255, 0.07)",
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "rgba(85, 128, 255, 0.18)",
+  },
+  dohNoticeText: {
+    color: "#5580FF",
+    fontSize: 11,
+    flex: 1,
+    lineHeight: 15,
+  },
   listSearchingIndicator: {
     flexDirection: "row",
     alignItems: "center",
@@ -2778,24 +3542,100 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "600",
   },
+  activeOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 1,
+  },
   searchLoaderContainer: {
+    flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    paddingVertical: 64,
     paddingHorizontal: 32,
+    paddingVertical: 48,
   },
   searchLoaderText: {
     color: "#ffffff",
     fontSize: 16,
     fontWeight: "700",
-    marginTop: 16,
-    textAlign: "center",
+    marginTop: 12,
   },
   searchLoaderSubtext: {
-    color: "#8e8d92",
-    fontSize: 13,
     marginTop: 8,
     textAlign: "center",
     lineHeight: 18,
+  },
+  torrentModalContainer: {
+    flex: 1,
+    backgroundColor: "rgba(5, 5, 5, 0.85)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 24,
+  },
+  torrentContentCard: {
+    width: "85%",
+    backgroundColor: "rgba(20, 18, 24, 0.9)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
+    borderRadius: 24,
+    padding: 24,
+    alignItems: "center",
+    elevation: 8,
+    shadowColor: "#0047FF",
+    shadowOpacity: 0.15,
+    shadowRadius: 16,
+  },
+  torrentTitleText: {
+    color: "#ffffff",
+    fontSize: 18,
+    fontWeight: "700",
+    marginTop: 18,
+  },
+  torrentSubTitleText: {
+    color: "#8E8D92",
+    fontSize: 13,
+    marginTop: 6,
+    textAlign: "center",
+  },
+  torrentProgressTrack: {
+    width: "100%",
+    height: 6,
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
+    borderRadius: 3,
+    marginTop: 20,
+    overflow: "hidden",
+  },
+  torrentProgressFill: {
+    height: "100%",
+    backgroundColor: "#0047FF",
+    borderRadius: 3,
+  },
+  torrentStatsRow: {
+    width: "100%",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginTop: 10,
+  },
+  torrentStatsText: {
+    color: "#A0A0A5",
+    fontSize: 12,
+    fontWeight: "500",
+  },
+  torrentCancelButton: {
+    marginTop: 24,
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.12)",
+    paddingVertical: 10,
+    paddingHorizontal: 32,
+    borderRadius: 20,
+  },
+  torrentCancelText: {
+    color: "#ffffff",
+    fontSize: 14,
+    fontWeight: "600",
   },
 });

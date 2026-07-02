@@ -7,7 +7,9 @@ import {
   Image,
   StyleSheet,
   Dimensions,
+  TouchableOpacity,
 } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import type { MediaItem } from "../types/plugin";
 import type { CardLayout } from "../context/TransitionContext";
 import { theme } from "../theme";
@@ -19,15 +21,20 @@ const CW_CARD_W = S_CARD_W * 1.2;
 interface ContinueCardProps {
   item: any;
   onPress: (item: MediaItem, layout: CardLayout) => void;
+  onDelete?: (id: string) => void;
+  width?: number;
 }
 
 export const ContinueCard = React.memo(function ContinueCard({
   item,
   onPress,
+  onDelete,
+  width,
 }: ContinueCardProps) {
   const viewRef = useRef<any>(null);
   const scale = useRef(new Animated.Value(1)).current;
   const pct = Math.min(Math.max((item.position / item.duration) * 100, 0), 100);
+  const cardWidth = width ?? CW_CARD_W;
 
   function handlePress() {
     viewRef.current?.measure(
@@ -74,12 +81,12 @@ export const ContinueCard = React.memo(function ContinueCard({
           bounciness: 0,
         }).start()
       }
-      style={{ marginRight: 8, width: CW_CARD_W }}
+      style={{ marginRight: 8, width: cardWidth }}
     >
       <View ref={viewRef}>
         <Animated.View style={{ transform: [{ scale }] }}>
           {/* Overflow hidden container to wrap image + progress bar together */}
-          <View style={styles.cardInnerContainer}>
+          <View style={[styles.cardInnerContainer, { width: cardWidth, height: cardWidth * 1.5 }]}>
             {item.posterUrl ? (
               <Image
                 source={{ uri: item.posterUrl }}
@@ -89,6 +96,21 @@ export const ContinueCard = React.memo(function ContinueCard({
             ) : (
               <View style={[styles.cwCardImg, styles.cardFallback]} />
             )}
+
+            {/* Custom delete from history button */}
+            {onDelete && (
+              <TouchableOpacity
+                style={styles.deleteBtn}
+                onPress={(e) => {
+                  e.stopPropagation();
+                  onDelete(item.imdbId);
+                }}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="close" size={13} color="#ffffff" />
+              </TouchableOpacity>
+            )}
+
             <View style={styles.cwProgressBg}>
               <View
                 style={[styles.cwProgressFill, { width: (pct + "%") as any }]}
@@ -125,6 +147,20 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.placeholder,
   },
   cardFallback: { flex: 1, backgroundColor: theme.colors.placeholder },
+  deleteBtn: {
+    position: "absolute",
+    top: 8,
+    right: 8,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: "rgba(15, 15, 20, 0.75)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.15)",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 30,
+  },
   cwProgressBg: {
     position: "absolute",
     bottom: 0,
@@ -139,13 +175,20 @@ const styles = StyleSheet.create({
   },
   cwBadge: {
     position: "absolute",
-    top: 6,
-    left: 6,
-    backgroundColor: "rgba(255, 74, 125, 0.85)",
-    borderRadius: 5,
-    paddingHorizontal: 5,
-    paddingVertical: 2,
+    top: 8,
+    left: 8,
+    backgroundColor: "rgba(15, 15, 20, 0.75)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.12)",
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
   },
-  cwBadgeTxt: { color: "#fff", fontSize: 9, fontWeight: "700" },
+  cwBadgeTxt: {
+    color: "rgba(255, 255, 255, 0.9)",
+    fontSize: 9,
+    fontWeight: "700",
+    letterSpacing: 0.5,
+  },
   cwTitle: { color: "rgba(255,255,255,0.7)", fontSize: 11, marginTop: 4 },
 });

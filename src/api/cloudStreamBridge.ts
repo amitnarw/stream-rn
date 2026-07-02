@@ -13,9 +13,32 @@ import type {
 
 const { CloudStreamModule } = NativeModules;
 
+async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = 3000): Promise<Response> {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal
+    });
+    clearTimeout(id);
+    return response;
+  } catch (error) {
+    clearTimeout(id);
+    throw error;
+  }
+}
+
 // Global active callbacks for streaming links
 let activeSourceCallback: ((source: VideoSource) => void) | null = null;
 let activeSubtitleCallback: ((sub: { lang: string; url: string }) => void) | null = null;
+
+let isResolutionCancelled = false;
+
+export function cancelPlaybackResolution() {
+  isResolutionCancelled = true;
+  console.log('[ZunoPlugin] Playback resolution cancelled by user');
+}
 
 DeviceEventEmitter.addListener('onPlaybackSourceFound', (event) => {
   try {
@@ -204,7 +227,7 @@ export async function getProviders(): Promise<PluginProvider[]> {
   await ensureOnline();
   const json = await CloudStreamModule.getProviders();
   const providers = parseJson<PluginProvider[]>(json);
-  const excludeNames = ['Internet Archive', 'Invidious', 'ShowBox'];
+  const excludeNames = ['Internet Archive', 'Invidious'];
   const filtered = providers.filter(
     (p) => !excludeNames.some((ex) => p.name.toLowerCase().includes(ex.toLowerCase()))
   );
@@ -250,7 +273,11 @@ export async function getMainPage(
         { name: 'Trending Movies', url: 'https://v3-cinemeta.strem.io/catalog/movie/top.json' },
         { name: 'Trending TV Shows', url: 'https://v3-cinemeta.strem.io/catalog/series/top.json' },
         { name: 'Action & Adventure', url: 'https://v3-cinemeta.strem.io/catalog/movie/top/genre=Action.json' },
+        { name: 'Sci-Fi & Fantasy TV', url: 'https://v3-cinemeta.strem.io/catalog/series/top/genre=Sci-Fi%20%26%20Fantasy.json' },
         { name: 'Drama TV Series', url: 'https://v3-cinemeta.strem.io/catalog/series/top/genre=Drama.json' },
+        { name: 'Thriller Blockbusters', url: 'https://v3-cinemeta.strem.io/catalog/movie/top/genre=Thriller.json' },
+        { name: 'Comedy Hits', url: 'https://v3-cinemeta.strem.io/catalog/movie/top/genre=Comedy.json' },
+        { name: 'Mystery & Crime Series', url: 'https://v3-cinemeta.strem.io/catalog/series/top/genre=Crime.json' },
       ];
       break;
     case 'New':
@@ -259,6 +286,10 @@ export async function getMainPage(
         { name: 'Highly Rated Series', url: 'https://v3-cinemeta.strem.io/catalog/series/imdbRating.json' },
         { name: 'New Actions', url: 'https://v3-cinemeta.strem.io/catalog/movie/imdbRating/genre=Action.json' },
         { name: 'New Sci-Fi', url: 'https://v3-cinemeta.strem.io/catalog/movie/imdbRating/genre=Sci-Fi.json' },
+        { name: 'New Crime Thrillers', url: 'https://v3-cinemeta.strem.io/catalog/movie/imdbRating/genre=Thriller.json' },
+        { name: 'New Comedies', url: 'https://v3-cinemeta.strem.io/catalog/movie/imdbRating/genre=Comedy.json' },
+        { name: 'New Drama Series', url: 'https://v3-cinemeta.strem.io/catalog/series/imdbRating/genre=Drama.json' },
+        { name: 'New Animated Series', url: 'https://v3-cinemeta.strem.io/catalog/series/imdbRating/genre=Animation.json' },
       ];
       break;
     case 'Movies':
@@ -267,6 +298,10 @@ export async function getMainPage(
         { name: 'Action Movies', url: 'https://v3-cinemeta.strem.io/catalog/movie/top/genre=Action.json' },
         { name: 'Comedy Movies', url: 'https://v3-cinemeta.strem.io/catalog/movie/top/genre=Comedy.json' },
         { name: 'Sci-Fi & Fantasy', url: 'https://v3-cinemeta.strem.io/catalog/movie/top/genre=Sci-Fi.json' },
+        { name: 'Thriller & Mystery', url: 'https://v3-cinemeta.strem.io/catalog/movie/top/genre=Thriller.json' },
+        { name: 'Horror & Suspense', url: 'https://v3-cinemeta.strem.io/catalog/movie/top/genre=Horror.json' },
+        { name: 'Romance & Drama', url: 'https://v3-cinemeta.strem.io/catalog/movie/top/genre=Romance.json' },
+        { name: 'Family Movies', url: 'https://v3-cinemeta.strem.io/catalog/movie/top/genre=Family.json' },
       ];
       break;
     case 'Series':
@@ -274,7 +309,11 @@ export async function getMainPage(
         { name: 'Popular Series', url: 'https://v3-cinemeta.strem.io/catalog/series/top.json' },
         { name: 'Drama Series', url: 'https://v3-cinemeta.strem.io/catalog/series/top/genre=Drama.json' },
         { name: 'Action & Adventure Series', url: 'https://v3-cinemeta.strem.io/catalog/series/top/genre=Action.json' },
-        { name: 'Sci-Fi Series', url: 'https://v3-cinemeta.strem.io/catalog/series/top/genre=Sci-Fi.json' },
+        { name: 'Sci-Fi & Fantasy Series', url: 'https://v3-cinemeta.strem.io/catalog/series/top/genre=Sci-Fi%20%26%20Fantasy.json' },
+        { name: 'Comedy Series', url: 'https://v3-cinemeta.strem.io/catalog/series/top/genre=Comedy.json' },
+        { name: 'Crime & Mystery Series', url: 'https://v3-cinemeta.strem.io/catalog/series/top/genre=Crime.json' },
+        { name: 'Thriller Series', url: 'https://v3-cinemeta.strem.io/catalog/series/top/genre=Thriller.json' },
+        { name: 'Animated Series', url: 'https://v3-cinemeta.strem.io/catalog/series/top/genre=Animation.json' },
       ];
       break;
     case 'TV Show':
@@ -282,6 +321,9 @@ export async function getMainPage(
         { name: 'Top TV Shows', url: 'https://v3-cinemeta.strem.io/catalog/series/top.json' },
         { name: 'Reality & Talk Shows', url: 'https://v3-cinemeta.strem.io/catalog/series/top/genre=Documentary.json' },
         { name: 'Comedy Shows', url: 'https://v3-cinemeta.strem.io/catalog/series/top/genre=Comedy.json' },
+        { name: 'Documentary Series', url: 'https://v3-cinemeta.strem.io/catalog/series/top/genre=Documentary.json' },
+        { name: 'Mystery Shows', url: 'https://v3-cinemeta.strem.io/catalog/series/top/genre=Mystery.json' },
+        { name: 'Family Shows', url: 'https://v3-cinemeta.strem.io/catalog/series/top/genre=Family.json' },
       ];
       break;
     case 'Cartoon':
@@ -289,6 +331,8 @@ export async function getMainPage(
         { name: 'Animated Movies', url: 'https://v3-cinemeta.strem.io/catalog/movie/top/genre=Animation.json' },
         { name: 'Animated Series', url: 'https://v3-cinemeta.strem.io/catalog/series/top/genre=Animation.json' },
         { name: 'Kids & Family', url: 'https://v3-cinemeta.strem.io/catalog/movie/top/genre=Family.json' },
+        { name: 'Fantasy Cartoons', url: 'https://v3-cinemeta.strem.io/catalog/movie/top/genre=Fantasy.json' },
+        { name: 'Adventure Cartoons', url: 'https://v3-cinemeta.strem.io/catalog/movie/top/genre=Adventure.json' },
       ];
       break;
     default:
@@ -440,11 +484,17 @@ export async function loadDetail(
     logoUrl: obj.logo ?? null,
     imdbId: id,
 
-    cast: (obj.cast ?? []).map((name: string) => ({
-      name,
-      image: null,
-      role: null,
-    })),
+    cast: (obj.credits_cast && obj.credits_cast.length > 0)
+      ? obj.credits_cast.map((c: any) => ({
+          name: c.name ?? '',
+          image: c.profile_path ? `https://image.tmdb.org/t/p/w185${c.profile_path}` : null,
+          role: c.character ?? null,
+        }))
+      : (obj.cast ?? []).map((name: string) => ({
+          name,
+          image: null,
+          role: null,
+        })),
     recommendations: [],
     trailers: (obj.trailerStreams ?? []).map((t: any) => ({
       url: `https://www.youtube.com/watch?v=${t.ytId}`,
@@ -456,16 +506,26 @@ export async function loadDetail(
     awards: obj.awards ?? null,
   };
 
-  // Enrich cast from TVmaze (free, no API key) for series
-  // For movies, ActorAvatar already fetches photos from Wikipedia lazily
-  if (isSerial && id) {
+  await setCache(cacheKey, data);
+  return data;
+}
+
+export async function enrichDetail(data: DetailResult): Promise<DetailResult> {
+  const isSerial = data.isSerial;
+  const id = data.imdbId;
+  if (!id) return data;
+
+  const cacheKey = `@zuno_cache_detail_cinemeta_${isSerial ? 'series' : 'movie'}_${id}`;
+
+  if (isSerial) {
     try {
       // TVmaze lookup by IMDb ID
-      const tvmazeShowRes = await fetch(`https://api.tvmaze.com/lookup/shows?imdb=${id}`);
+      const tvmazeShowRes = await fetchWithTimeout(`https://api.tvmaze.com/lookup/shows?imdb=${id}`, {}, 3000);
       if (tvmazeShowRes.ok) {
         const tvmazeShow = await tvmazeShowRes.json();
         if (tvmazeShow?.id) {
-          const castRes = await fetch(`https://api.tvmaze.com/shows/${tvmazeShow.id}/cast`);
+          // Fetch cast
+          const castRes = await fetchWithTimeout(`https://api.tvmaze.com/shows/${tvmazeShow.id}/cast`, {}, 3000);
           if (castRes.ok) {
             const castData = await castRes.json();
             const tvmazeCast = (castData as any[]).slice(0, 20);
@@ -474,13 +534,107 @@ export async function loadDetail(
                 name: c.person?.name ?? '',
                 image: c.person?.image?.medium ?? null,
                 role: c.character?.name ?? null,
+                imdbId: null, // populated below
               }));
+
+              // Fetch external IDs for the first 10 actors in parallel to resolve IMDB IDs
+              const enrichPromises = tvmazeCast.slice(0, 10).map(async (c: any, idx: number) => {
+                try {
+                  if (c.person?.id) {
+                    const personRes = await fetchWithTimeout(`https://api.tvmaze.com/people/${c.person.id}`, {}, 2000);
+                    if (personRes.ok) {
+                      const personData = await personRes.json();
+                      if (personData?.externals?.imdb && data.cast[idx]) {
+                        data.cast[idx].imdbId = personData.externals.imdb;
+                      }
+                    }
+                  }
+                } catch (_) {}
+              });
+              await Promise.allSettled(enrichPromises);
             }
+          }
+
+          // Fetch episodes to get runtimes
+          const episodesRes = await fetchWithTimeout(`https://api.tvmaze.com/shows/${tvmazeShow.id}/episodes`, {}, 3000);
+          if (episodesRes.ok) {
+            const episodesData = await episodesRes.json();
+            const runtimesMap = new Map<string, number>();
+            (episodesData as any[]).forEach((ep: any) => {
+              const key = `${ep.season}:${ep.number}`;
+              if (ep.runtime) {
+                runtimesMap.set(key, ep.runtime);
+              }
+            });
+
+            // Map runtimes to our episodes list
+            data.episodes.forEach((ep) => {
+              const key = `${ep.season ?? 1}:${ep.episode}`;
+              const runtime = runtimesMap.get(key);
+              if (runtime) {
+                ep.runtime = runtime;
+              }
+            });
           }
         }
       }
     } catch (e) {
       // TVmaze not reachable — keep Cinemeta's 3 names as fallback
+    }
+  } else {
+    // Enrich movie cast from TMDB via the /find endpoint (same DB Cinemeta uses, no API key needed)
+    try {
+      const tmdbFindRes = await fetchWithTimeout(
+        `https://api.themoviedb.org/3/find/${id}?external_source=imdb_id&api_key=c9a3df4e3bc49ffe6c553f0bea05e99b`,
+        {},
+        3000
+      );
+      if (tmdbFindRes.ok) {
+        const tmdbFindData = await tmdbFindRes.json();
+        const tmdbMovie = (tmdbFindData.movie_results ?? [])[0];
+        if (tmdbMovie?.id) {
+          const creditsRes = await fetchWithTimeout(
+            `https://api.themoviedb.org/3/movie/${tmdbMovie.id}/credits?api_key=c9a3df4e3bc49ffe6c553f0bea05e99b`,
+            {},
+            3000
+          );
+          if (creditsRes.ok) {
+            const creditsData = await creditsRes.json();
+            const tmdbCast = (creditsData.cast ?? []).slice(0, 20);
+            if (tmdbCast.length > 0) {
+              data.cast = tmdbCast.map((c: any) => ({
+                name: c.name ?? '',
+                image: c.profile_path
+                  ? `https://image.tmdb.org/t/p/w185${c.profile_path}`
+                  : null,
+                role: c.character ?? null,
+                imdbId: null, // populated below
+              }));
+
+              // Fetch IMDB IDs for each actor (TMDB external IDs endpoint)
+              // We do this in parallel, capped at 10 actors to avoid flooding
+              const enrichPromises = tmdbCast.slice(0, 10).map(async (c: any, idx: number) => {
+                try {
+                  const extRes = await fetchWithTimeout(
+                    `https://api.themoviedb.org/3/person/${c.id}/external_ids?api_key=c9a3df4e3bc49ffe6c553f0bea05e99b`,
+                    {},
+                    2000
+                  );
+                  if (extRes.ok) {
+                    const extData = await extRes.json();
+                    if (extData.imdb_id && data.cast[idx]) {
+                      data.cast[idx].imdbId = extData.imdb_id;
+                    }
+                  }
+                } catch (_) {}
+              });
+              await Promise.allSettled(enrichPromises);
+            }
+          }
+        }
+      }
+    } catch (e) {
+      // TMDB not reachable — keep Cinemeta cast as fallback
     }
   }
 
@@ -565,7 +719,8 @@ export async function loadLinks(
           console.log(`[linksCache.set] Cinemeta Key: ${cacheKey}, sources count: ${completeResult.sources.length}`);
           linksCache.set(cacheKey, { timestamp: now, result: completeResult });
         }
-      }
+      },
+      imdbId
     );
 
     return result;
@@ -610,6 +765,94 @@ export interface PlaybackProgress {
   status: 'searching' | 'found' | 'none' | 'error';
   linksCount: number;
   errorReason?: string;
+  /** True when the Kotlin layer detected ISP DNS blocking and auto-retried via Cloudflare DoH */
+  isDohRetry?: boolean;
+}
+
+async function fetchStremioAddonStreams(
+  addonName: string,
+  baseUrl: string,
+  imdbId: string,
+  isSerial: boolean,
+  season: number,
+  episode: number
+): Promise<VideoSource[]> {
+  const type = isSerial ? 'series' : 'movie';
+  const queryId = isSerial ? `${imdbId}:${season}:${episode}` : imdbId;
+  const url = `${baseUrl}/stream/${type}/${queryId}.json`;
+  
+  try {
+    const res = await fetch(url);
+    if (!res.ok) {
+      console.warn(`[ZunoPlugin] ${addonName} fetch failed with HTTP status ${res.status}`);
+      return [];
+    }
+    const text = await res.text();
+    if (!text.trim().startsWith('{')) {
+      console.warn(`[ZunoPlugin] ${addonName} returned non-JSON/invalid response: ${text.slice(0, 100)}`);
+      return [];
+    }
+    const json = JSON.parse(text);
+    if (!json.streams) return [];
+    
+    return json.streams.map((stream: any) => {
+      let magnetUrl = '';
+      if (stream.infoHash) {
+        magnetUrl = `magnet:?xt=urn:btih:${stream.infoHash}&dn=${encodeURIComponent(stream.title?.split('\n')[0] || 'Torrent')}` +
+          `&tr=udp://tracker.coppersurfer.tk:6969/announce` +
+          `&tr=udp://tracker.openbittorrent.com:6969/announce` +
+          `&tr=udp://tracker.opentrackr.org:1337` +
+          `&tr=udp://explodie.org:6969/announce` +
+          `&tr=udp://open.demonii.com:1337/announce`;
+      } else if (stream.url && stream.url.startsWith('magnet:')) {
+        magnetUrl = stream.url;
+      }
+
+      if (!magnetUrl) return null;
+
+      const titleText = stream.title || '';
+      // Extract seeders count
+      let seeders = 0;
+      const emojiMatch = titleText.match(/👤\s*(\d+)/);
+      if (emojiMatch) {
+        seeders = parseInt(emojiMatch[1], 10);
+      } else {
+        const textMatch = titleText.match(/(?:seeders|seeds|seed):\s*(\d+)/i);
+        if (textMatch) {
+          seeders = parseInt(textMatch[1], 10);
+        } else {
+          const sMatch = titleText.match(/\bS:\s*(\d+)/i);
+          if (sMatch) seeders = parseInt(sMatch[1], 10);
+        }
+      }
+
+      // Filter out dead links (0 seeders parsed)
+      const hasSeedersInfo = titleText.includes('👤') || /seeders|seeds|seed/i.test(titleText) || /\bS:\s*\d+/i.test(titleText);
+      if (hasSeedersInfo && seeders === 0) {
+        return null; // Dead link, discard
+      }
+
+      const qualityMatch = stream.name?.match(/(1080p|720p|2160p|480p)/i);
+      const quality = qualityMatch ? qualityMatch[0] : '720p';
+      
+      const parts = titleText.split('\n') || [];
+      const fileName = parts[0] || 'Torrent Source';
+      const stats = parts[1] || '';
+
+      return {
+        quality: `${quality} (${stats.trim() || 'Torrent'})`,
+        url: magnetUrl,
+        type: 'torrent',
+        headers: {},
+        provider: addonName,
+        host: fileName,
+        seeders: seeders
+      };
+    }).filter((s: any) => s !== null);
+  } catch (err) {
+    console.warn(`[ZunoPlugin] ${addonName} fetch failed:`, err);
+    return [];
+  }
 }
 
 export async function resolvePlaybackSources(
@@ -620,15 +863,31 @@ export async function resolvePlaybackSources(
   onProgress: (progress: PlaybackProgress[]) => void,
   onSourceFound?: (source: VideoSource) => void,
   onAllDone?: () => void,
-  onCacheUpdate?: (result: LinksResult) => void
+  onCacheUpdate?: (result: LinksResult) => void,
+  imdbId?: string
 ): Promise<LinksResult> {
+  isResolutionCancelled = false; // Reset cancellation flag
   const allProviders = await getProviders();
-  const providers = allProviders.filter(p => p.hasSearch !== false && p.name !== 'ShowBox');
-  const progressList: PlaybackProgress[] = allProviders.map(p => ({
-    providerName: p.name,
-    status: p.hasSearch === false || p.name === 'ShowBox' ? 'none' : 'searching',
-    linksCount: 0,
-  }));
+  const providers = allProviders.filter(p => p.hasSearch !== false);
+  
+  const addons = [
+    { name: 'Torrentio', url: 'https://torrentio.strem.fun' },
+    { name: 'Comet', url: 'https://comet.elfhosted.com' }
+  ];
+
+  const progressList: PlaybackProgress[] = [];
+  if (imdbId) {
+    addons.forEach(add => {
+      progressList.push({ providerName: add.name, status: 'searching', linksCount: 0 });
+    });
+  }
+  allProviders.forEach(p => {
+    progressList.push({
+      providerName: p.name,
+      status: p.hasSearch === false ? 'none' : 'searching',
+      linksCount: 0,
+    });
+  });
 
   onProgress([...progressList]);
 
@@ -694,6 +953,21 @@ export async function resolvePlaybackSources(
     // Within the same provider, dedup by URL to avoid streaming the same link twice.
     if (!finalSources.some(fs => fs.url === s.url && fs.provider === s.provider)) {
       finalSources.push(s);
+      
+      // Direct links first, torrents last (sorted by seeders)
+      finalSources.sort((x, y) => {
+        const xIsTorrent = x.type === 'torrent' || x.url.startsWith('magnet:');
+        const yIsTorrent = y.type === 'torrent' || y.url.startsWith('magnet:');
+        if (xIsTorrent && !yIsTorrent) return 1;
+        if (!xIsTorrent && yIsTorrent) return -1;
+        if (xIsTorrent && yIsTorrent) {
+          const xSeed = (x as any).seeders ?? 0;
+          const ySeed = (y as any).seeders ?? 0;
+          return ySeed - xSeed;
+        }
+        return 0;
+      });
+
       if (onSourceFound) onSourceFound(s);
       // Resolve promise immediately on first source so UI shows it right away
       if (!promiseResolved && resolvePromise) {
@@ -711,8 +985,9 @@ export async function resolvePlaybackSources(
     }
   };
 
-    const searchAndResolve = async (provider: PluginProvider, idx: number, onEnterLoadLinks?: () => void): Promise<LinksResult | null> => {
+  const searchAndResolve = async (provider: PluginProvider, idx: number, onEnterLoadLinks?: () => void): Promise<LinksResult | null> => {
     try {
+      if (isResolutionCancelled) return null;
       console.log(`[ZunoPlugin][SEARCH] ${provider.name} searching for '${title}'`);
       const items = await CloudStreamModule.search(provider.name, title);
       const parsed = parseJson<{ items: any[]; error?: string }>(items);
@@ -759,6 +1034,7 @@ export async function resolvePlaybackSources(
 
       console.log(`[ZunoPlugin][MATCH] ${provider.name}: matched '${bestMatch.title}' (score=${bestScore.toFixed(2)}) -> loading detail url='${bestMatch.url}'`);
 
+      if (isResolutionCancelled) return null;
       const detailJson = await CloudStreamModule.loadDetail(provider.name, bestMatch.url);
       const detailObj = parseJson<any>(detailJson);
 
@@ -800,6 +1076,7 @@ export async function resolvePlaybackSources(
         return null;
       }
 
+      if (isResolutionCancelled) return null;
       console.log(`[ZunoPlugin][LINKS] ${provider.name}: loading links for mediaRef='${matchingEpisode.mediaRef}'`);
       onEnterLoadLinks?.();
       const linksJson = await CloudStreamModule.loadLinks(provider.name, matchingEpisode.mediaRef);
@@ -860,7 +1137,14 @@ export async function resolvePlaybackSources(
     } catch (err: any) {
       console.warn(`[ZunoPlugin][ERROR] ${provider.name}:`, err);
       progressList[idx].status = 'error';
-      progressList[idx].errorReason = err?.message || String(err);
+      const rawMsg: string = err?.message || String(err);
+      // Detect whether Kotlin's DoH fallback was triggered (indicated in error message)
+      const isDoh = rawMsg.toLowerCase().includes('doh') ||
+                    rawMsg.toLowerCase().includes('dns blocked') ||
+                    rawMsg.toLowerCase().includes('retrying via') ||
+                    rawMsg.toLowerCase().includes('isp block');
+      progressList[idx].isDohRetry = isDoh || false;
+      progressList[idx].errorReason = rawMsg;
       onProgress([...progressList]);
       return null;
     }
@@ -874,6 +1158,7 @@ export async function resolvePlaybackSources(
   return new Promise<LinksResult>((resolve) => {
     resolvePromise = resolve;
     let completedCount = 0;
+    const totalTasksCount = providers.length + (imdbId ? addons.length : 0);
 
     const checkResolve = (allDone = false) => {
       if (promiseResolved) return;
@@ -890,7 +1175,7 @@ export async function resolvePlaybackSources(
         // in-flight streamed events (e.g. remaining links from 4K HDHUB)
         // into onSourceFound so the UI list keeps updating live.
         // Callbacks are cleaned up only when all providers finish.
-      } else if (allDone && completedCount >= providers.length) {
+      } else if (allDone && completedCount >= totalTasksCount) {
         // All providers done, no sources found
         promiseResolved = true;
         console.log(`[ZunoPlugin][RESOLVED_EMPTY] All providers done, no sources found.`);
@@ -899,7 +1184,71 @@ export async function resolvePlaybackSources(
       }
     };
 
-    // Run searches in parallel
+    // 1. Run Stremio Addons in parallel
+    if (imdbId) {
+      addons.forEach((add) => {
+        const addonIdx = progressList.findIndex(p => p.providerName === add.name);
+        fetchStremioAddonStreams(add.name, add.url, imdbId, isSerial, season, episode).then((streams) => {
+          if (isResolutionCancelled) return;
+          if (streams.length > 0) {
+            if (addonIdx !== -1) {
+              progressList[addonIdx].status = 'found';
+              progressList[addonIdx].linksCount = streams.length;
+              onProgress([...progressList]);
+            }
+
+            streams.forEach((s) => {
+              if (!finalSources.some(fs => fs.url === s.url && fs.provider === s.provider)) {
+                finalSources.push(s);
+              }
+            });
+
+            // Direct links first, torrents last (sorted by seeders)
+            finalSources.sort((x, y) => {
+              const xIsTorrent = x.type === 'torrent' || x.url.startsWith('magnet:');
+              const yIsTorrent = y.type === 'torrent' || y.url.startsWith('magnet:');
+              if (xIsTorrent && !yIsTorrent) return 1;
+              if (!xIsTorrent && yIsTorrent) return -1;
+              if (xIsTorrent && yIsTorrent) {
+                const xSeed = (x as any).seeders ?? 0;
+                const ySeed = (y as any).seeders ?? 0;
+                return ySeed - xSeed;
+              }
+              return 0;
+            });
+
+            // Fire onSourceFound callback to stream to UI
+            streams.forEach((s) => {
+              if (onSourceFound) onSourceFound(s);
+            });
+
+          } else {
+            if (addonIdx !== -1) {
+              progressList[addonIdx].status = 'none';
+              onProgress([...progressList]);
+            }
+          }
+        }).catch((e) => {
+          if (addonIdx !== -1) {
+            progressList[addonIdx].status = 'error';
+            progressList[addonIdx].errorReason = e.message || String(e);
+            onProgress([...progressList]);
+          }
+        }).finally(() => {
+          completedCount++;
+          checkResolve(completedCount >= totalTasksCount);
+          if (completedCount >= totalTasksCount) {
+            activeSourceCallback = null;
+            activeSubtitleCallback = null;
+            onAllDone?.();
+            const uniqueSubs = Array.from(new Map(finalSubtitles.map(s => [s.url, s])).values());
+            onCacheUpdate?.({ sources: [...finalSources], subtitles: uniqueSubs });
+          }
+        });
+      });
+    }
+
+    // 2. Run searches for standard providers in parallel
     providers.forEach((p) => {
       const idx = progressList.findIndex(pr => pr.providerName === p.name);
       if (idx === -1) return;
@@ -917,9 +1266,9 @@ export async function resolvePlaybackSources(
         }, TIMEOUT))
       ]).then(() => {
         completedCount++;
-        checkResolve(completedCount >= providers.length);
+        checkResolve(completedCount >= totalTasksCount);
         // Once truly all done, clean up callbacks, fire onAllDone, and update cache with complete list
-        if (completedCount >= providers.length) {
+        if (completedCount >= totalTasksCount) {
           activeSourceCallback = null;
           activeSubtitleCallback = null;
           onAllDone?.();
@@ -1005,4 +1354,38 @@ export async function clearPlaybackHistory(): Promise<boolean> {
     console.warn('Failed to clear playback history:', e);
     return false;
   }
+}
+
+export async function deletePlaybackHistoryItem(id: string): Promise<boolean> {
+  try {
+    return await CloudStreamModule.deletePlaybackHistoryItem(id);
+  } catch (e) {
+    console.warn('Failed to delete history item:', e);
+    return false;
+  }
+}
+
+export interface TorrentStreamInfo {
+  streamUrl: string;
+  fileName: string;
+  fileSize: number;
+}
+
+export interface TorrentStatus {
+  progress: number;
+  speed: number;
+  peers: number;
+  active: boolean;
+}
+
+export async function startTorrentStream(magnetUrl: string): Promise<TorrentStreamInfo> {
+  return await CloudStreamModule.startTorrentStream(magnetUrl);
+}
+
+export async function stopTorrentStream(): Promise<boolean> {
+  return await CloudStreamModule.stopTorrentStream();
+}
+
+export async function getTorrentStatus(): Promise<TorrentStatus> {
+  return await CloudStreamModule.getTorrentStatus();
 }
