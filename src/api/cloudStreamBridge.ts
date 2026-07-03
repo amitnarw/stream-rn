@@ -874,7 +874,7 @@ export async function resolvePlaybackSources(
   
   const addons = [
     { name: 'Torrentio', url: 'https://torrentio.strem.fun' },
-    { name: 'Comet', url: 'https://comet.elfhosted.com' }
+    { name: 'Comet', url: 'https://comet.feels.legal' }
   ];
 
   const progressList: PlaybackProgress[] = [];
@@ -1295,7 +1295,7 @@ export function playStream(
   headers?: Record<string, string>,
   title?: string,
   subtitleUrl?: string,
-  allSources?: { quality: string; url: string; type: string; headers: Record<string, string> }[],
+  allSources?: VideoSource[],
   allSubtitles?: { lang: string; url: string }[],
   episodesJson?: string,
   currentEpisodeIndex?: number,
@@ -1390,4 +1390,34 @@ export async function stopTorrentStream(): Promise<boolean> {
 
 export async function getTorrentStatus(): Promise<TorrentStatus> {
   return await CloudStreamModule.getTorrentStatus();
+}
+
+export function lockLandscape() {
+  if (CloudStreamModule?.lockLandscape) {
+    CloudStreamModule.lockLandscape();
+  }
+}
+
+export function unlockOrientation() {
+  if (CloudStreamModule?.unlockOrientation) {
+    CloudStreamModule.unlockOrientation();
+  }
+}
+
+export function setScreenBrightness(brightness: number) {
+  if (CloudStreamModule?.setScreenBrightness) {
+    CloudStreamModule.setScreenBrightness(brightness);
+  }
+}
+
+export function enterImmersiveMode() {
+  if (CloudStreamModule?.enterImmersiveMode) {
+    CloudStreamModule.enterImmersiveMode();
+  }
+}
+
+export function exitImmersiveMode() {
+  if (CloudStreamModule?.exitImmersiveMode) {
+    CloudStreamModule.exitImmersiveMode();
+  }
 }

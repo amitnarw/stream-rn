@@ -23,6 +23,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BlurView, BlurTargetView } from "expo-blur";
+import Reanimated, { FadeInUp, FadeOut, Easing as ReanimatedEasing } from "react-native-reanimated";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import type { HomeSection, MediaItem } from "../types/plugin";
@@ -821,15 +822,15 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
     <View style={styles.root}>
       {/* Custom Glassmorphic Pull-to-Refresh Indicator */}
       {refreshing && (
-        <Animated.View
-          entering={FadeInUp.duration(300).easing(Easing.out(Easing.quad))}
+        <Reanimated.View
+          entering={FadeInUp.duration(300).easing(ReanimatedEasing.out(ReanimatedEasing.quad))}
           exiting={FadeOut.duration(200)}
           style={[styles.customRefreshIndicator, { top: insets.top + 65 }]}
         >
           <BlurView intensity={80} tint="dark" style={StyleSheet.absoluteFillObject} />
           <ActivityIndicator size="small" color="#0047FF" style={{ marginRight: 8 }} />
           <Text style={styles.customRefreshText}>REFRESHING FEED</Text>
-        </Animated.View>
+        </Reanimated.View>
       )}
 
       <View style={{ flex: 1 }}>

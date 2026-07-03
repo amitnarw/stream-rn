@@ -44,6 +44,7 @@ import { BlurView, BlurTargetView } from "expo-blur";
 import { Ionicons, FontAwesome6 } from "@expo/vector-icons";
 import * as favoritesApi from "../api/favorites";
 import { LinearGradient } from "expo-linear-gradient";
+import MaskedView from "@react-native-masked-view/masked-view";
 import { theme } from "../theme";
 import type {
   EpisodeItem,
@@ -56,6 +57,7 @@ import * as bridge from "../api/cloudStreamBridge";
 import { useTransition } from "../context/TransitionContext";
 import type { CardLayout } from "../context/TransitionContext";
 import { CustomModal } from "../components/CustomModal";
+import CustomVideoPlayer from "../components/CustomVideoPlayer";
 
 function getHighQualityImageUrl(
   url: string | null | undefined,
@@ -136,8 +138,12 @@ function cleanErrorMessage(err: string | undefined): string {
 function cleanTorrentError(err: string | undefined): string {
   if (!err) return "Torrent failed to start.";
   const e = err.toLowerCase();
-  if (e.includes("metadata resolution timed out") || e.includes("no peers found") || e.includes("bad magnet")) {
-    return "No seeders found \u2014 this torrent link may be dead. Try a different source.";
+  if (
+    e.includes("metadata resolution timed out") ||
+    e.includes("no peers found") ||
+    e.includes("bad magnet")
+  ) {
+    return "No seeders found\u002c this torrent link may be dead. Try a different source.";
   }
   if (e.includes("failed to add torrent handle")) {
     return "Could not start the torrent download. Try again.";
@@ -402,6 +408,29 @@ export default function DetailScreen() {
   } = useTransition();
 
   const [playingEpisode, setPlayingEpisode] = useState<number | null>(null);
+
+  // Custom React Native Video Player States
+  const [playerVisible, setPlayerVisible] = useState(false);
+  const [playerConfig, setPlayerConfig] = useState<{
+    url: string;
+    headers?: Record<string, string>;
+    title: string;
+    subUrl?: string;
+    sources: any[];
+    subtitles: any[];
+    isSerial: boolean;
+    season: number;
+    episode: number;
+    episodeTitle: string;
+    logoUrl?: string;
+    currentEpisodeIndex: number;
+    episodes: any[];
+  } | null>(null);
+  const [pendingPlayEpisode, setPendingPlayEpisode] = useState<{
+    ep: any;
+    season: number;
+  } | null>(null);
+
   const [resolvingProgress, setResolvingProgress] = useState<
     bridge.PlaybackProgress[]
   >([]);
@@ -437,12 +466,21 @@ export default function DetailScreen() {
   const [torrentStatus, setTorrentStatus] =
     useState<bridge.TorrentStatus | null>(null);
   const [selectedTorrentSeeders, setSelectedTorrentSeeders] = useState(0);
-  const [torrentErrorModal, setTorrentErrorModal] = useState<{ visible: boolean; message: string }>({ visible: false, message: '' });
+  const [torrentErrorModal, setTorrentErrorModal] = useState<{
+    visible: boolean;
+    message: string;
+  }>({ visible: false, message: "" });
+  const [torrentExpanded, setTorrentExpanded] = useState(false);
   const torrentIntervalRef = useRef<any>(null);
+  const resolveTimeoutRef = useRef<any>(null);
 
   const closeSourcePicker = () => {
     setShowSourcePicker(false);
     setPlayingEpisode(null);
+    if (resolveTimeoutRef.current) {
+      clearTimeout(resolveTimeoutRef.current);
+      resolveTimeoutRef.current = null;
+    }
     bridge.cancelPlaybackResolution();
     setIsTorrentBuffering(false);
     if (torrentIntervalRef.current) {
@@ -453,6 +491,9 @@ export default function DetailScreen() {
 
   useEffect(() => {
     return () => {
+      if (resolveTimeoutRef.current) {
+        clearTimeout(resolveTimeoutRef.current);
+      }
       bridge.cancelPlaybackResolution();
       if (torrentIntervalRef.current) {
         clearInterval(torrentIntervalRef.current);
@@ -694,13 +735,18 @@ export default function DetailScreen() {
   }, [allProviders, providerName, resolvingProgress]);
 
   const filteredSources = useMemo(() => {
-    const list = activeProviderTab.toLowerCase() === "all"
-      ? sources
-      : sources.filter((s) => s.provider.toLowerCase() === activeProviderTab.toLowerCase());
+    const list =
+      activeProviderTab.toLowerCase() === "all"
+        ? sources
+        : sources.filter(
+            (s) =>
+              (s.provider ?? "").toLowerCase() ===
+              activeProviderTab.toLowerCase(),
+          );
     // Always render: direct/HLS links first, torrent/magnet links last (sorted by seeders desc)
     return [...list].sort((x, y) => {
-      const xIsTorrent = x.type === 'torrent' || x.url.startsWith('magnet:');
-      const yIsTorrent = y.type === 'torrent' || y.url.startsWith('magnet:');
+      const xIsTorrent = x.type === "torrent" || x.url.startsWith("magnet:");
+      const yIsTorrent = y.type === "torrent" || y.url.startsWith("magnet:");
       if (xIsTorrent && !yIsTorrent) return 1;
       if (!xIsTorrent && yIsTorrent) return -1;
       if (xIsTorrent && yIsTorrent) {
@@ -792,11 +838,28 @@ export default function DetailScreen() {
         console.warn("Failed to open trailer URL", err),
       );
     } else {
-      bridge.playStream(
-        trailer.url,
-        trailer.referer ? { Referer: trailer.referer } : undefined,
-        `${detail.title} - Trailer`,
-      );
+      setPlayerConfig({
+        url: trailer.url,
+        headers: trailer.referer ? { Referer: trailer.referer } : undefined,
+        title: `${detail.title} - Trailer`,
+        isSerial: false,
+        season: 1,
+        episode: 1,
+        episodeTitle: "Trailer",
+        logoUrl: detail.logoUrl || "",
+        currentEpisodeIndex: -1,
+        episodes: [],
+        sources: [
+          {
+            quality: "Trailer",
+            url: trailer.url,
+            type: "direct",
+            headers: trailer.referer ? { Referer: trailer.referer } : undefined,
+          },
+        ],
+        subtitles: [],
+      });
+      setPlayerVisible(true);
     }
   };
 
@@ -888,50 +951,69 @@ export default function DetailScreen() {
       setSelectedSourceIndex(0);
       setActiveProviderTab("All");
 
-      try {
-        const result = await bridge.loadLinks(
-          providerName,
-          ep.mediaRef,
-          (progress) => {
-            setResolvingProgress(progress);
-          },
-          (newSource) => {
-            // Stream sources into UI immediately as each provider returns them
-            setSources((prev) => {
-              if (prev.some((s) => s.url === newSource.url)) return prev;
-              return [...prev, newSource];
-            });
-          },
-          () => {
-            // onAllDone: ALL providers have completed — now safe to stop loading
-            setIsResolving(false);
-            setPlayingEpisode(null);
-          },
-        );
-
-        setSubtitles(result.subtitles);
-        // Merge snapshot sources into live-streamed ones (never overwrite)
-        setSources((prev) => {
-          const merged = new Map(prev.map((s) => [s.url, s]));
-          (result.sources ?? []).forEach((s) => {
-            if (!merged.has(s.url)) merged.set(s.url, s);
-          });
-          return [...merged.values()];
-        });
-      } catch (e: any) {
-        setLinksError(
-          e instanceof bridge.OfflineError
-            ? "No internet connection. Please check your network."
-            : e.message || "Failed to load playable links.",
-        );
-        setIsResolving(false);
-        setPlayingEpisode(null);
+      if (resolveTimeoutRef.current) {
+        clearTimeout(resolveTimeoutRef.current);
       }
-      // Note: isResolving(false) is handled by onAllDone callback (for Cinemeta streaming path)
-      // For cache-hit and non-Cinemeta paths, loadLinks calls onAllDone before returning
+
+      // Delay bridge.loadLinks until the bottom sheet opening animation (300ms) has completed.
+      // This ensures a 60fps entry transition for the source picker bottom sheet.
+      resolveTimeoutRef.current = setTimeout(async () => {
+        try {
+          const result = await bridge.loadLinks(
+            providerName,
+            ep.mediaRef,
+            (progress) => {
+              setResolvingProgress(progress);
+            },
+            (newSource) => {
+              // Stream sources into UI immediately as each provider returns them
+              setSources((prev) => {
+                if (prev.some((s) => s.url === newSource.url)) return prev;
+                return [...prev, newSource];
+              });
+            },
+            () => {
+              // onAllDone: ALL providers have completed — now safe to stop loading
+              setIsResolving(false);
+              setPlayingEpisode(null);
+            },
+          );
+
+          setSubtitles(result.subtitles);
+          // Merge snapshot sources into live-streamed ones (never overwrite)
+          setSources((prev) => {
+            const merged = new Map(prev.map((s) => [s.url, s]));
+            (result.sources ?? []).forEach((s) => {
+              if (!merged.has(s.url)) merged.set(s.url, s);
+            });
+            return [...merged.values()];
+          });
+        } catch (e: any) {
+          setLinksError(
+            e instanceof bridge.OfflineError
+              ? "No internet connection. Please check your network."
+              : e.message || "Failed to load playable links.",
+          );
+          setIsResolving(false);
+          setPlayingEpisode(null);
+        }
+      }, 350);
     },
     [detail, providerName],
   );
+
+  useEffect(() => {
+    if (pendingPlayEpisode && selectedSeason === pendingPlayEpisode.season) {
+      const ep = pendingPlayEpisode.ep;
+      const dispIdx = displayedEpisodes.findIndex(
+        (e) => e.mediaRef === ep.mediaRef,
+      );
+      if (dispIdx !== -1) {
+        setPendingPlayEpisode(null);
+        playEpisode(ep, dispIdx);
+      }
+    }
+  }, [selectedSeason, displayedEpisodes, pendingPlayEpisode, playEpisode]);
 
   if (phase === "idle" || !item) return null;
 
@@ -991,12 +1073,12 @@ export default function DetailScreen() {
                   setIsTorrentBuffering(false);
 
                   // Play local HTTP range server stream URL!
-                  bridge.playStream(
-                    info.streamUrl,
-                    source.headers,
-                    title,
+                  setPlayerConfig({
+                    url: info.streamUrl,
+                    headers: source.headers,
+                    title: detail?.title || "",
                     subUrl,
-                    [
+                    sources: [
                       {
                         quality: "Torrent Stream",
                         url: info.streamUrl,
@@ -1007,16 +1089,15 @@ export default function DetailScreen() {
                       },
                     ],
                     subtitles,
-                    JSON.stringify(episodesPayload),
-                    playingEpisode ?? -1,
-                    detail?.imdbId || "",
-                    detail?.isSerial ? "series" : "movie",
-                    detail?.posterUrl || "",
-                    currentEp?.season || 1,
-                    currentEp?.episode || 1,
-                    currentEp?.label || "",
-                    detail?.logoUrl || "",
-                  );
+                    isSerial: detail?.isSerial || false,
+                    season: currentEp?.season || 1,
+                    episode: currentEp?.episode || 1,
+                    episodeTitle: currentEp?.label || "",
+                    logoUrl: detail?.logoUrl || "",
+                    currentEpisodeIndex: playingEpisode ?? -1,
+                    episodes: allEpisodes,
+                  });
+                  setPlayerVisible(true);
                 }
               } catch (err) {
                 console.warn("[ZunoPlugin] Error polling torrent status:", err);
@@ -1027,37 +1108,42 @@ export default function DetailScreen() {
           })
           .catch((err) => {
             setIsTorrentBuffering(false);
-            setTorrentErrorModal({ visible: true, message: cleanTorrentError(err.message) });
+            setTorrentErrorModal({
+              visible: true,
+              message: cleanTorrentError(err.message),
+            });
           });
       } catch (e: any) {
         setIsTorrentBuffering(false);
-        setTorrentErrorModal({ visible: true, message: cleanTorrentError(e.message) });
+        setTorrentErrorModal({
+          visible: true,
+          message: cleanTorrentError(e.message),
+        });
       }
       return;
     }
 
-    bridge.playStream(
-      source.url,
-      source.headers,
-      title,
+    setPlayerConfig({
+      url: source.url,
+      headers: source.headers,
+      title: detail?.title || "",
       subUrl,
-      sources.map((s) => ({
+      sources: sources.map((s) => ({
         quality: s.quality,
         url: s.url,
         type: s.type,
         headers: s.headers,
       })),
       subtitles,
-      JSON.stringify(episodesPayload),
-      playingEpisode ?? -1,
-      detail?.imdbId || "",
-      detail?.isSerial ? "series" : "movie",
-      detail?.posterUrl || "",
-      currentEp?.season || 1,
-      currentEp?.episode || 1,
-      currentEp?.label || "",
-      detail?.logoUrl || "",
-    );
+      isSerial: detail?.isSerial || false,
+      season: currentEp?.season || 1,
+      episode: currentEp?.episode || 1,
+      episodeTitle: currentEp?.label || "",
+      logoUrl: detail?.logoUrl || "",
+      currentEpisodeIndex: playingEpisode ?? -1,
+      episodes: allEpisodes,
+    });
+    setPlayerVisible(true);
   }
 
   const expandedContent = detail ? (
@@ -1118,93 +1204,76 @@ export default function DetailScreen() {
         <View style={styles.castSection}>
           <Text style={styles.sectionTitle}>Cast ({detail.cast.length})</Text>
           <View style={styles.castScrollContainer}>
-            <ScrollView
-              horizontal
-              nestedScrollEnabled={true}
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.castList}
+            <MaskedView
+              style={styles.castMaskedView}
+              maskElement={
+                <LinearGradient
+                  colors={["transparent", "black", "black", "transparent"]}
+                  locations={[0, 0.08, 0.92, 1]}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  style={StyleSheet.absoluteFillObject}
+                />
+              }
             >
-              {detail.cast.map((actor, idx) => {
-                const initials = actor.name
-                  .split(" ")
-                  .map((s) => s[0])
-                  .join("")
-                  .toUpperCase()
-                  .slice(0, 2);
-                const handleCastPress = () => {
-                  if (actor.imdbId) {
-                    Linking.openURL(
-                      `https://www.imdb.com/name/${actor.imdbId}/`,
-                    ).catch(() => {});
-                  }
-                };
-                return (
-                  <TouchableOpacity
-                    key={`actor-${idx}`}
-                    style={styles.castCard}
-                    onPress={handleCastPress}
-                    activeOpacity={actor.imdbId ? 0.7 : 1}
-                    disabled={!actor.imdbId}
-                  >
-                    {actor.image ? (
-                      <Image
-                        source={{ uri: actor.image, cache: "force-cache" }}
-                        style={styles.castImage}
-                      />
-                    ) : (
-                      <ActorAvatar
-                        name={actor.name}
-                        initials={initials}
-                        style={styles.castImage}
-                      />
-                    )}
-                    <Text style={styles.castName} numberOfLines={1}>
-                      {actor.name}
-                    </Text>
-                    {actor.role ? (
-                      <Text style={styles.castRole} numberOfLines={1}>
-                        {actor.role}
+              <ScrollView
+                horizontal
+                nestedScrollEnabled={true}
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.castList}
+              >
+                {detail.cast.map((actor, idx) => {
+                  const initials = actor.name
+                    .split(" ")
+                    .map((s) => s[0])
+                    .join("")
+                    .toUpperCase()
+                    .slice(0, 2);
+                  const handleCastPress = () => {
+                    if (actor.imdbId) {
+                      Linking.openURL(
+                        `https://www.imdb.com/name/${actor.imdbId}/`,
+                      ).catch(() => {});
+                    }
+                  };
+                  return (
+                    <TouchableOpacity
+                      key={`actor-${idx}`}
+                      style={styles.castCard}
+                      onPress={handleCastPress}
+                      activeOpacity={actor.imdbId ? 0.7 : 1}
+                      disabled={!actor.imdbId}
+                    >
+                      {actor.image ? (
+                        <Image
+                          source={{ uri: actor.image, cache: "force-cache" }}
+                          style={styles.castImage}
+                        />
+                      ) : (
+                        <ActorAvatar
+                          name={actor.name}
+                          initials={initials}
+                          style={styles.castImage}
+                        />
+                      )}
+                      <Text style={styles.castName} numberOfLines={1}>
+                        {actor.name}
                       </Text>
-                    ) : null}
-                    {actor.imdbId && (
-                      <View style={styles.castImdbBadge}>
-                        <Text style={styles.castImdbBadgeText}>IMDb</Text>
-                      </View>
-                    )}
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
-
-            {/* Left and Right Edge Fades for Cast scroll */}
-            <LinearGradient
-              colors={["rgba(15, 15, 20, 0.95)", "transparent"]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={{
-                position: "absolute",
-                left: 0,
-                top: 0,
-                bottom: 0,
-                width: 16,
-                zIndex: 10,
-              }}
-              pointerEvents="none"
-            />
-            <LinearGradient
-              colors={["transparent", "rgba(15, 15, 20, 0.95)"]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={{
-                position: "absolute",
-                right: 0,
-                top: 0,
-                bottom: 0,
-                width: 20,
-                zIndex: 10,
-              }}
-              pointerEvents="none"
-            />
+                      {actor.role ? (
+                        <Text style={styles.castRole} numberOfLines={1}>
+                          {actor.role}
+                        </Text>
+                      ) : null}
+                      {actor.imdbId && (
+                        <View style={styles.castImdbBadge}>
+                          <Text style={styles.castImdbBadgeText}>IMDb</Text>
+                        </View>
+                      )}
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            </MaskedView>
           </View>
         </View>
       )}
@@ -1748,10 +1817,10 @@ export default function DetailScreen() {
               </Text>
               <Text style={styles.torrentSubTitleText}>
                 {torrentStatus?.peers && torrentStatus.peers > 0
-                  ? `Connected to ${torrentStatus.peers} live peer${torrentStatus.peers > 1 ? 's' : ''}`
+                  ? `Connected to ${torrentStatus.peers} live peer${torrentStatus.peers > 1 ? "s" : ""}`
                   : selectedTorrentSeeders > 0
                     ? `Locating ${selectedTorrentSeeders} known seeders on network...`
-                    : 'Searching for peers...'}
+                    : "Searching for peers..."}
               </Text>
 
               {/* Progress bar */}
@@ -1815,6 +1884,13 @@ export default function DetailScreen() {
           />
 
           <Animated.View style={[styles.sheet, sheetAnimatedStyle]}>
+            <BlurView
+              intensity={100}
+              tint="dark"
+              blurTarget={{ current: blurTarget }}
+              blurMethod="dimezisBlurView"
+              style={StyleSheet.absoluteFillObject}
+            />
             <View style={styles.sheetContent}>
               <View style={styles.sheetHandle} />
               <View style={styles.sheetHeaderRow}>
@@ -1857,7 +1933,9 @@ export default function DetailScreen() {
                         prog?.status === "searching";
 
                       const tabSourcesCount = sources.filter(
-                        (s) => s.provider.toLowerCase() === tab.toLowerCase(),
+                        (s) =>
+                          (s.provider ?? "").toLowerCase() ===
+                          tab.toLowerCase(),
                       ).length;
                       if (tab === "All") {
                         tabLabel =
@@ -1944,143 +2022,19 @@ export default function DetailScreen() {
                   />
                 </View>
               )}
-
-              {/* DoH bypass notice — only shown when ISP blocking was detected */}
-
-              {isTabResolving && filteredSources.length > 0 && (
-                <View style={styles.listSearchingIndicator}>
-                  <ActivityIndicator
-                    size="small"
-                    color="#0047FF"
-                    style={{ marginRight: 8 }}
-                  />
-                  <Text style={styles.listSearchingText}>
-                    Searching for more links... ({filteredSources.length} found)
-                  </Text>
-                </View>
-              )}
-
-              {isTabResolving && filteredSources.length === 0 ? (
-                <View style={styles.searchLoaderContainer}>
-                  <ActivityIndicator size="large" color="#0047FF" />
-                  <Text style={styles.searchLoaderText}>
-                    Searching for links...
-                  </Text>
-                  <Text style={styles.searchLoaderSubtext}>
-                    Checking all providers in parallel. Found sources will
-                    appear here instantly.
-                  </Text>
-                </View>
-              ) : !isTabResolving && filteredSources.length === 0 ? (
-                <View style={styles.noSourcesContainer}>
-                  {(() => {
-                    const allBlocked =
-                      resolvingProgress.length > 0 &&
-                      resolvingProgress.filter(
-                        (p) => p.status === "error" || p.status === "none",
-                      ).length > 0 &&
-                      resolvingProgress.every(
-                        (p) =>
-                          p.status === "none" ||
-                          p.status === "searching" ||
-                          isIspBlock(p.errorReason),
-                      );
-                    return (
-                      <>
-                        <Ionicons
-                          name={
-                            allBlocked
-                              ? "lock-closed-outline"
-                              : "alert-circle-outline"
-                          }
-                          size={48}
-                          color={theme.colors.rose}
-                          style={{ opacity: 0.8 }}
-                        />
-                        <Text style={styles.noSourcesText}>
-                          {allBlocked
-                            ? "Content blocked by your network"
-                            : "No links found"}
-                        </Text>
-                        <Text style={styles.noSourcesSubtext}>
-                          {allBlocked
-                            ? "Your internet provider (Jio/Airtel/etc.) is blocking these sources.\nConnect to a VPN and try again."
-                            : "Try another provider tab or clear the Playback Links cache in Settings."}
-                        </Text>
-                      </>
-                    );
-                  })()}
-                  {(() => {
-                    const activeProg = resolvingProgress.find(
-                      (p) => p.providerName === activeProviderTab,
-                    );
-                    if (
-                      activeProg?.errorReason &&
-                      activeProviderTab !== "All"
-                    ) {
-                      const blocked = isIspBlock(activeProg.errorReason);
-                      return (
-                        <View
-                          style={
-                            blocked
-                              ? styles.vpnNoticeCard
-                              : styles.errorReasonCard
-                          }
-                        >
-                          {blocked ? (
-                            <>
-                              <Ionicons
-                                name="lock-closed-outline"
-                                size={18}
-                                color={theme.colors.rose}
-                                style={{ marginBottom: 6 }}
-                              />
-                              <Text style={styles.vpnNoticeTitle}>
-                                Blocked by your network
-                              </Text>
-                              <Text style={styles.vpnNoticeText}>
-                                This source is blocked by your internet provider
-                                (Jio/Airtel/etc.).
-                                {"\n"}Connect to a VPN to access it.
-                              </Text>
-                            </>
-                          ) : (
-                            <Text style={styles.errorReasonText}>
-                              {cleanErrorMessage(activeProg.errorReason)}
-                            </Text>
-                          )}
-                        </View>
-                      );
-                    }
-                    return null;
-                  })()}
-                </View>
-              ) : null}
-
-              {/* Torrent stream error modal */}
-              <CustomModal
-                visible={torrentErrorModal.visible}
-                onClose={() => setTorrentErrorModal({ visible: false, message: '' })}
-                title="Torrent Unavailable"
-                message={torrentErrorModal.message}
-                glowColors={['rgba(255, 74, 125, 0.15)', 'transparent']}
-                iconName="alert-circle"
-                iconColor="#ff4a7d"
-                iconBgColor="rgba(255, 74, 125, 0.12)"
-              />
-
+ 
               {/* Always show source list when sources exist, even while still resolving */}
               {filteredSources.length > 0 && (
                 <View style={styles.sheetListContainer}>
-                  <ScrollView
-                    showsVerticalScrollIndicator={false}
-                    style={styles.sheetList}
-                    contentContainerStyle={{
-                      paddingTop: 12,
-                      paddingBottom: 24,
-                    }}
-                  >
-                    {filteredSources.map((source, idx) => {
+                  {(() => {
+                    const directSources = filteredSources.filter(
+                      (s) => s.type !== "torrent" && !s.url.startsWith("magnet:"),
+                    );
+                    const torrentSources = filteredSources.filter(
+                      (s) => s.type === "torrent" || s.url.startsWith("magnet:"),
+                    );
+
+                    const renderSourceRow = (source: any, idx: number) => {
                       const isSplitted = source.quality.includes(" · ");
                       const hostName =
                         source.host ||
@@ -2099,18 +2053,21 @@ export default function DetailScreen() {
                         source.url,
                       );
 
-                      // Extract size dynamically from the quality or title string if present
                       const sizeMatch = source.quality.match(
                         /\[?(\d+(?:\.\d+)?\s*(?:GB|MB|kb|gigabytes|megabytes))\]?/i,
                       );
                       const sizeTag = sizeMatch ? sizeMatch[1] : null;
                       const showProviderBadge = activeProviderTab === "All";
-                      const isTorrentSource = source.type === 'torrent' || source.url.startsWith('magnet:');
-                      const torrentSeeders = (source as any).seeders as number | undefined;
+                      const isTorrentSource =
+                        source.type === "torrent" ||
+                        source.url.startsWith("magnet:");
+                      const torrentSeeders = (source as any).seeders as
+                        | number
+                        | undefined;
 
                       return (
                         <TouchableOpacity
-                          key={`source-${idx}`}
+                          key={`source-${source.type}-${idx}`}
                           style={styles.sheetRow}
                           onPress={() => onSourceSelect(source)}
                           activeOpacity={0.7}
@@ -2122,7 +2079,6 @@ export default function DetailScreen() {
                                 { flexWrap: "wrap", gap: 6 },
                               ]}
                             >
-                              {/* Host Name - Normal Text (No Background Badge) */}
                               <Text
                                 style={[
                                   styles.sheetQuality,
@@ -2132,7 +2088,6 @@ export default function DetailScreen() {
                                 {hostName}
                               </Text>
 
-                              {/* Quality Badge */}
                               <View
                                 style={[
                                   styles.sheetBadge,
@@ -2152,52 +2107,54 @@ export default function DetailScreen() {
                                 </Text>
                               </View>
 
-                              {/* Protocol Badge */}
                               <View style={styles.sheetBadge}>
                                 <Text style={styles.sheetBadgeText}>
                                   {protocolLabel}
                                 </Text>
                               </View>
 
-                              {/* Seeder Count Badge — only for torrent sources */}
-                              {isTorrentSource && torrentSeeders !== undefined && torrentSeeders > 0 && (
-                                <View
-                                  style={[
-                                    styles.sheetBadge,
-                                    {
-                                      backgroundColor: torrentSeeders >= 50
-                                        ? 'rgba(34, 197, 94, 0.12)'
-                                        : torrentSeeders >= 10
-                                          ? 'rgba(234, 179, 8, 0.10)'
-                                          : 'rgba(255, 255, 255, 0.06)',
-                                      borderColor: torrentSeeders >= 50
-                                        ? 'rgba(34, 197, 94, 0.3)'
-                                        : torrentSeeders >= 10
-                                          ? 'rgba(234, 179, 8, 0.25)'
-                                          : 'rgba(255,255,255,0.1)',
-                                      borderWidth: 0.5,
-                                    },
-                                  ]}
-                                >
-                                  <Text
+                              {isTorrentSource &&
+                                torrentSeeders !== undefined &&
+                                torrentSeeders > 0 && (
+                                  <View
                                     style={[
-                                      styles.sheetBadgeText,
+                                      styles.sheetBadge,
                                       {
-                                        color: torrentSeeders >= 50
-                                          ? '#22c55e'
-                                          : torrentSeeders >= 10
-                                            ? '#eab308'
-                                            : '#a0a0a5',
-                                        fontWeight: '600',
+                                        backgroundColor:
+                                          torrentSeeders >= 50
+                                            ? "rgba(34, 197, 94, 0.12)"
+                                            : torrentSeeders >= 10
+                                              ? "rgba(234, 179, 8, 0.10)"
+                                              : "rgba(255, 255, 255, 0.06)",
+                                        borderColor:
+                                          torrentSeeders >= 50
+                                            ? "rgba(34, 197, 94, 0.3)"
+                                            : torrentSeeders >= 10
+                                              ? "rgba(234, 179, 8, 0.25)"
+                                              : "rgba(255,255,255,0.1)",
+                                        borderWidth: 0.5,
                                       },
                                     ]}
                                   >
-                                    {`👤 ${torrentSeeders}`}
-                                  </Text>
-                                </View>
-                              )}
+                                    <Text
+                                      style={[
+                                        styles.sheetBadgeText,
+                                        {
+                                          color:
+                                            torrentSeeders >= 50
+                                              ? "#22c55e"
+                                              : torrentSeeders >= 10
+                                                ? "#eab308"
+                                                : "#a0a0a5",
+                                          fontWeight: "600",
+                                        },
+                                      ]}
+                                    >
+                                      {`👤 ${torrentSeeders}`}
+                                    </Text>
+                                  </View>
+                                )}
 
-                              {/* Size Badge */}
                               {sizeTag && (
                                 <View
                                   style={[
@@ -2213,7 +2170,6 @@ export default function DetailScreen() {
                                 </View>
                               )}
 
-                              {/* Provider Badge */}
                               {showProviderBadge && (
                                 <View
                                   style={[
@@ -2236,7 +2192,6 @@ export default function DetailScreen() {
                                 </View>
                               )}
 
-                              {/* Custom Headers Badge */}
                               {hasHeaders && (
                                 <View
                                   style={[
@@ -2259,7 +2214,6 @@ export default function DetailScreen() {
                                 </View>
                               )}
 
-                              {/* Subtitles Available Indicator */}
                               {subtitles.length > 0 && idx === 0 ? (
                                 <View
                                   style={[
@@ -2278,12 +2232,60 @@ export default function DetailScreen() {
                           </View>
                         </TouchableOpacity>
                       );
-                    })}
-                  </ScrollView>
+                    };
+
+                    return (
+                      <ScrollView
+                        showsVerticalScrollIndicator={false}
+                        style={styles.sheetList}
+                        contentContainerStyle={{
+                          paddingTop: 12,
+                          paddingBottom: 24,
+                        }}
+                      >
+                        {/* Direct/HLS Sources rendered first */}
+                        {directSources.map((source, idx) => renderSourceRow(source, idx))}
+
+                        {/* Collapsible Torrent Accordion row */}
+                        {torrentSources.length > 0 && (
+                          <>
+                            <TouchableOpacity
+                              onPress={() => setTorrentExpanded(!torrentExpanded)}
+                              style={[
+                                styles.accordionHeader,
+                                torrentExpanded && styles.accordionHeaderActive,
+                              ]}
+                              activeOpacity={0.8}
+                            >
+                              <Ionicons
+                                name="cloud-download-outline"
+                                size={18}
+                                color={theme.colors.rose}
+                                style={{ marginRight: 10 }}
+                              />
+                              <Text style={styles.accordionTitle}>
+                                Torrent & Magnet Links ({torrentSources.length} found)
+                              </Text>
+                              <Ionicons
+                                name={torrentExpanded ? "chevron-up" : "chevron-down"}
+                                size={18}
+                                color="#a0a0a5"
+                              />
+                            </TouchableOpacity>
+
+                            {torrentExpanded &&
+                              torrentSources.map((source, idx) =>
+                                renderSourceRow(source, idx),
+                              )}
+                          </>
+                        )}
+                      </ScrollView>
+                    );
+                  })()}
 
                   {/* Top & Bottom Edge Fades for sheetList */}
                   <LinearGradient
-                    colors={["#141417", "transparent"]}
+                    colors={["rgba(20, 18, 24, 0.95)", "transparent"]}
                     start={{ x: 0, y: 0 }}
                     end={{ x: 0, y: 1 }}
                     style={{
@@ -2297,7 +2299,7 @@ export default function DetailScreen() {
                     pointerEvents="none"
                   />
                   <LinearGradient
-                    colors={["transparent", "#141417"]}
+                    colors={["transparent", "rgba(20, 18, 24, 0.95)"]}
                     start={{ x: 0, y: 0 }}
                     end={{ x: 0, y: 1 }}
                     style={{
@@ -2360,6 +2362,44 @@ export default function DetailScreen() {
           }}
         />
       </Animated.View>
+
+      {playerConfig && (
+        <CustomVideoPlayer
+          visible={playerVisible}
+          url={playerConfig.url}
+          headers={playerConfig.headers}
+          title={playerConfig.title}
+          logoUrl={playerConfig.logoUrl}
+          isSerial={playerConfig.isSerial}
+          season={playerConfig.season}
+          episode={playerConfig.episode}
+          episodeTitle={playerConfig.episodeTitle}
+          episodes={playerConfig.episodes}
+          currentEpisodeIndex={playerConfig.currentEpisodeIndex}
+          onEpisodeChange={(index) => {
+            const ep = playerConfig.episodes[index];
+            if (ep) {
+              setPlayerVisible(false);
+              setPlayerConfig(null);
+              const dispIdx = displayedEpisodes.findIndex(
+                (e) => e.mediaRef === ep.mediaRef,
+              );
+              if (dispIdx !== -1) {
+                playEpisode(ep, dispIdx);
+              } else if (ep.season) {
+                setSelectedSeason(ep.season);
+                setPendingPlayEpisode({ ep, season: ep.season });
+              }
+            }
+          }}
+          onClose={() => {
+            setPlayerVisible(false);
+            setPlayerConfig(null);
+          }}
+          subtitles={playerConfig.subtitles}
+          sources={playerConfig.sources}
+        />
+      )}
     </View>
   );
 }
@@ -3066,8 +3106,12 @@ const styles = StyleSheet.create({
     position: "relative",
     overflow: "hidden",
   },
+  castMaskedView: {
+    width: "100%",
+  },
   castList: {
-    paddingRight: 12,
+    paddingLeft: 28,
+    paddingRight: 16,
   },
   castCard: {
     width: 80,
@@ -3204,7 +3248,7 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.08)",
-    backgroundColor: "#141417",
+    backgroundColor: "rgba(20, 18, 24, 0.45)",
   },
   sheetContent: {
     flex: 1,
@@ -3682,5 +3726,27 @@ const styles = StyleSheet.create({
     color: "#ffffff",
     fontSize: 14,
     fontWeight: "600",
+  },
+  accordionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 16,
+    backgroundColor: "rgba(255,255,255,0.04)",
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+    marginTop: 8,
+  },
+  accordionHeaderActive: {
+    backgroundColor: "rgba(255,255,255,0.08)",
+    borderColor: "rgba(255,255,255,0.15)",
+  },
+  accordionTitle: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "700",
+    flex: 1,
   },
 });

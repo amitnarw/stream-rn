@@ -222,7 +222,7 @@ export default function SettingsScreen({ navigation }: Props) {
   const [confirmMessage, setConfirmMessage] = useState('');
   const [confirmBtnText, setConfirmBtnText] = useState('');
   const [confirmAction, setConfirmAction] = useState<() => void>(() => {});
-  const [confirmGlowColors, setConfirmGlowColors] = useState<string[]>([]);
+  const [confirmGlowColors, setConfirmGlowColors] = useState<readonly [string, string, ...string[]]>(['transparent', 'transparent']);
   const [confirmIconName, setConfirmIconName] = useState<any>('trash-outline');
   const [confirmIconColor, setConfirmIconColor] = useState<string>('#ffffff');
   const [confirmIconBg, setConfirmIconBg] = useState<string>('rgba(255,255,255,0.1)');
@@ -230,7 +230,7 @@ export default function SettingsScreen({ navigation }: Props) {
   const [successVisible, setSuccessVisible] = useState(false);
   const [successTitle, setSuccessTitle] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
-  const [successGlowColors, setSuccessGlowColors] = useState<string[]>([]);
+  const [successGlowColors, setSuccessGlowColors] = useState<readonly [string, string, ...string[]]>(['transparent', 'transparent']);
   const [successIconName, setSuccessIconName] = useState<any>('checkmark-circle-outline');
   const [successIconColor, setSuccessIconColor] = useState<string>('#2ecc71');
   const [successIconBg, setSuccessIconBg] = useState<string>('rgba(46, 204, 113, 0.1)');
@@ -289,7 +289,7 @@ export default function SettingsScreen({ navigation }: Props) {
     title: string,
     message: string,
     btnText: string,
-    glowColors: string[],
+    glowColors: readonly [string, string, ...string[]],
     iconName: any,
     iconColor: string,
     iconBgColor: string,

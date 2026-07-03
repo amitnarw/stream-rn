@@ -18,7 +18,7 @@ interface CustomModalProps {
   message: string;
   confirmText?: string;
   onConfirm?: () => void;
-  glowColors: string[];
+  glowColors: readonly [string, string, ...string[]];
   iconName: any;
   iconColor: string;
   iconBgColor: string;
