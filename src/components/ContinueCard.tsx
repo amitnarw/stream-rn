@@ -9,7 +9,7 @@ import {
   Dimensions,
   TouchableOpacity,
 } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { XMarkIcon } from "react-native-heroicons/solid";
 import type { MediaItem } from "../types/plugin";
 import type { CardLayout } from "../context/TransitionContext";
 import { theme } from "../theme";
@@ -107,7 +107,7 @@ export const ContinueCard = React.memo(function ContinueCard({
                 }}
                 activeOpacity={0.7}
               >
-                <Ionicons name="close" size={13} color="#ffffff" />
+                <XMarkIcon size={13} color="#ffffff" />
               </TouchableOpacity>
             )}
 

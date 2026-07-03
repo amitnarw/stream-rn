@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BlurView, BlurTargetView } from 'expo-blur';
-import { Ionicons } from '@expo/vector-icons';
+import { ArrowLeftIcon, MagnifyingGlassIcon, SignalIcon } from 'react-native-heroicons/solid';
 import { LinearGradient } from 'expo-linear-gradient';
 import type { MediaItem } from '../types/plugin';
 import * as bridge from '../api/cloudStreamBridge';
@@ -119,15 +119,14 @@ export default function SearchScreen({ route, navigation }: Props) {
         ) : error ? (
           <View style={styles.errorContainer}>
             <BlurView intensity={20} tint="dark" style={styles.errorCard}>
-              <Ionicons 
-                name={error.includes('No results') ? "search-outline" : "wifi-outline"} 
-                size={40} 
-                color={error.includes('No results') ? "rgba(255,255,255,0.4)" : theme.colors.rose} 
-                style={{ marginBottom: 12 }} 
-              />
-              <Text style={styles.errorTitle}>
-                {error.includes('No results') ? "No Results Found" : "Search Error"}
-              </Text>
+              {error.includes('No results') ? (
+              <MagnifyingGlassIcon size={40} color="rgba(255,255,255,0.4)" style={{ marginBottom: 12 }} />
+            ) : (
+              <SignalIcon size={40} color={theme.colors.rose} style={{ marginBottom: 12 }} />
+            )}
+            <Text style={styles.errorTitle}>
+              {error.includes('No results') ? "No Results Found" : "Search Error"}
+            </Text>
               <Text style={styles.errorText}>{error}</Text>
               {!(error.includes('No results')) && (
                 <TouchableOpacity style={styles.retryBtn} onPress={() => doSearch(query)} activeOpacity={0.8}>
@@ -200,7 +199,7 @@ export default function SearchScreen({ route, navigation }: Props) {
         {navigation.canGoBack() ? (
           <TouchableOpacity style={styles.navButton} onPress={() => navigation.goBack()}>
             <BlurView intensity={35} tint="dark" style={styles.navButtonBlur}>
-              <Ionicons name="arrow-back" size={20} color="#fff" />
+              <ArrowLeftIcon size={20} color="#fff" />
             </BlurView>
           </TouchableOpacity>
         ) : (

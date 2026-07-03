@@ -8,9 +8,7 @@ import {
   Pressable,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
 import { theme } from '../theme';
-
 interface CustomModalProps {
   visible: boolean;
   onClose: () => void;
@@ -19,7 +17,7 @@ interface CustomModalProps {
   confirmText?: string;
   onConfirm?: () => void;
   glowColors: readonly [string, string, ...string[]];
-  iconName: any;
+  Icon: React.ComponentType<{ size: number; color: string }>;
   iconColor: string;
   iconBgColor: string;
   confirmDestructive?: boolean;
@@ -33,7 +31,7 @@ export function CustomModal({
   confirmText,
   onConfirm,
   glowColors,
-  iconName,
+  Icon,
   iconColor,
   iconBgColor,
   confirmDestructive = false,
@@ -59,7 +57,7 @@ export function CustomModal({
           
           <View style={styles.modalHeader}>
             <View style={[styles.iconContainer, { backgroundColor: iconBgColor }]}>
-              <Ionicons name={iconName} size={22} color={iconColor} />
+              <Icon size={22} color={iconColor} />
             </View>
             <Text style={styles.modalTitle}>{title}</Text>
           </View>

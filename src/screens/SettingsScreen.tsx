@@ -14,8 +14,16 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BlurView, BlurTargetView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
+import {
+  ArrowLeftIcon,
+  ArrowPathIcon,
+  CheckCircleIcon,
+  XCircleIcon,
+  LinkIcon,
+  TrashIcon
+} from 'react-native-heroicons/solid';
 import * as bridge from '../api/cloudStreamBridge';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { theme } from '../theme';
 import { useTransitionActions } from '../context/TransitionContext';
 import { CustomModal } from '../components/CustomModal';
@@ -203,6 +211,7 @@ export default function SettingsScreen({ navigation }: Props) {
   const [selectedHomeTtl, setSelectedHomeTtl] = useState(12 * 60 * 60 * 1000);
   const [selectedDetailTtl, setSelectedDetailTtl] = useState(24 * 60 * 60 * 1000);
   const [selectedLinksTtl, setSelectedLinksTtl] = useState(30 * 60 * 1000);
+  const [playerMode, setPlayerMode] = useState<'inbuilt' | 'external'>('inbuilt');
   const [clearing, setClearing] = useState(false);
   const [clearingLinks, setClearingLinks] = useState(false);
 
@@ -223,7 +232,7 @@ export default function SettingsScreen({ navigation }: Props) {
   const [confirmBtnText, setConfirmBtnText] = useState('');
   const [confirmAction, setConfirmAction] = useState<() => void>(() => {});
   const [confirmGlowColors, setConfirmGlowColors] = useState<readonly [string, string, ...string[]]>(['transparent', 'transparent']);
-  const [confirmIconName, setConfirmIconName] = useState<any>('trash-outline');
+  const [confirmIcon, setConfirmIcon] = useState<React.ComponentType<any>>(() => TrashIcon);
   const [confirmIconColor, setConfirmIconColor] = useState<string>('#ffffff');
   const [confirmIconBg, setConfirmIconBg] = useState<string>('rgba(255,255,255,0.1)');
 
@@ -231,7 +240,7 @@ export default function SettingsScreen({ navigation }: Props) {
   const [successTitle, setSuccessTitle] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
   const [successGlowColors, setSuccessGlowColors] = useState<readonly [string, string, ...string[]]>(['transparent', 'transparent']);
-  const [successIconName, setSuccessIconName] = useState<any>('checkmark-circle-outline');
+  const [successIcon, setSuccessIcon] = useState<React.ComponentType<any>>(() => CheckCircleIcon);
   const [successIconColor, setSuccessIconColor] = useState<string>('#2ecc71');
   const [successIconBg, setSuccessIconBg] = useState<string>('rgba(46, 204, 113, 0.1)');
 
@@ -251,6 +260,13 @@ export default function SettingsScreen({ navigation }: Props) {
       setSelectedHomeTtl(settings.mainPageTtl);
       setSelectedDetailTtl(settings.detailsTtl);
       setSelectedLinksTtl(settings.linksTtl);
+      
+      const savedMode = await AsyncStorage.getItem('@sozo_player_mode');
+      if (savedMode === 'external') {
+        setPlayerMode('external');
+      } else {
+        setPlayerMode('inbuilt');
+      }
     } catch (e) {
       console.warn('Failed to load settings:', e);
     } finally {
@@ -285,12 +301,21 @@ export default function SettingsScreen({ navigation }: Props) {
     }
   }
 
+  async function handlePlayerModeChange(mode: 'inbuilt' | 'external') {
+    setPlayerMode(mode);
+    try {
+      await AsyncStorage.setItem('@sozo_player_mode', mode);
+    } catch (e) {
+      console.warn('Failed to save player mode:', e);
+    }
+  }
+
   const triggerConfirmModal = (
     title: string,
     message: string,
     btnText: string,
     glowColors: readonly [string, string, ...string[]],
-    iconName: any,
+    iconComponent: React.ComponentType<any>,
     iconColor: string,
     iconBgColor: string,
     action: () => void
@@ -299,7 +324,7 @@ export default function SettingsScreen({ navigation }: Props) {
     setConfirmMessage(message);
     setConfirmBtnText(btnText);
     setConfirmGlowColors(glowColors);
-    setConfirmIconName(iconName);
+    setConfirmIcon(() => iconComponent);
     setConfirmIconColor(iconColor);
     setConfirmIconBg(iconBgColor);
     setConfirmAction(() => action);
@@ -315,12 +340,12 @@ export default function SettingsScreen({ navigation }: Props) {
     setSuccessMessage(message);
     if (isError) {
       setSuccessGlowColors(['rgba(255, 74, 125, 0.15)', 'transparent']);
-      setSuccessIconName('close-circle-outline');
+      setSuccessIcon(() => XCircleIcon);
       setSuccessIconColor(theme.colors.rose);
       setSuccessIconBg('rgba(255, 74, 125, 0.1)');
     } else {
       setSuccessGlowColors(['rgba(46, 204, 113, 0.15)', 'transparent']);
-      setSuccessIconName('checkmark-circle-outline');
+      setSuccessIcon(() => CheckCircleIcon);
       setSuccessIconColor('#2ecc71');
       setSuccessIconBg('rgba(46, 204, 113, 0.1)');
     }
@@ -333,7 +358,7 @@ export default function SettingsScreen({ navigation }: Props) {
       'Are you sure you want to refresh all cached movie lists and posters? This will reload all names and images fresh from the internet next time you browse, without deleting your favorites.',
       'Refresh Info',
       ['rgba(255, 74, 125, 0.15)', 'transparent'], // Rose glow
-      'refresh-circle-outline',
+      ArrowPathIcon,
       theme.colors.rose,
       'rgba(255, 74, 125, 0.1)',
       async () => {
@@ -356,7 +381,7 @@ export default function SettingsScreen({ navigation }: Props) {
       'Are you sure you want to refresh all video stream links? This will force the app to search for new working links next time you play a video, resolving any broken player screens.',
       'Refresh Links',
       ['rgba(255, 255, 255, 0.12)', 'transparent'], // Faint white glow
-      'link-outline',
+      LinkIcon,
       '#ffffff',
       'rgba(255, 255, 255, 0.1)',
       async () => {
@@ -458,6 +483,51 @@ export default function SettingsScreen({ navigation }: Props) {
             />
           </View>
 
+          {/* Video Player Mode Settings Card */}
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>Video Player Mode</Text>
+            <Text style={styles.cardDescription}>
+              Choose whether to play video streams using the app's inbuilt premium media player or launch them in an external third-party video player (like VLC or MX Player).
+            </Text>
+            <View style={styles.playerModeOptions}>
+              <TouchableOpacity
+                style={[
+                  styles.modeOptionBtn,
+                  playerMode === 'inbuilt' && styles.modeOptionBtnActive,
+                ]}
+                onPress={() => handlePlayerModeChange('inbuilt')}
+                activeOpacity={0.8}
+              >
+                {playerMode === 'inbuilt' ? (
+                  <CheckCircleIcon size={18} color={theme.colors.accentLight} style={{ marginRight: 8 }} />
+                ) : (
+                  <View style={{ width: 18, height: 18, borderRadius: 9, borderWidth: 2, borderColor: 'rgba(255,255,255,0.3)', marginRight: 8 }} />
+                )}
+                <Text style={[styles.modeOptionText, playerMode === 'inbuilt' && styles.modeOptionTextActive]}>
+                  Inbuilt Player
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.modeOptionBtn,
+                  playerMode === 'external' && styles.modeOptionBtnActive,
+                ]}
+                onPress={() => handlePlayerModeChange('external')}
+                activeOpacity={0.8}
+              >
+                {playerMode === 'external' ? (
+                  <CheckCircleIcon size={18} color={theme.colors.accentLight} style={{ marginRight: 8 }} />
+                ) : (
+                  <View style={{ width: 18, height: 18, borderRadius: 9, borderWidth: 2, borderColor: 'rgba(255,255,255,0.3)', marginRight: 8 }} />
+                )}
+                <Text style={[styles.modeOptionText, playerMode === 'external' && styles.modeOptionTextActive]}>
+                  External Player
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
           {/* Storage Management Card */}
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Storage & Cleanup</Text>
@@ -538,8 +608,7 @@ export default function SettingsScreen({ navigation }: Props) {
               tint="dark" 
               style={styles.navButtonBlur}
             >
-              <Ionicons 
-                name="arrow-back" 
+              <ArrowLeftIcon 
                 size={20} 
                 color={theme.colors.textPrimary} 
               />
@@ -564,7 +633,7 @@ export default function SettingsScreen({ navigation }: Props) {
         confirmText={confirmBtnText}
         onConfirm={confirmAction}
         glowColors={confirmGlowColors}
-        iconName={confirmIconName}
+        Icon={confirmIcon}
         iconColor={confirmIconColor}
         iconBgColor={confirmIconBg}
         confirmDestructive={confirmTitle.includes('Info') || confirmTitle.includes('Posters') || confirmTitle.includes('Cache')}
@@ -577,7 +646,7 @@ export default function SettingsScreen({ navigation }: Props) {
         title={successTitle}
         message={successMessage}
         glowColors={successGlowColors}
-        iconName={successIconName}
+        Icon={successIcon}
         iconColor={successIconColor}
         iconBgColor={successIconBg}
       />
@@ -822,5 +891,33 @@ const styles = StyleSheet.create({
     color: theme.colors.textSecondary,
     fontSize: 12,
     lineHeight: 16,
+  },
+  playerModeOptions: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 8,
+  },
+  modeOptionBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+  },
+  modeOptionBtnActive: {
+    backgroundColor: 'rgba(0, 71, 255, 0.08)',
+    borderColor: 'rgba(0, 71, 255, 0.25)',
+  },
+  modeOptionText: {
+    color: 'rgba(255,255,255,0.6)',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  modeOptionTextActive: {
+    color: '#ffffff',
   },
 });

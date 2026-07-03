@@ -13,6 +13,13 @@ import type {
 
 const { CloudStreamModule } = NativeModules;
 
+// Silence all verbose link resolution logs in this file
+const console = {
+  log: () => {},
+  warn: (...args: any[]) => global.console.warn(...args),
+  error: (...args: any[]) => global.console.error(...args),
+} as any;
+
 async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = 3000): Promise<Response> {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
@@ -109,6 +116,23 @@ export async function saveSettings(mainPageTtl: number, detailsTtl: number, link
     currentLinksTtl = linksTtl;
   } catch (e) {
     console.warn('Failed to save settings:', e);
+  }
+}
+
+export async function getPlayerMode(): Promise<'inbuilt' | 'external'> {
+  try {
+    const mode = await AsyncStorage.getItem('@sozo_player_mode');
+    return mode === 'external' ? 'external' : 'inbuilt';
+  } catch {
+    return 'inbuilt';
+  }
+}
+
+export async function setPlayerMode(mode: 'inbuilt' | 'external'): Promise<void> {
+  try {
+    await AsyncStorage.setItem('@sozo_player_mode', mode);
+  } catch (e) {
+    console.warn('Failed to save player mode:', e);
   }
 }
 
@@ -335,6 +359,13 @@ export async function getMainPage(
         { name: 'Adventure Cartoons', url: 'https://v3-cinemeta.strem.io/catalog/movie/top/genre=Adventure.json' },
       ];
       break;
+    case 'Anime':
+      urls = [
+        { name: 'Popular Anime Series', url: 'https://v3-cinemeta.strem.io/catalog/series/top/genre=Anime.json' },
+        { name: 'Trending Anime Movies', url: 'https://v3-cinemeta.strem.io/catalog/movie/top/genre=Anime.json' },
+        { name: 'Highly Rated Anime', url: 'https://v3-cinemeta.strem.io/catalog/series/imdbRating/genre=Anime.json' },
+      ];
+      break;
     default:
       urls = [
         { name: 'Trending Movies', url: 'https://v3-cinemeta.strem.io/catalog/movie/top.json' },
@@ -342,18 +373,38 @@ export async function getMainPage(
       ];
   }
 
+  const animeIds = await getAnimeImdbIds();
+
   const results = await Promise.all(
     urls.map(async (u) => {
       try {
         const response = await fetch(u.url);
         const json = await response.json();
-        const items = (json.metas ?? []).map((m: any) => ({
+        let items = (json.metas ?? []).map((m: any) => ({
           provider: 'Cinemeta',
           url: `${m.type}/${m.id}`,
           title: m.name ?? '',
           posterUrl: m.poster ?? null,
           type: m.type ?? null,
+          genres: m.genres ?? [],
         }));
+
+        if (category === 'Cartoon') {
+          items = items.filter((item: any) => {
+            const hasAnimationGenre = item.genres.includes('Animation');
+            const imdbId = item.url.split('/')[1];
+            const isAnimeItem = animeIds.has(imdbId);
+            return hasAnimationGenre && !isAnimeItem;
+          });
+        }
+
+        if (category === 'Anime') {
+          items = items.filter((item: any) => {
+            const imdbId = item.url.split('/')[1];
+            return animeIds.has(imdbId);
+          });
+        }
+
         return { name: u.name, items };
       } catch (e) {
         console.warn(`Failed to fetch catalog for ${u.name}:`, e);
@@ -655,9 +706,6 @@ export async function loadLinks(
 
   if (cached && now - cached.timestamp < currentLinksTtl) {
     console.log(`[Cache Hit - Synced] Returning cached playback links for ${cacheKey}`);
-    if (onSourceFound) {
-      cached.result.sources.forEach(src => onSourceFound(src));
-    }
     onAllDone?.(); // Signal that we're done so loading indicator clears
     return cached.result;
   }
@@ -666,9 +714,6 @@ export async function loadLinks(
   const settings = await getSettings();
   if (cached && now - cached.timestamp < settings.linksTtl) {
     console.log(`[Cache Hit] Returning cached playback links for ${cacheKey}`);
-    if (onSourceFound) {
-      cached.result.sources.forEach(src => onSourceFound(src));
-    }
     onAllDone?.(); // Signal that we're done so loading indicator clears
     return cached.result;
   }
@@ -1420,4 +1465,46 @@ export function exitImmersiveMode() {
   if (CloudStreamModule?.exitImmersiveMode) {
     CloudStreamModule.exitImmersiveMode();
   }
+}
+
+export async function getSystemVolume(): Promise<number> {
+  if (CloudStreamModule?.getSystemVolume) {
+    return await CloudStreamModule.getSystemVolume();
+  }
+  return 1.0;
+}
+
+export function setSystemVolume(volume: number) {
+  if (CloudStreamModule?.setSystemVolume) {
+    CloudStreamModule.setSystemVolume(volume);
+  }
+}
+
+export function playInExternalPlayer(url: string, mimeType: string | null, title: string | null) {
+  if (CloudStreamModule?.playInExternalPlayer) {
+    CloudStreamModule.playInExternalPlayer(url, mimeType, title);
+  }
+}
+
+let cachedAnimeIds = new Set<string>();
+
+export async function getAnimeImdbIds(): Promise<Set<string>> {
+  if (cachedAnimeIds.size > 0) {
+    return cachedAnimeIds;
+  }
+  try {
+    const [seriesRes, moviesRes] = await Promise.all([
+      fetch('https://v3-cinemeta.strem.io/catalog/series/top/genre=Anime.json').then(r => r.json()).catch(() => ({ metas: [] })),
+      fetch('https://v3-cinemeta.strem.io/catalog/movie/top/genre=Anime.json').then(r => r.json()).catch(() => ({ metas: [] })),
+    ]);
+    (seriesRes?.metas || []).forEach((m: any) => {
+      const id = m.imdb_id || m.id;
+      if (id) cachedAnimeIds.add(id);
+    });
+    (moviesRes?.metas || []).forEach((m: any) => {
+      const id = m.imdb_id || m.id;
+      if (id) cachedAnimeIds.add(id);
+    });
+  } catch (_) {}
+  return cachedAnimeIds;
 }

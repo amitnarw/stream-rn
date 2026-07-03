@@ -340,4 +340,47 @@ class CloudStreamModule(reactContext: ReactApplicationContext) :
             }
         }
     }
+
+    @ReactMethod
+    fun getSystemVolume(promise: Promise) {
+        try {
+            val audioManager = reactApplicationContext.getSystemService(android.content.Context.AUDIO_SERVICE) as android.media.AudioManager
+            val maxVol = audioManager.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)
+            val curVol = audioManager.getStreamVolume(android.media.AudioManager.STREAM_MUSIC)
+            val fraction = if (maxVol > 0) curVol.toFloat() / maxVol else 0f
+            promise.resolve(fraction.toDouble())
+        } catch (e: Exception) {
+            promise.reject("VOLUME_ERROR", e.message, e)
+        }
+    }
+
+    @ReactMethod
+    fun setSystemVolume(volume: Float) {
+        try {
+            val audioManager = reactApplicationContext.getSystemService(android.content.Context.AUDIO_SERVICE) as android.media.AudioManager
+            val maxVol = audioManager.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)
+            val targetVal = (volume * maxVol).toInt().coerceIn(0, maxVol)
+            audioManager.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, targetVal, 0)
+        } catch (_: Exception) {}
+    }
+
+    @ReactMethod
+    fun playInExternalPlayer(url: String, mimeType: String?, title: String?) {
+        try {
+            val context = reactApplicationContext
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(android.net.Uri.parse(url), mimeType ?: "video/*")
+                putExtra("title", title ?: "Play Video")
+                putExtra("title_name", title ?: "Play Video")
+                // Support MX Player / VLC title parameters
+                putExtra("title", title ?: "Play Video")
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(Intent.createChooser(intent, "Play with").apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            })
+        } catch (e: Exception) {
+            Log.e("CloudStreamModule", "Failed to start external player: ${e.message}")
+        }
+    }
 }

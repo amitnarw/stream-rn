@@ -33,6 +33,16 @@ class CloudStreamPluginHost(val appContext: ReactApplicationContext) {
             ctxField.set(null, WeakReference<android.content.Context>(appContext))
         } catch (_: Exception) {}
 
+        // Silence all plugin System.out/err console logs
+        try {
+            val dummy = java.io.PrintStream(object : java.io.OutputStream() {
+                override fun write(b: Int) {}
+                override fun write(b: ByteArray, off: Int, len: Int) {}
+            })
+            System.setOut(dummy)
+            System.setErr(dummy)
+        } catch (_: Exception) {}
+
         // Global OkHttpClient Interceptor Patch to block/fast-fail dead domains
         try {
             val apiKtCls = Class.forName("com.lagradost.cloudstream3.MainAPIKt")
@@ -212,6 +222,47 @@ class CloudStreamPluginHost(val appContext: ReactApplicationContext) {
             }
             if (patchedNames.isNotEmpty()) {
                 Log.i(TAG, "domain patches applied: $patchedNames")
+            }
+
+            // Patch registered extractor domains at runtime (e.g. VidSrcMe, VsEmbed)
+            try {
+                val extClass = Class.forName("com.lagradost.cloudstream3.utils.ExtractorApiKt")
+                val getXsMethod = extClass.getMethod("getXs")
+                val extractorsList = getXsMethod.invoke(null) as? List<*>
+                if (extractorsList != null) {
+                    for (extractor in extractorsList) {
+                        if (extractor == null) continue
+                        val name = extractor.javaClass.simpleName
+                        val fullName = extractor.javaClass.name
+                        var targetUrl = ""
+                        var shouldPatch = false
+
+                        if (name.contains("VidSrcMe", ignoreCase = true) || fullName.contains("VidSrcMe", ignoreCase = true)) {
+                            targetUrl = "https://vidsrcme.su"
+                            shouldPatch = true
+                        } else if (name.contains("VsEmbed", ignoreCase = true) || fullName.contains("VsEmbed", ignoreCase = true)) {
+                            targetUrl = "https://vsembed.su"
+                            shouldPatch = true
+                        }
+
+                        if (shouldPatch && targetUrl.isNotEmpty()) {
+                            var cls: Class<*>? = extractor.javaClass
+                            while (cls != null) {
+                                try {
+                                    val mf = cls.getDeclaredField("mainUrl")
+                                    mf.isAccessible = true
+                                    mf.set(extractor, targetUrl)
+                                    Log.i(TAG, "Successfully patched Extractor ${extractor.javaClass.name} mainUrl -> $targetUrl")
+                                    break
+                                } catch (_: NoSuchFieldException) {
+                                    cls = cls.superclass
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to patch extractors mainUrl: ${e.message}")
             }
 
             loadedPlugins[internalName] = instance
@@ -438,11 +489,9 @@ class CloudStreamPluginHost(val appContext: ReactApplicationContext) {
 
     suspend fun loadLinksJson(providerName: String, data: String): String {
         val api = apiByName(providerName) ?: run {
-            Log.w(STAG, "[LINKS] Provider not found: $providerName")
             return """{"error":"Provider not found: $providerName"}"""
         }
         val resolvedData = resolveUrl(api, data)
-        Log.i(STAG, "[LINKS] ${api.name} data='$data' resolvedData='$resolvedData'")
         val videoSources = JSONArray()
         val subs = JSONArray()
         var error: String? = null
@@ -459,7 +508,6 @@ class CloudStreamPluginHost(val appContext: ReactApplicationContext) {
                             put("provider", providerName)
                         }
                         subs.put(subObj)
-                        Log.d(STAG, "[LINKS] ${api.name}: subtitle lang=${sf.lang} url=${sf.url}")
                         
                         try {
                             val subJson = subObj.toString()
@@ -496,7 +544,6 @@ class CloudStreamPluginHost(val appContext: ReactApplicationContext) {
                             put("provider", providerName)
                         }
                         videoSources.put(sourceObj)
-                        Log.d(STAG, "[LINKS] ${api.name}: source name=${link.name} quality=$res url=${link.url.take(80)}")
                         
                         try {
                             val sourceJson = sourceObj.toString()
@@ -514,10 +561,8 @@ class CloudStreamPluginHost(val appContext: ReactApplicationContext) {
             )
         } catch (t: Throwable) {
             val msg = "${t.javaClass.simpleName}: ${t.message}"
-            Log.e(STAG, "[LINKS] ❌ ${api.name} data='$data': $msg")
             error = msg
         }
-        Log.i(STAG, "[LINKS] ${api.name}: ${videoSources.length()} sources, ${subs.length()} subtitles")
         return JSONObject().apply {
             put("videoUrl", if (videoSources.length() > 0) videoSources.getJSONObject(0).optString("url") else null)
             put("sources", videoSources)

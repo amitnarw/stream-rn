@@ -25,7 +25,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BlurView, BlurTargetView } from "expo-blur";
 import Reanimated, { FadeInUp, FadeOut, Easing as ReanimatedEasing } from "react-native-reanimated";
 import { LinearGradient } from "expo-linear-gradient";
-import { Ionicons } from "@expo/vector-icons";
+import { SignalIcon, ExclamationCircleIcon } from "react-native-heroicons/solid";
 import type { HomeSection, MediaItem } from "../types/plugin";
 import * as bridge from "../api/cloudStreamBridge";
 import { useTransition, useTransitionActions } from "../context/TransitionContext";
@@ -75,6 +75,7 @@ const CATEGORY_TABS = [
   "Series",
   "TV Show",
   "Cartoon",
+  "Anime",
 ];
 
 // Display genre/duration/rating tags for hero cards (rotated per item index)
@@ -161,35 +162,6 @@ function HomeSkeletonScreen() {
   const insets = useSafeAreaInsets();
   return (
     <View style={[styles.root, { backgroundColor: theme.colors.background }]}>
-      {/* Category header capsule skeleton */}
-      <View
-        style={[
-          styles.headerContainer,
-          {
-            top: insets.top + 4,
-            backgroundColor: "rgba(255, 255, 255, 0.05)",
-            borderWidth: 1,
-            borderColor: "rgba(255, 255, 255, 0.08)",
-          },
-        ]}
-      >
-        <View
-          style={{
-            flexDirection: "row",
-            paddingHorizontal: 20,
-            alignItems: "center",
-            gap: 12,
-            height: "100%",
-          }}
-        >
-          <SkeletonBox width={70} height={26} borderRadius={13} />
-          <SkeletonBox width={50} height={26} borderRadius={13} />
-          <SkeletonBox width={65} height={26} borderRadius={13} />
-          <SkeletonBox width={55} height={26} borderRadius={13} />
-          <SkeletonBox width={80} height={26} borderRadius={13} />
-        </View>
-      </View>
-
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{
@@ -772,7 +744,7 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
       return (
         <View style={styles.errorContainer}>
           <BlurView intensity={20} tint="dark" style={styles.errorCard}>
-            <Ionicons name="wifi-outline" size={40} color={theme.colors.rose} style={{ marginBottom: 12 }} />
+            <SignalIcon size={40} color={theme.colors.rose} style={{ marginBottom: 12 }} />
             <Text style={styles.errorTitle}>Connection Interrupted</Text>
             <Text style={styles.errText}>{sectionError}</Text>
             <TouchableOpacity
@@ -880,74 +852,74 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
           />
         </BlurTargetView>
 
-        <Animated.View style={{ flex: 1, zIndex: 1 }}>
-          {/* ── Category tab row ── */}
+        {/* ── Category tab row ── */}
+        <Animated.View
+          style={[styles.headerContainer, { top: insets.top + 4 }]}
+        >
           <Animated.View
-            style={[styles.headerContainer, { top: insets.top + 4 }]}
+            style={[
+              StyleSheet.absoluteFillObject,
+              { opacity: headerBgOpacity },
+            ]}
           >
-            <Animated.View
-              style={[
-                StyleSheet.absoluteFillObject,
-                { opacity: headerBgOpacity },
-              ]}
-            >
-              <View style={styles.blurBackdrop}>
-                {blurTarget && !showSkeleton ? (
-                  <BlurView
-                    intensity={100}
-                    tint="dark"
-                    style={StyleSheet.absoluteFillObject}
-                    blurMethod="dimezisBlurView"
-                    blurTarget={{ current: blurTarget }}
-                  />
-                ) : (
-                  <View
-                    style={[
-                      StyleSheet.absoluteFillObject,
-                      { backgroundColor: "rgba(20, 18, 24, 0.95)" },
-                    ]}
-                  />
-                )}
+            <View style={styles.blurBackdrop}>
+              {blurTarget && !showSkeleton ? (
+                <BlurView
+                  intensity={100}
+                  tint="dark"
+                  style={StyleSheet.absoluteFillObject}
+                  blurMethod="dimezisBlurView"
+                  blurTarget={{ current: blurTarget }}
+                />
+              ) : (
                 <View
                   style={[
                     StyleSheet.absoluteFillObject,
-                    { backgroundColor: "rgba(15, 15, 20, 0.38)" },
+                    { backgroundColor: "rgba(20, 18, 24, 0.95)" },
                   ]}
                 />
-              </View>
-            </Animated.View>
-
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.tabRow}
-              style={styles.tabRowWrap}
-            >
-              {CATEGORY_TABS.map((tab, i) => {
-                const isActive = i === activeTab;
-                return (
-                  <TouchableOpacity
-                    key={tab}
-                    onPress={() => handleTabPress(i)}
-                    activeOpacity={0.75}
-                    style={[styles.tabItem, isActive && styles.tabItemActive]}
-                  >
-                    <Text
-                      style={[styles.tabText, isActive && styles.tabTextActive]}
-                    >
-                      {tab}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
+              )}
+              <View
+                style={[
+                  StyleSheet.absoluteFillObject,
+                  { backgroundColor: "rgba(15, 15, 20, 0.38)" },
+                ]}
+              />
+            </View>
           </Animated.View>
 
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.tabRow}
+            style={styles.tabRowWrap}
+          >
+            {CATEGORY_TABS.map((tab, i) => {
+              const isActive = i === activeTab;
+              return (
+                <TouchableOpacity
+                  key={tab}
+                  onPress={() => handleTabPress(i)}
+                  activeOpacity={0.75}
+                  style={[styles.tabItem, isActive && styles.tabItemActive]}
+                >
+                  <Text
+                    style={[styles.tabText, isActive && styles.tabTextActive]}
+                  >
+                    {tab}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        </Animated.View>
+
+        <Animated.View style={{ flex: 1, zIndex: 1 }}>
           {/* ── Content ── */}
           {error ? (
             <View style={[styles.errorContainer, { marginTop: 150 }]}>
               <BlurView intensity={20} tint="dark" style={styles.errorCard}>
-                <Ionicons name="alert-circle-outline" size={42} color={theme.colors.rose} style={{ marginBottom: 12 }} />
+                <ExclamationCircleIcon size={42} color={theme.colors.rose} style={{ marginBottom: 12 }} />
                 <Text style={styles.errorTitle}>Unable to Load Feed</Text>
                 <Text style={styles.errText}>{error}</Text>
                 <TouchableOpacity style={styles.retryBtn} onPress={init} activeOpacity={0.8}>
@@ -1223,7 +1195,7 @@ const styles = StyleSheet.create({
     height: 48,
     borderRadius: 24,
     overflow: "hidden",
-    zIndex: 50,
+    zIndex: 150,
     borderWidth: 1,
     borderColor: "rgba(255, 255, 255, 0.08)",
   },

@@ -12,7 +12,8 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useFocusEffect } from '@react-navigation/native';
 import { BlurView, BlurTargetView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
+import { HeartIcon as HeartIconOutline } from 'react-native-heroicons/outline';
+import { ArrowLeftIcon } from 'react-native-heroicons/solid';
 import type { MediaItem } from '../types/plugin';
 import { getFavorites } from '../api/favorites';
 import MediaCard from '../components/MediaCard';
@@ -98,7 +99,7 @@ export default function FavoritesScreen({ navigation }: Props) {
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
               <View style={styles.emptyIconContainer}>
-                <Ionicons name="heart-dislike-outline" size={48} color="rgba(255, 74, 125, 0.6)" />
+                <HeartIconOutline size={48} color="rgba(255, 74, 125, 0.6)" />
               </View>
               <Text style={styles.emptyTitle}>Your Favorites is Empty</Text>
               <Text style={styles.emptyText}>
@@ -144,7 +145,7 @@ export default function FavoritesScreen({ navigation }: Props) {
         {navigation.canGoBack() ? (
           <TouchableOpacity style={styles.navButton} onPress={() => navigation.goBack()}>
             <BlurView intensity={35} tint="dark" style={styles.navButtonBlur}>
-              <Ionicons name="arrow-back" size={20} color="#fff" />
+              <ArrowLeftIcon size={20} color="#fff" />
             </BlurView>
           </TouchableOpacity>
         ) : (

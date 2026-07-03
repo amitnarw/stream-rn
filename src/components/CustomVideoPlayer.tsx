@@ -11,29 +11,30 @@ import {
   GestureResponderEvent,
   ActivityIndicator,
   BackHandler,
+  ScrollView,
 } from "react-native";
 import { useVideoPlayer, VideoView } from "expo-video";
 import { BlurView, BlurTargetView } from "expo-blur";
-import { HugeiconsIcon } from "@hugeicons/react-native";
 import {
   PlayIcon,
   PauseIcon,
-  Cancel01Icon,
-  LockIcon,
-  LockKeyIcon,
-  Maximize02Icon,
+  XMarkIcon,
+  LockClosedIcon,
+  LockOpenIcon,
+  ArrowsPointingOutIcon,
   FingerPrintIcon,
-  VolumeHighIcon,
-  Sun01Icon,
-  ClosedCaptionIcon,
-  DashboardSpeed01Icon,
-  DatabaseSettingIcon,
-  PreviousIcon,
-  NextIcon,
-  GoBackward10SecIcon,
-  GoForward10SecIcon,
-  Clock01Icon
-} from "@hugeicons/core-free-icons";
+  SpeakerWaveIcon,
+  SunIcon,
+  LanguageIcon,
+  BoltIcon,
+  Square3Stack3DIcon,
+  BackwardIcon,
+  ForwardIcon,
+  ClockIcon,
+  ArrowUpRightIcon,
+  CheckIcon
+} from "react-native-heroicons/solid";
+import * as bridge from "../api/cloudStreamBridge";
 import { LinearGradient } from "expo-linear-gradient";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Animated, {
@@ -41,9 +42,12 @@ import Animated, {
   useAnimatedStyle,
   withTiming,
   runOnJS,
+  FadeIn,
+  FadeOut,
+  ZoomIn,
+  ZoomOut,
 } from "react-native-reanimated";
 import { theme } from "../theme";
-import * as bridge from "../api/cloudStreamBridge";
 
 const { width: WINDOW_WIDTH, height: WINDOW_HEIGHT } = Dimensions.get("window");
 
@@ -139,6 +143,61 @@ function parseSubtitles(text: string): Cue[] {
   return cues.sort((a, b) => a.start - b.start);
 }
 
+interface PlayerModalProps {
+  visible: boolean;
+  onClose: () => void;
+  title: string;
+  children: React.ReactNode;
+  blurTarget: any;
+  hideCloseButton?: boolean;
+}
+
+const PlayerModal = ({ visible, onClose, title, children, blurTarget, hideCloseButton = false }: PlayerModalProps) => {
+  if (!visible) return null;
+
+  return (
+    <Animated.View
+      entering={FadeIn.duration(200)}
+      exiting={FadeOut.duration(150)}
+      style={styles.resumePromptOverlay}
+    >
+      <TouchableOpacity
+        style={StyleSheet.absoluteFillObject}
+        onPress={onClose}
+        activeOpacity={1}
+      />
+      <Animated.View
+        entering={ZoomIn.duration(250)}
+        exiting={ZoomOut.duration(200)}
+        style={styles.playerModalContainer}
+      >
+        <BlurView
+          intensity={100}
+          tint="dark"
+          blurTarget={blurTarget}
+          blurMethod="dimezisBlurView"
+          style={StyleSheet.absoluteFillObject}
+        />
+        <View style={styles.modalHeader}>
+          <Text style={styles.resumePromptTitle}>{title}</Text>
+          {!hideCloseButton && (
+            <TouchableOpacity onPress={onClose} style={styles.modalCloseIconBtn}>
+              <XMarkIcon size={20} color="#fff" />
+            </TouchableOpacity>
+          )}
+        </View>
+        <ScrollView
+          showsVerticalScrollIndicator={true}
+          style={styles.modalScrollBody}
+          contentContainerStyle={styles.modalScrollBodyContent}
+        >
+          {children}
+        </ScrollView>
+      </Animated.View>
+    </Animated.View>
+  );
+};
+
 export default function CustomVideoPlayer({
   visible,
   url,
@@ -180,6 +239,9 @@ export default function CustomVideoPlayer({
   );
   const [cues, setCues] = useState<Cue[]>([]);
   const [activeCue, setActiveCue] = useState<Cue | null>(null);
+  const [subDelay, setSubDelay] = useState(0);
+  const [subPosition, setSubPosition] = useState<"top" | "middle" | "bottom">("bottom");
+  const [subBackground, setSubBackground] = useState<"none" | "translucent" | "solid">("translucent");
 
   // Player state variables
   const [isPlaying, setIsPlaying] = useState(false);
@@ -215,6 +277,16 @@ export default function CustomVideoPlayer({
 
   // Playback Rate
   const [playbackRate, setPlaybackRate] = useState(1.0);
+
+  // Active slider tracker for fullscreen slider expand feature
+  const [activeSlider, setActiveSlider] = useState<"progress" | "volume" | "brightness" | null>(null);
+
+  // Load initial system volume on mount
+  useEffect(() => {
+    bridge.getSystemVolume().then((vol) => {
+      volumeShared.value = vol;
+    }).catch(() => {});
+  }, []);
 
   // Sleep Timer state
   const [sleepTimer, setSleepTimer] = useState<"off" | 15 | 30 | 60 | "episode">("off");
@@ -266,9 +338,9 @@ export default function CustomVideoPlayer({
     p.volume = 1.0; // Default full volume
   });
 
-  // Keep volume in sync with Shared Value changes
+  // Keep relative player volume at max, control actual loudness via system volume
   useEffect(() => {
-    player.volume = volumeShared.value;
+    player.volume = 1.0;
   }, [player]);
 
   // Hide system status bar & bottom navigation bar globally on mount, show on unmount
@@ -311,7 +383,6 @@ export default function CustomVideoPlayer({
     setDuration(player.duration);
     setStatus(player.status);
     setCurrentTime(player.currentTime);
-    volumeShared.value = player.volume;
     latestTimeRef.current = player.currentTime;
 
     const subs = [
@@ -420,16 +491,16 @@ export default function CustomVideoPlayer({
       });
   }, [activeSubtitleUrl]);
 
-  // Update active subtitle cue based on currentTime
+  // Update active subtitle cue based on currentTime & subDelay
   useEffect(() => {
     if (cues.length === 0) {
       setActiveCue(null);
       return;
     }
-    const current = currentTime;
+    const current = currentTime + subDelay;
     const active = cues.find((c) => current >= c.start && current <= c.end);
     setActiveCue(active || null);
-  }, [currentTime, cues]);
+  }, [currentTime, cues, subDelay]);
 
   // Sleep Timer countdown implementation
   useEffect(() => {
@@ -462,7 +533,8 @@ export default function CustomVideoPlayer({
       clearTimeout(controlsTimeoutRef.current);
     }
     controlsTimeoutRef.current = setTimeout(() => {
-      if (player.playing && activeModal === null && !showResumePrompt) {
+      const isPreparing = status === "loading" || status === "idle";
+      if ((isPlaying || isPreparing) && activeModal === null && !showResumePrompt) {
         setShowControls(false);
         controlsOpacity.value = withTiming(0, { duration: 300 });
       }
@@ -488,7 +560,7 @@ export default function CustomVideoPlayer({
     return () => {
       if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
     };
-  }, [isPlaying, activeModal, showResumePrompt]);
+  }, [isPlaying, status, activeModal, showResumePrompt]);
 
   // Gestures Touch tracking using start references to guarantee linear sliding math
   const startVolumeRef = useRef(1.0);
@@ -555,6 +627,13 @@ export default function CustomVideoPlayer({
     onClose();
   };
 
+  const handlePlayExternal = () => {
+    player.pause();
+    const currentUrl = selectedSource ? selectedSource.url : url;
+    bridge.playInExternalPlayer(currentUrl, null, title);
+    handleClose();
+  };
+
   const formatTime = (secs: number) => {
     if (isNaN(secs) || secs < 0) return "0:00";
     const h = Math.floor(secs / 3600);
@@ -606,30 +685,50 @@ export default function CustomVideoPlayer({
   // Butter-Smooth On-Screen Slider Touch Handlers using pageX offsets & Shared Values
   const volumeStartPageX = useRef(0);
   const volumeStartVal = useRef(1.0);
+  const lastVolumeRef = useRef(1.0);
+
+  const handleMuteToggle = () => {
+    if (volumeShared.value > 0) {
+      lastVolumeRef.current = volumeShared.value;
+      volumeShared.value = 0;
+      bridge.setSystemVolume(0);
+    } else {
+      const target = lastVolumeRef.current > 0 ? lastVolumeRef.current : 1.0;
+      volumeShared.value = target;
+      bridge.setSystemVolume(target);
+    }
+    resetHideTimer();
+  };
 
   const handleVolumeTouchStart = (evt: GestureResponderEvent) => {
+    setActiveSlider("volume");
     const { pageX, locationX } = evt.nativeEvent;
     const ratio = Math.max(0, Math.min(1, locationX / 110));
     volumeShared.value = ratio;
     volumeStartVal.current = ratio;
     volumeStartPageX.current = pageX;
-    player.volume = ratio;
+    bridge.setSystemVolume(ratio);
     resetHideTimer();
   };
 
   const handleVolumeTouchMove = (evt: GestureResponderEvent) => {
     const { pageX } = evt.nativeEvent;
     const deltaX = pageX - volumeStartPageX.current;
-    const nextVal = Math.max(0, Math.min(1, volumeStartVal.current + deltaX / 110));
+    const nextVal = Math.max(0, Math.min(1, volumeStartVal.current + deltaX / 550));
     volumeShared.value = nextVal;
-    player.volume = nextVal;
+    bridge.setSystemVolume(nextVal);
     resetHideTimer();
+  };
+
+  const handleVolumeTouchEnd = () => {
+    setActiveSlider(null);
   };
 
   const brightnessStartPageX = useRef(0);
   const brightnessStartVal = useRef(0.5);
 
   const handleBrightnessTouchStart = (evt: GestureResponderEvent) => {
+    setActiveSlider("brightness");
     const { pageX, locationX } = evt.nativeEvent;
     const ratio = Math.max(0, Math.min(1, locationX / 110));
     brightnessShared.value = ratio;
@@ -642,20 +741,25 @@ export default function CustomVideoPlayer({
   const handleBrightnessTouchMove = (evt: GestureResponderEvent) => {
     const { pageX } = evt.nativeEvent;
     const deltaX = pageX - brightnessStartPageX.current;
-    const nextVal = Math.max(0, Math.min(1, brightnessStartVal.current + deltaX / 110));
+    const nextVal = Math.max(0, Math.min(1, brightnessStartVal.current + deltaX / 550));
     brightnessShared.value = nextVal;
     bridge.setScreenBrightness(nextVal);
     resetHideTimer();
   };
 
+  const handleBrightnessTouchEnd = () => {
+    setActiveSlider(null);
+  };
+
   const progressStartPageX = useRef(0);
   const progressStartVal = useRef(0);
-  const scrubberWidth = SCREEN_WIDTH - 200;
 
   const handleProgressBarTouchStart = (evt: GestureResponderEvent) => {
     isDraggingProgressRef.current = true;
+    setActiveSlider("progress");
     const { pageX, locationX } = evt.nativeEvent;
-    const ratio = Math.max(0, Math.min(1, locationX / scrubberWidth));
+    const normWidth = SCREEN_WIDTH - 200;
+    const ratio = Math.max(0, Math.min(1, locationX / normWidth));
     const seekTime = ratio * duration;
     player.currentTime = seekTime;
     progressPercentShared.value = ratio * 100;
@@ -667,7 +771,7 @@ export default function CustomVideoPlayer({
   const handleProgressBarTouchMove = (evt: GestureResponderEvent) => {
     const { pageX } = evt.nativeEvent;
     const deltaX = pageX - progressStartPageX.current;
-    const deltaRatio = deltaX / scrubberWidth;
+    const deltaRatio = deltaX / SCREEN_WIDTH;
     const nextTime = Math.max(0, Math.min(duration, progressStartVal.current + deltaRatio * duration));
     player.currentTime = nextTime;
     progressPercentShared.value = (nextTime / duration) * 100;
@@ -676,6 +780,7 @@ export default function CustomVideoPlayer({
 
   const handleProgressBarTouchEnd = () => {
     isDraggingProgressRef.current = false;
+    setActiveSlider(null);
   };
 
   // Reanimated Animated styles for Butter-Smooth 60fps slider fills!
@@ -717,6 +822,61 @@ export default function CustomVideoPlayer({
     };
   });
 
+  // Slider Expansion and UI Fading Styles
+  const otherUIStyle = useAnimatedStyle(() => {
+    return {
+      opacity: withTiming(activeSlider === null ? 1 : 0, { duration: 150 }),
+    };
+  });
+
+  const volumeTrackStyle = useAnimatedStyle(() => {
+    return {
+      width: withTiming(activeSlider === "volume" ? 550 : 110, { duration: 150 }),
+    };
+  });
+
+  const brightnessTrackStyle = useAnimatedStyle(() => {
+    return {
+      width: withTiming(activeSlider === "brightness" ? 550 : 110, { duration: 150 }),
+    };
+  });
+
+  const volumeCapsuleStyle = useAnimatedStyle(() => {
+    const isVisible = activeSlider === null || activeSlider === "volume";
+    return {
+      opacity: withTiming(isVisible ? 1 : 0, { duration: 150 }),
+      width: withTiming(isVisible ? (activeSlider === "volume" ? 590 : 160) : 0, { duration: 150 }),
+      paddingHorizontal: withTiming(isVisible ? 16 : 0, { duration: 150 }),
+      borderWidth: withTiming(isVisible ? 1 : 0, { duration: 150 }),
+    };
+  });
+
+  const brightnessCapsuleStyle = useAnimatedStyle(() => {
+    const isVisible = activeSlider === null || activeSlider === "brightness";
+    return {
+      opacity: withTiming(isVisible ? 1 : 0, { duration: 150 }),
+      width: withTiming(isVisible ? (activeSlider === "brightness" ? 590 : 160) : 0, { duration: 150 }),
+      paddingHorizontal: withTiming(isVisible ? 16 : 0, { duration: 150 }),
+      borderWidth: withTiming(isVisible ? 1 : 0, { duration: 150 }),
+    };
+  });
+
+  const progressContainerStyle = useAnimatedStyle(() => {
+    const isActive = activeSlider === "progress";
+    return {
+      marginHorizontal: withTiming(isActive ? 0 : 16, { duration: 150 }),
+      height: withTiming(isActive ? 44 : 30, { duration: 150 }),
+    };
+  });
+
+  const progressTrackStyle = useAnimatedStyle(() => {
+    const isActive = activeSlider === "progress";
+    return {
+      height: withTiming(isActive ? 8 : 4, { duration: 150 }),
+      borderRadius: withTiming(isActive ? 4 : 2, { duration: 150 }),
+    };
+  });
+
   // Render Locked UI state (minimizes overlays to avoid accidental triggers)
   if (isLocked) {
     return (
@@ -755,7 +915,7 @@ export default function CustomVideoPlayer({
                 blurMethod="dimezisBlurView"
                 style={styles.blurCover}
               >
-                <HugeiconsIcon icon={LockIcon} size={24} color={theme.colors.accentLight} />
+                <LockOpenIcon size={24} color={theme.colors.accentLight} />
               </BlurView>
             </TouchableOpacity>
           </View>
@@ -779,29 +939,7 @@ export default function CustomVideoPlayer({
           />
         </BlurTargetView>
 
-        {/* Vignette Shading Fades at Top & Bottom */}
-        <View style={StyleSheet.absoluteFill} pointerEvents="none">
-          <LinearGradient
-            colors={["rgba(5, 5, 5, 0.85)", "rgba(5, 5, 5, 0.3)", "transparent"]}
-            style={{
-              position: "absolute",
-              top: 0,
-              left: 0,
-              right: 0,
-              height: 120,
-            }}
-          />
-          <LinearGradient
-            colors={["transparent", "rgba(5, 5, 5, 0.3)", "rgba(5, 5, 5, 0.9)"]}
-            style={{
-              position: "absolute",
-              bottom: 0,
-              left: 0,
-              right: 0,
-              height: 160,
-            }}
-          />
-        </View>
+
 
         {/* Double-tap / Gestures area */}
         <View style={StyleSheet.absoluteFill} {...panResponder.panHandlers}>
@@ -814,8 +952,29 @@ export default function CustomVideoPlayer({
 
         {/* Subtitles Overlay */}
         {activeCue && (
-          <View style={styles.subtitleContainer} pointerEvents="none">
-            <Text style={styles.subtitleText}>{activeCue.text}</Text>
+          <View
+            style={[
+              styles.subtitleContainer,
+              subPosition === "top"
+                ? { top: 100, bottom: undefined }
+                : subPosition === "middle"
+                ? { top: SCREEN_HEIGHT / 2 - 20, bottom: undefined }
+                : { bottom: 120, top: undefined },
+            ]}
+            pointerEvents="none"
+          >
+            <Text
+              style={[
+                styles.subtitleText,
+                subBackground === "none"
+                  ? { backgroundColor: "transparent" }
+                  : subBackground === "solid"
+                  ? { backgroundColor: "rgba(0,0,0,0.95)" }
+                  : { backgroundColor: "rgba(0,0,0,0.65)" }, // translucent default
+              ]}
+            >
+              {activeCue.text}
+            </Text>
           </View>
         )}
 
@@ -835,11 +994,11 @@ export default function CustomVideoPlayer({
             blurMethod="dimezisBlurView"
             style={styles.hudBlur}
           >
-            <HugeiconsIcon
-              icon={hudType === "brightness" ? Sun01Icon : VolumeHighIcon}
-              size={28}
-              color="#fff"
-            />
+            {hudType === "brightness" ? (
+              <SunIcon size={28} color="#fff" />
+            ) : (
+              <SpeakerWaveIcon size={28} color="#fff" />
+            )}
             <View style={styles.hudBarOuter}>
               <Animated.View
                 style={[
@@ -853,19 +1012,54 @@ export default function CustomVideoPlayer({
 
         {/* Top and Bottom Controls Interface - box-none to pass touches to child views */}
         <Animated.View style={[StyleSheet.absoluteFill, controlsStyle]} pointerEvents="box-none">
+          {/* Vignette Shading Fades at Top & Bottom */}
+          <Animated.View style={[StyleSheet.absoluteFill, otherUIStyle]} pointerEvents="none">
+            <LinearGradient
+              colors={["rgba(5, 5, 5, 0.85)", "rgba(5, 5, 5, 0.3)", "transparent"]}
+              style={{
+                position: "absolute",
+                top: 0,
+                left: 0,
+                right: 0,
+                height: 120,
+              }}
+            />
+            <LinearGradient
+              colors={["transparent", "rgba(5, 5, 5, 0.3)", "rgba(5, 5, 5, 0.9)"]}
+              style={{
+                position: "absolute",
+                bottom: 0,
+                left: 0,
+                right: 0,
+                height: 160,
+              }}
+            />
+          </Animated.View>
           {/* Top Panel Controls - top: 40 to avoid system notification bar interference */}
           <View style={styles.topPanel} pointerEvents="box-none">
             {/* Extreme Left: Back Button & Top Options Capsule */}
-            <View style={styles.topPanelLeft} pointerEvents="box-none">
+            <Animated.View style={[styles.topPanelLeft, otherUIStyle]} pointerEvents={activeSlider === null ? "box-none" : "none"}>
               <TouchableOpacity onPress={handleClose} activeOpacity={0.8} style={styles.circleBlurBtn}>
                 <BlurView
                   intensity={100}
                   tint="dark"
                   blurTarget={{ current: blurTarget }}
                   blurMethod="dimezisBlurView"
-                  style={styles.blurCover}
+                  style={[styles.blurCover, { borderRadius: 25 }]}
                 >
-                  <HugeiconsIcon icon={Cancel01Icon} size={26} color="#fff" />
+                  <XMarkIcon size={26} color="#fff" />
+                </BlurView>
+              </TouchableOpacity>
+
+              <TouchableOpacity onPress={handlePlayExternal} activeOpacity={0.8} style={styles.circleBlurBtn}>
+                <BlurView
+                  intensity={100}
+                  tint="dark"
+                  blurTarget={{ current: blurTarget }}
+                  blurMethod="dimezisBlurView"
+                  style={[styles.blurCover, { borderRadius: 25 }]}
+                >
+                  <ArrowUpRightIcon size={20} color="#fff" />
                 </BlurView>
               </TouchableOpacity>
 
@@ -885,7 +1079,7 @@ export default function CustomVideoPlayer({
                   activeOpacity={0.8}
                   style={styles.capsuleIconBtn}
                 >
-                  <HugeiconsIcon icon={LockKeyIcon} size={20} color="#fff" />
+                  <LockClosedIcon size={20} color="#fff" />
                 </TouchableOpacity>
 
                 <TouchableOpacity
@@ -896,7 +1090,7 @@ export default function CustomVideoPlayer({
                   activeOpacity={0.8}
                   style={styles.capsuleIconBtn}
                 >
-                  <HugeiconsIcon icon={Maximize02Icon} size={20} color="#fff" />
+                  <ArrowsPointingOutIcon size={20} color="#fff" />
                 </TouchableOpacity>
 
                 <TouchableOpacity
@@ -907,61 +1101,75 @@ export default function CustomVideoPlayer({
                   activeOpacity={0.8}
                   style={styles.capsuleIconBtn}
                 >
-                  <HugeiconsIcon
-                    icon={FingerPrintIcon}
+                  <FingerPrintIcon
                     size={20}
                     color={gesturesEnabled ? "#fff" : "rgba(255,255,255,0.4)"}
                   />
                 </TouchableOpacity>
               </BlurView>
-            </View>
+            </Animated.View>
 
             {/* Top Right: Volume and Brightness vertical sliders stack */}
             <View style={styles.topRightSlidersStack} pointerEvents="box-none">
               {/* Volume control slider capsule */}
-              <BlurView
-                intensity={100}
-                tint="dark"
-                blurTarget={{ current: blurTarget }}
-                blurMethod="dimezisBlurView"
-                style={styles.sliderCapsule}
-              >
-                <View
-                  style={styles.sliderTrackContainer}
-                  onTouchStart={handleVolumeTouchStart}
-                  onTouchMove={handleVolumeTouchMove}
-                >
-                  <View style={styles.sliderTrack}>
-                    <Animated.View style={[styles.sliderFill, volumeFillStyle]} />
-                  </View>
+              <Animated.View style={volumeCapsuleStyle}>
+                <BlurView
+                  intensity={100}
+                  tint="dark"
+                  blurTarget={{ current: blurTarget }}
+                  blurMethod="dimezisBlurView"
+                  style={[StyleSheet.absoluteFillObject, { borderRadius: 22 }]}
+                />
+                <View style={{ flexDirection: "row", alignItems: "center", width: "100%", height: "100%" }}>
+                  <Animated.View
+                    style={[styles.sliderTrackContainer, volumeTrackStyle]}
+                    onTouchStart={handleVolumeTouchStart}
+                    onTouchMove={handleVolumeTouchMove}
+                    onTouchEnd={handleVolumeTouchEnd}
+                    onTouchCancel={handleVolumeTouchEnd}
+                  >
+                    <View style={styles.sliderTrack}>
+                      <Animated.View style={[styles.sliderFill, volumeFillStyle]} />
+                    </View>
+                  </Animated.View>
+                  <TouchableOpacity onPress={handleMuteToggle} activeOpacity={0.8}>
+                    <SpeakerWaveIcon
+                      size={20}
+                      color={volumeShared.value === 0 ? theme.colors.rose : "#fff"}
+                    />
+                  </TouchableOpacity>
                 </View>
-                <HugeiconsIcon icon={VolumeHighIcon} size={20} color="#fff" />
-              </BlurView>
+              </Animated.View>
 
               {/* Brightness control slider capsule */}
-              <BlurView
-                intensity={100}
-                tint="dark"
-                blurTarget={{ current: blurTarget }}
-                blurMethod="dimezisBlurView"
-                style={styles.sliderCapsule}
-              >
-                <View
-                  style={styles.sliderTrackContainer}
-                  onTouchStart={handleBrightnessTouchStart}
-                  onTouchMove={handleBrightnessTouchMove}
-                >
-                  <View style={styles.sliderTrack}>
-                    <Animated.View style={[styles.sliderFill, brightnessFillStyle]} />
-                  </View>
+              <Animated.View style={brightnessCapsuleStyle}>
+                <BlurView
+                  intensity={100}
+                  tint="dark"
+                  blurTarget={{ current: blurTarget }}
+                  blurMethod="dimezisBlurView"
+                  style={[StyleSheet.absoluteFillObject, { borderRadius: 22 }]}
+                />
+                <View style={{ flexDirection: "row", alignItems: "center", width: "100%", height: "100%" }}>
+                  <Animated.View
+                    style={[styles.sliderTrackContainer, brightnessTrackStyle]}
+                    onTouchStart={handleBrightnessTouchStart}
+                    onTouchMove={handleBrightnessTouchMove}
+                    onTouchEnd={handleBrightnessTouchEnd}
+                    onTouchCancel={handleBrightnessTouchEnd}
+                  >
+                    <View style={styles.sliderTrack}>
+                      <Animated.View style={[styles.sliderFill, brightnessFillStyle]} />
+                    </View>
+                  </Animated.View>
+                  <SunIcon size={20} color="#fff" />
                 </View>
-                <HugeiconsIcon icon={Sun01Icon} size={20} color="#fff" />
-              </BlurView>
+              </Animated.View>
             </View>
           </View>
 
           {/* Center Playback Controls */}
-          <View style={styles.centerPanel} pointerEvents="box-none">
+          <Animated.View style={[styles.centerPanel, otherUIStyle]} pointerEvents={activeSlider === null ? "box-none" : "none"}>
             {/* Show Prev Episode Button if Series */}
             {isSerial && onEpisodeChange && currentEpisodeIndex > 0 && (
               <TouchableOpacity
@@ -974,9 +1182,9 @@ export default function CustomVideoPlayer({
                   tint="dark"
                   blurTarget={{ current: blurTarget }}
                   blurMethod="dimezisBlurView"
-                  style={styles.blurCover}
+                  style={[styles.blurCover, { borderRadius: 27 }]}
                 >
-                  <HugeiconsIcon icon={PreviousIcon} size={24} color="#fff" />
+                  <BackwardIcon size={24} color="#fff" />
                 </BlurView>
               </TouchableOpacity>
             )}
@@ -988,9 +1196,9 @@ export default function CustomVideoPlayer({
                 tint="dark"
                 blurTarget={{ current: blurTarget }}
                 blurMethod="dimezisBlurView"
-                style={styles.blurCover}
+                style={[styles.blurCover, { borderRadius: 27 }]}
               >
-                <HugeiconsIcon icon={GoBackward10SecIcon} size={30} color="#fff" />
+                <BackwardIcon size={30} color="#fff" />
               </BlurView>
             </TouchableOpacity>
 
@@ -1005,17 +1213,14 @@ export default function CustomVideoPlayer({
                 tint="dark"
                 blurTarget={{ current: blurTarget }}
                 blurMethod="dimezisBlurView"
-                style={styles.blurCover}
+                style={[styles.blurCover, { borderRadius: 44 }]}
               >
                 {(status === "loading" || status === "idle") ? (
                   <ActivityIndicator size="large" color="#fff" />
+                ) : isPlaying ? (
+                  <PauseIcon size={44} color="#fff" />
                 ) : (
-                  <HugeiconsIcon
-                    icon={isPlaying ? PauseIcon : PlayIcon}
-                    size={44}
-                    color="#fff"
-                    style={!isPlaying ? { marginLeft: 6 } : null}
-                  />
+                  <PlayIcon size={44} color="#fff" style={{ marginLeft: 6 }} />
                 )}
               </BlurView>
             </TouchableOpacity>
@@ -1027,9 +1232,9 @@ export default function CustomVideoPlayer({
                 tint="dark"
                 blurTarget={{ current: blurTarget }}
                 blurMethod="dimezisBlurView"
-                style={styles.blurCover}
+                style={[styles.blurCover, { borderRadius: 27 }]}
               >
-                <HugeiconsIcon icon={GoForward10SecIcon} size={30} color="#fff" />
+                <ForwardIcon size={30} color="#fff" />
               </BlurView>
             </TouchableOpacity>
 
@@ -1045,18 +1250,18 @@ export default function CustomVideoPlayer({
                   tint="dark"
                   blurTarget={{ current: blurTarget }}
                   blurMethod="dimezisBlurView"
-                  style={styles.blurCover}
+                  style={[styles.blurCover, { borderRadius: 27 }]}
                 >
-                  <HugeiconsIcon icon={NextIcon} size={24} color="#fff" />
+                  <ForwardIcon size={24} color="#fff" />
                 </BlurView>
               </TouchableOpacity>
             )}
-          </View>
+          </Animated.View>
 
           {/* Bottom Panel Controls - Shifted to bottom: 40 to avoid notch/system cutouts */}
           <View style={styles.bottomPanel} pointerEvents="box-none">
             {/* Row 1: Logo & Settings Capsule (Layers icon removed, keeping subtitles & speed dashboard) */}
-            <View style={styles.bottomMetaRow} pointerEvents="box-none">
+            <Animated.View style={[styles.bottomMetaRow, otherUIStyle]} pointerEvents={activeSlider === null ? "box-none" : "none"}>
               <View style={styles.titleLogoRow}>
                 {logoUrl ? (
                   <View style={styles.logoShadowContainer}>
@@ -1089,7 +1294,7 @@ export default function CustomVideoPlayer({
                   activeOpacity={0.8}
                   style={styles.capsuleIconBtn}
                 >
-                  <HugeiconsIcon icon={ClosedCaptionIcon} size={20} color="#fff" />
+                  <LanguageIcon size={20} color="#fff" />
                 </TouchableOpacity>
 
                 <TouchableOpacity
@@ -1097,37 +1302,37 @@ export default function CustomVideoPlayer({
                   activeOpacity={0.8}
                   style={styles.capsuleIconBtn}
                 >
-                  <HugeiconsIcon icon={DashboardSpeed01Icon} size={20} color="#fff" />
+                  <BoltIcon size={20} color="#fff" />
                 </TouchableOpacity>
               </BlurView>
-            </View>
+            </Animated.View>
 
             {/* Row 2: Scrubber timeline full-width at the bottom, and time labels placed beside it (Left/Right) */}
             {/* Scrubber fill is white with no thumb, matching volume slider style. Height doubled to 8px! */}
             <View style={styles.scrubberRow} pointerEvents="box-none">
-              <Text style={styles.timeText}>{formatTime(currentTime)}</Text>
+              <Animated.Text style={[styles.timeText, otherUIStyle]}>{formatTime(currentTime)}</Animated.Text>
               
-              <View
-                style={styles.progressBarContainer}
+              <Animated.View
+                style={[styles.progressBarContainer, progressContainerStyle]}
                 onTouchStart={handleProgressBarTouchStart}
                 onTouchMove={handleProgressBarTouchMove}
                 onTouchEnd={handleProgressBarTouchEnd}
                 onTouchCancel={handleProgressBarTouchEnd}
               >
-                <View style={styles.progressBarTrack}>
+                <Animated.View style={[styles.progressBarTrack, progressTrackStyle]}>
                   <Animated.View style={[styles.progressBarFill, progressFillStyle]} />
-                </View>
-              </View>
+                </Animated.View>
+              </Animated.View>
 
-              <TouchableOpacity onPress={() => setShowRemainingTime(!showRemainingTime)}>
-                <Text style={styles.timeText}>
+              <TouchableOpacity onPress={() => setShowRemainingTime(!showRemainingTime)} activeOpacity={0.8}>
+                <Animated.Text style={[styles.timeText, otherUIStyle]}>
                   {showRemainingTime ? `-${formatTime(duration - currentTime)}` : formatTime(duration)}
-                </Text>
+                </Animated.Text>
               </TouchableOpacity>
             </View>
 
             {/* Row 3: Action Pills (Moved below the progress bar as requested) */}
-            <View style={styles.actionPillsRow}>
+            <Animated.View style={[styles.actionPillsRow, otherUIStyle]} pointerEvents={activeSlider === null ? "auto" : "none"}>
               {/* Show Continue Watching button only if there is valid saved progress */}
               {savedProgress > 5 && duration > 0 && savedProgress < duration - 15 && (
                 <BlurView
@@ -1138,7 +1343,7 @@ export default function CustomVideoPlayer({
                   style={styles.pillCover}
                 >
                   <TouchableOpacity onPress={handleContinueWatching} style={styles.pillBtn}>
-                    <HugeiconsIcon icon={Clock01Icon} size={14} color="#fff" style={{ marginRight: 6 }} />
+                    <ClockIcon size={14} color="#fff" style={{ marginRight: 6 }} />
                     <Text style={styles.pillText}>Continue Watching ({formatTime(savedProgress)})</Text>
                   </TouchableOpacity>
                 </BlurView>
@@ -1153,201 +1358,288 @@ export default function CustomVideoPlayer({
                 style={styles.pillCover}
               >
                 <TouchableOpacity onPress={() => setActiveModal("quality")} style={styles.pillBtn}>
-                  <HugeiconsIcon icon={DatabaseSettingIcon} size={14} color="#fff" style={{ marginRight: 6 }} />
+                  <Square3Stack3DIcon size={14} color="#fff" style={{ marginRight: 6 }} />
                   <Text style={styles.pillText}>Sources</Text>
                 </TouchableOpacity>
               </BlurView>
-            </View>
+            </Animated.View>
           </View>
         </Animated.View>
 
         {/* Continue Watching Resume Prompt Overlay */}
-        {showResumePrompt && (
-          <View style={styles.resumePromptOverlay}>
-            <BlurView
-              intensity={100}
-              tint="dark"
-              blurTarget={{ current: blurTarget }}
-              blurMethod="dimezisBlurView"
-              style={styles.resumePromptBlur}
-            >
-              <HugeiconsIcon icon={Clock01Icon} size={42} color={theme.colors.accentLight} style={{ marginBottom: 12 }} />
-              <Text style={styles.resumePromptTitle}>Resume Playback?</Text>
-              <Text style={styles.resumePromptSubtitle}>
-                You watched up to {formatTime(savedProgress)}. Would you like to continue from where you left?
-              </Text>
-              <View style={styles.resumePromptButtons}>
-                <TouchableOpacity
-                  onPress={() => {
-                    player.currentTime = savedProgress;
-                    player.play();
-                    setShowResumePrompt(false);
-                  }}
-                  activeOpacity={0.8}
-                  style={[styles.resumeBtn, { marginRight: 16 }]}
-                >
-                  <Text style={styles.resumeBtnText}>Resume</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={() => {
-                    player.currentTime = 0;
-                    player.play();
-                    setShowResumePrompt(false);
-                  }}
-                  activeOpacity={0.8}
-                  style={styles.startOverBtn}
-                >
-                  <Text style={styles.startOverBtnText}>Start Fresh</Text>
-                </TouchableOpacity>
-              </View>
-            </BlurView>
+        <PlayerModal
+          visible={showResumePrompt}
+          onClose={() => {
+            player.currentTime = 0;
+            player.play();
+            setShowResumePrompt(false);
+          }}
+          title="Resume Playback?"
+          blurTarget={{ current: blurTarget }}
+          hideCloseButton={true}
+        >
+          <View style={{ alignItems: "center", width: "100%" }}>
+            <ClockIcon size={42} color={theme.colors.accentLight} style={{ marginBottom: 12 }} />
+            <Text style={styles.resumePromptSubtitle}>
+              You watched up to {formatTime(savedProgress)}. Would you like to continue from where you left?
+            </Text>
+            <View style={styles.resumePromptButtons}>
+              <TouchableOpacity
+                onPress={() => {
+                  player.currentTime = savedProgress;
+                  player.play();
+                  setShowResumePrompt(false);
+                }}
+                activeOpacity={0.8}
+                style={[styles.resumeBtn, { marginRight: 16 }]}
+              >
+                <Text style={styles.resumeBtnText}>Resume</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => {
+                  player.currentTime = 0;
+                  player.play();
+                  setShowResumePrompt(false);
+                }}
+                activeOpacity={0.8}
+                style={styles.startOverBtn}
+              >
+                <Text style={styles.startOverBtnText}>Start Fresh</Text>
+              </TouchableOpacity>
+            </View>
           </View>
-        )}
+        </PlayerModal>
 
-        {/* Real-time native blurred Modal Dialogs in the center of the screen */}
-        {activeModal !== null && (
-          <View style={styles.resumePromptOverlay}>
-            <BlurView
-              intensity={100}
-              tint="dark"
-              blurTarget={{ current: blurTarget }}
-              blurMethod="dimezisBlurView"
-              style={styles.resumePromptBlur}
+        {/* Sources/Quality select modal */}
+        <PlayerModal
+          visible={activeModal === "quality"}
+          onClose={() => setActiveModal(null)}
+          title="Select Source"
+          blurTarget={{ current: blurTarget }}
+        >
+          {sources.map((src, index) => (
+            <TouchableOpacity
+              key={index}
+              style={[
+                styles.modalItem,
+                selectedSource?.url === src.url && styles.modalItemActive,
+              ]}
+              onPress={() => selectQuality(src)}
             >
-              <View style={styles.modalHeader}>
-                <Text style={styles.resumePromptTitle}>
-                  {activeModal === "quality"
-                    ? "Select Source"
-                    : activeModal === "subtitles"
-                    ? "Select Subtitles"
-                    : "Playback Settings"}
-                </Text>
-                <TouchableOpacity onPress={() => setActiveModal(null)} style={styles.modalCloseIconBtn}>
-                  <HugeiconsIcon icon={Cancel01Icon} size={20} color="#fff" />
-                </TouchableOpacity>
-              </View>
-
-              {activeModal === "quality" && (
-                <View style={styles.modalScrollContainer}>
-                  {sources.map((src, index) => (
-                    <TouchableOpacity
-                      key={index}
-                      style={[
-                        styles.modalItem,
-                        selectedSource?.url === src.url && styles.modalItemActive,
-                      ]}
-                      onPress={() => selectQuality(src)}
-                    >
-                      <Text style={styles.modalItemText}>{src.quality}</Text>
-                      {selectedSource?.url === src.url && (
-                        <HugeiconsIcon icon={Clock01Icon} size={16} color={theme.colors.accentLight} />
-                      )}
-                    </TouchableOpacity>
-                  ))}
-                </View>
+              <Text style={styles.modalItemText}>{src.quality}</Text>
+              {selectedSource?.url === src.url && (
+                <CheckIcon size={16} color={theme.colors.accentLight} />
               )}
+            </TouchableOpacity>
+          ))}
+        </PlayerModal>
 
-              {activeModal === "subtitles" && (
-                <View style={styles.modalScrollContainer}>
+        {/* Subtitles modal */}
+        <PlayerModal
+          visible={activeModal === "subtitles"}
+          onClose={() => setActiveModal(null)}
+          title="Select Subtitles"
+          blurTarget={{ current: blurTarget }}
+        >
+          <View style={styles.settingsModalBody}>
+            {/* Select Subtitle Track */}
+            <Text style={styles.settingsLabel}>Subtitle Track</Text>
+            <View style={{ width: "100%", maxHeight: 60, marginBottom: 12 }}>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ flexDirection: "row", paddingVertical: 4 }}>
+                <TouchableOpacity
+                  style={[
+                    styles.speedOption,
+                    activeSubtitleUrl === "" && styles.speedOptionActive,
+                  ]}
+                  onPress={() => selectSubtitle("")}
+                >
+                  <Text style={styles.speedOptionText}>Off</Text>
+                </TouchableOpacity>
+                {subtitles.map((sub, index) => (
                   <TouchableOpacity
+                    key={index}
                     style={[
-                      styles.modalItem,
-                      activeSubtitleUrl === "" && styles.modalItemActive,
+                      styles.speedOption,
+                      activeSubtitleUrl === sub.url && styles.speedOptionActive,
                     ]}
-                    onPress={() => selectSubtitle("")}
+                    onPress={() => selectSubtitle(sub.url)}
                   >
-                    <Text style={styles.modalItemText}>Subtitles Off</Text>
-                    {activeSubtitleUrl === "" && (
-                      <HugeiconsIcon icon={Clock01Icon} size={16} color={theme.colors.accentLight} />
-                    )}
+                    <Text style={styles.speedOptionText}>{sub.lang}</Text>
                   </TouchableOpacity>
-                  {subtitles.map((sub, index) => (
-                    <TouchableOpacity
-                      key={index}
-                      style={[
-                        styles.modalItem,
-                        activeSubtitleUrl === sub.url && styles.modalItemActive,
-                      ]}
-                      onPress={() => selectSubtitle(sub.url)}
-                    >
-                      <Text style={styles.modalItemText}>{sub.lang}</Text>
-                      {activeSubtitleUrl === sub.url && (
-                        <HugeiconsIcon icon={Clock01Icon} size={16} color={theme.colors.accentLight} />
-                      )}
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              )}
+                ))}
+              </ScrollView>
+            </View>
 
-              {activeModal === "speed" && (
-                <View style={styles.settingsModalBody}>
-                  <Text style={styles.settingsLabel}>Playback Speed</Text>
-                  <View style={styles.speedRow}>
-                    {[0.5, 0.75, 1.0, 1.25, 1.5, 2.0].map((rate) => (
-                      <TouchableOpacity
-                        key={rate}
-                        style={[
-                          styles.speedOption,
-                          playbackRate === rate && styles.speedOptionActive,
-                        ]}
-                        onPress={() => selectSpeed(rate)}
-                      >
-                        <Text style={styles.speedOptionText}>{rate}x</Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
+            {/* Subtitle Delay (Sync) */}
+            <Text style={[styles.settingsLabel, { marginTop: 12 }]}>
+              Subtitle Sync (Delay: {subDelay > 0 ? `+${subDelay.toFixed(1)}` : subDelay.toFixed(1)}s)
+            </Text>
+            <View style={styles.speedRow}>
+              <TouchableOpacity
+                style={styles.speedOption}
+                onPress={() => {
+                  setSubDelay((prev) => prev - 0.5);
+                  resetHideTimer();
+                }}
+              >
+                <Text style={styles.speedOptionText}>-0.5s</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.speedOption}
+                onPress={() => {
+                  setSubDelay((prev) => prev - 0.1);
+                  resetHideTimer();
+                }}
+              >
+                <Text style={styles.speedOptionText}>-0.1s</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.speedOption, subDelay === 0 && styles.speedOptionActive]}
+                onPress={() => {
+                  setSubDelay(0);
+                  resetHideTimer();
+                }}
+              >
+                <Text style={styles.speedOptionText}>Reset</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.speedOption}
+                onPress={() => {
+                  setSubDelay((prev) => prev + 0.1);
+                  resetHideTimer();
+                }}
+              >
+                <Text style={styles.speedOptionText}>+0.1s</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.speedOption}
+                onPress={() => {
+                  setSubDelay((prev) => prev + 0.5);
+                  resetHideTimer();
+                }}
+              >
+                <Text style={styles.speedOptionText}>+0.5s</Text>
+              </TouchableOpacity>
+            </View>
 
-                  <Text style={[styles.settingsLabel, { marginTop: 12 }]}>Swipe Gestures</Text>
-                  <View style={styles.speedRow}>
-                    {[
-                      { label: "On", value: true },
-                      { label: "Off", value: false },
-                    ].map((opt) => (
-                      <TouchableOpacity
-                        key={opt.label}
-                        style={[
-                          styles.speedOption,
-                          gesturesEnabled === opt.value && styles.speedOptionActive,
-                        ]}
-                        onPress={() => {
-                          setGesturesEnabled(opt.value);
-                          setActiveModal(null);
-                        }}
-                      >
-                        <Text style={styles.speedOptionText}>{opt.label}</Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
+            {/* Subtitle Vertical Position */}
+            <Text style={[styles.settingsLabel, { marginTop: 12 }]}>Vertical Position</Text>
+            <View style={styles.speedRow}>
+              {(["top", "middle", "bottom"] as const).map((pos) => (
+                <TouchableOpacity
+                  key={pos}
+                  style={[
+                    styles.speedOption,
+                    subPosition === pos && styles.speedOptionActive,
+                  ]}
+                  onPress={() => {
+                    setSubPosition(pos);
+                    resetHideTimer();
+                  }}
+                >
+                  <Text style={styles.speedOptionText}>
+                    {pos.charAt(0).toUpperCase() + pos.slice(1)}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
 
-                  <Text style={[styles.settingsLabel, { marginTop: 12 }]}>Sleep Timer</Text>
-                  <View style={styles.speedRow}>
-                    {["off", 15, 30, 60, "episode"].map((timer) => (
-                      <TouchableOpacity
-                        key={timer.toString()}
-                        style={[
-                          styles.speedOption,
-                          sleepTimer === timer && styles.speedOptionActive,
-                        ]}
-                        onPress={() => {
-                          setSleepTimer(timer as any);
-                          setActiveModal(null);
-                        }}
-                      >
-                        <Text style={styles.speedOptionText}>
-                          {timer === "off"
-                            ? "Off"
-                            : timer === "episode"
-                            ? "End of Ep"
-                            : `${timer}m`}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                </View>
-              )}
-            </BlurView>
+            {/* Subtitle Background Toggle */}
+            <Text style={[styles.settingsLabel, { marginTop: 12 }]}>Background Block</Text>
+            <View style={styles.speedRow}>
+              {(["none", "translucent", "solid"] as const).map((bg) => (
+                <TouchableOpacity
+                  key={bg}
+                  style={[
+                    styles.speedOption,
+                    subBackground === bg && styles.speedOptionActive,
+                  ]}
+                  onPress={() => {
+                    setSubBackground(bg);
+                    resetHideTimer();
+                  }}
+                >
+                  <Text style={styles.speedOptionText}>
+                    {bg === "none" ? "No BG" : bg === "translucent" ? "Translucent" : "Solid Black"}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
           </View>
-        )}
+        </PlayerModal>
+
+        {/* Settings/Speed Modal */}
+        <PlayerModal
+          visible={activeModal === "speed"}
+          onClose={() => setActiveModal(null)}
+          title="Playback Settings"
+          blurTarget={{ current: blurTarget }}
+        >
+          <View style={styles.settingsModalBody}>
+            <Text style={styles.settingsLabel}>Playback Speed</Text>
+            <View style={styles.speedRow}>
+              {[0.5, 0.75, 1.0, 1.25, 1.5, 2.0].map((rate) => (
+                <TouchableOpacity
+                  key={rate}
+                  style={[
+                    styles.speedOption,
+                    playbackRate === rate && styles.speedOptionActive,
+                  ]}
+                  onPress={() => selectSpeed(rate)}
+                >
+                  <Text style={styles.speedOptionText}>{rate}x</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <Text style={[styles.settingsLabel, { marginTop: 12 }]}>Swipe Gestures</Text>
+            <View style={styles.speedRow}>
+              {[
+                { label: "On", value: true },
+                { label: "Off", value: false },
+              ].map((opt) => (
+                <TouchableOpacity
+                  key={opt.label}
+                  style={[
+                    styles.speedOption,
+                    gesturesEnabled === opt.value && styles.speedOptionActive,
+                  ]}
+                  onPress={() => {
+                    setGesturesEnabled(opt.value);
+                    setActiveModal(null);
+                  }}
+                >
+                  <Text style={styles.speedOptionText}>{opt.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <Text style={[styles.settingsLabel, { marginTop: 12 }]}>Sleep Timer</Text>
+            <View style={styles.speedRow}>
+              {["off", 15, 30, 60, "episode"].map((timer) => (
+                <TouchableOpacity
+                  key={timer.toString()}
+                  style={[
+                    styles.speedOption,
+                    sleepTimer === timer && styles.speedOptionActive,
+                  ]}
+                  onPress={() => {
+                    setSleepTimer(timer as any);
+                    setActiveModal(null);
+                  }}
+                >
+                  <Text style={styles.speedOptionText}>
+                    {timer === "off"
+                      ? "Off"
+                      : timer === "episode"
+                      ? "End of Ep"
+                      : `${timer}m`}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        </PlayerModal>
       </View>
     </View>
   );
@@ -1515,7 +1807,7 @@ const styles = StyleSheet.create({
   },
   bottomPanel: {
     position: "absolute",
-    bottom: 40,
+    bottom: 18,
     left: 40,
     right: 40,
   },
@@ -1523,7 +1815,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 8,
+    marginBottom: 2,
   },
   bottomLeftMeta: {
     flex: 1,
@@ -1571,7 +1863,7 @@ const styles = StyleSheet.create({
   actionPillsRow: {
     flexDirection: "row",
     alignItems: "center",
-    marginTop: 10,
+    marginTop: 2,
   },
   pillCover: {
     borderRadius: 20,
@@ -1594,7 +1886,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     width: "100%",
-    paddingVertical: 8,
+    paddingVertical: 0,
   },
   timeText: {
     color: "rgba(255,255,255,0.75)",
@@ -1656,6 +1948,23 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.08)",
     overflow: "hidden",
+  },
+  playerModalContainer: {
+    width: 460,
+    maxHeight: SCREEN_HEIGHT * 0.9,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+    overflow: "hidden",
+    padding: 24,
+    justifyContent: "flex-start",
+  },
+  modalScrollBody: {
+    width: "100%",
+  },
+  modalScrollBodyContent: {
+    width: "100%",
+    paddingVertical: 10,
   },
   resumePromptTitle: {
     color: "#fff",

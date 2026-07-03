@@ -18,6 +18,7 @@ import {
   Text,
   TouchableOpacity,
   View,
+  LayoutAnimation,
   Pressable,
   Animated as RNAnimated,
   Modal,
@@ -34,6 +35,7 @@ import Animated, {
   FadeIn,
   FadeOut,
   FadeInUp,
+  FadeOutDown,
   withTiming,
   withRepeat,
   withSequence,
@@ -41,7 +43,18 @@ import Animated, {
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BlurView, BlurTargetView } from "expo-blur";
-import { Ionicons, FontAwesome6 } from "@expo/vector-icons";
+import {
+  PlayIcon,
+  ArrowLeftIcon,
+  HeartIcon,
+  ExclamationCircleIcon,
+  ArrowPathIcon,
+  XMarkIcon,
+  ArrowDownTrayIcon,
+  ChevronUpIcon,
+  ChevronDownIcon
+} from "react-native-heroicons/solid";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as favoritesApi from "../api/favorites";
 import { LinearGradient } from "expo-linear-gradient";
 import MaskedView from "@react-native-masked-view/masked-view";
@@ -315,7 +328,7 @@ const HeroEpisodeRow = React.memo(
                 tint="dark"
                 style={styles.playIconGlassBlur}
               >
-                <FontAwesome6 name="play" size={20} color="white" />
+                <PlayIcon size={20} color="white" />
               </BlurView>
             )}
           </View>
@@ -408,6 +421,10 @@ export default function DetailScreen() {
   } = useTransition();
 
   const [playingEpisode, setPlayingEpisode] = useState<number | null>(null);
+  const [activeEpisodeIndex, setActiveEpisodeIndex] = useState<number | null>(
+    null,
+  );
+  const [isSheetTransitionDone, setIsSheetTransitionDone] = useState(false);
 
   // Custom React Native Video Player States
   const [playerVisible, setPlayerVisible] = useState(false);
@@ -437,21 +454,83 @@ export default function DetailScreen() {
   const [isResolving, setIsResolving] = useState(false);
   const [linksError, setLinksError] = useState<string | null>(null);
   const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(false);
-  const expandProgress = useSharedValue(0);
+  const [collapsedDescHeight, setCollapsedDescHeight] = useState(0);
+  const [fullDescHeight, setFullDescHeight] = useState(0);
+  const [expandedContentHeight, setExpandedContentHeight] = useState(0);
+  const [accordionHeight, setAccordionHeight] = useState(0);
+  const [torrentExpanded, setTorrentExpanded] = useState(false);
 
+  const expandProgress = useSharedValue(0);
+  const descExpandShared = useSharedValue(0);
+  const accordionExpandShared = useSharedValue(0);
+
+  // Animate expanded metadata details
   useEffect(() => {
     expandProgress.value = withTiming(isDescriptionExpanded ? 1 : 0, {
-      duration: 350,
+      duration: 300,
       easing: Easing.bezier(0.25, 1, 0.5, 1),
     });
   }, [isDescriptionExpanded]);
 
-  // Use maxHeight animation instead of exact height to avoid needing a hidden off-screen
-  // measurement render pass (which was doubling mount cost of cast + ActorAvatar network calls)
+  // Animate description text
+  useEffect(() => {
+    descExpandShared.value = withTiming(isDescriptionExpanded ? 1 : 0, {
+      duration: 300,
+      easing: Easing.bezier(0.25, 1, 0.5, 1),
+    });
+  }, [isDescriptionExpanded]);
+
+  // Animate Torrent Accordion
+  useEffect(() => {
+    accordionExpandShared.value = withTiming(torrentExpanded ? 1 : 0, {
+      duration: 250,
+      easing: Easing.bezier(0.25, 1, 0.5, 1),
+    });
+  }, [torrentExpanded]);
+
+  // Reset measurements on detail changes
+  useEffect(() => {
+    setCollapsedDescHeight(0);
+    setFullDescHeight(0);
+    setExpandedContentHeight(0);
+    setIsDescriptionExpanded(false);
+    setTorrentExpanded(false);
+  }, [detail?.description, detail?.title]);
+
   const expandedAnimatedStyle = useAnimatedStyle(() => {
+    if (expandedContentHeight === 0) {
+      return {
+        height: 0,
+        opacity: 0,
+        overflow: "hidden",
+      };
+    }
     return {
-      maxHeight: expandProgress.value * 2000,
+      height: expandProgress.value * expandedContentHeight,
       opacity: expandProgress.value,
+      overflow: "hidden",
+    };
+  });
+
+  const descriptionAnimatedStyle = useAnimatedStyle(() => {
+    if (collapsedDescHeight === 0 || fullDescHeight === 0) {
+      return {};
+    }
+    const targetHeight = interpolate(
+      descExpandShared.value,
+      [0, 1],
+      [collapsedDescHeight, fullDescHeight],
+    );
+    return {
+      height: targetHeight,
+      overflow: "hidden",
+    };
+  });
+
+  const accordionAnimatedStyle = useAnimatedStyle(() => {
+    return {
+      height: accordionExpandShared.value * accordionHeight,
+      opacity: accordionExpandShared.value,
       overflow: "hidden",
     };
   });
@@ -470,13 +549,14 @@ export default function DetailScreen() {
     visible: boolean;
     message: string;
   }>({ visible: false, message: "" });
-  const [torrentExpanded, setTorrentExpanded] = useState(false);
   const torrentIntervalRef = useRef<any>(null);
   const resolveTimeoutRef = useRef<any>(null);
 
   const closeSourcePicker = () => {
     setShowSourcePicker(false);
     setPlayingEpisode(null);
+    setActiveEpisodeIndex(null);
+    setIsSheetTransitionDone(false);
     if (resolveTimeoutRef.current) {
       clearTimeout(resolveTimeoutRef.current);
       resolveTimeoutRef.current = null;
@@ -717,22 +797,27 @@ export default function DetailScreen() {
   const providerName = detail?.provider || item?.provider || "Cinemeta";
 
   const providerTabs = useMemo(() => {
+    let list: string[] = ["All"];
     if (providerName === "Cinemeta") {
       if (resolvingProgress.length > 0) {
         // Always show All + all providers, regardless of resolving state.
         // This keeps tabs stable — they don't disappear when resolving ends.
-        return ["All", ...resolvingProgress.map((p) => p.providerName)];
+        list.push(...resolvingProgress.map((p) => p.providerName));
+      } else {
+        // Fallback to allProviders (loaded at mount)
+        allProviders.forEach((p) => {
+          list.push(p.name);
+        });
       }
-      // Fallback to allProviders (loaded at mount)
-      const list = ["All"];
-      allProviders.forEach((p) => {
-        list.push(p.name);
-      });
-      return list;
     } else {
-      return ["All", providerName];
+      list.push(providerName);
     }
-  }, [allProviders, providerName, resolvingProgress]);
+
+    if (!list.includes("VidSrcMe")) list.push("VidSrcMe");
+    if (!list.includes("VsEmbed")) list.push("VsEmbed");
+
+    return list;
+  }, [allProviders, providerName, resolvingProgress, sources]);
 
   const filteredSources = useMemo(() => {
     const list =
@@ -939,7 +1024,11 @@ export default function DetailScreen() {
     async (ep: EpisodeItem, index: number) => {
       if (!detail) return;
       setPlayingEpisode(index);
+      setActiveEpisodeIndex(index);
       setLinksError(null);
+      if (!showSourcePicker) {
+        setIsSheetTransitionDone(false);
+      }
 
       const hasCache = bridge.hasCachedLinks(providerName, ep.mediaRef);
 
@@ -958,6 +1047,26 @@ export default function DetailScreen() {
       // Delay bridge.loadLinks until the bottom sheet opening animation (300ms) has completed.
       // This ensures a 60fps entry transition for the source picker bottom sheet.
       resolveTimeoutRef.current = setTimeout(async () => {
+        setIsSheetTransitionDone(true);
+        const mapSourceProvider = (src: VideoSource): VideoSource | null => {
+          let mappedProvider = src.provider;
+          if (src.url.includes("vidsrcme.su")) {
+            mappedProvider = "VidSrcMe";
+          } else if (src.url.includes("vsembed.su")) {
+            mappedProvider = "VsEmbed";
+          } else if (
+            src.url.includes("vidsrc") ||
+            src.url.includes("vidvault") ||
+            src.url.includes("vidrock")
+          ) {
+            return null;
+          }
+          return {
+            ...src,
+            provider: mappedProvider,
+          };
+        };
+
         try {
           const result = await bridge.loadLinks(
             providerName,
@@ -968,8 +1077,10 @@ export default function DetailScreen() {
             (newSource) => {
               // Stream sources into UI immediately as each provider returns them
               setSources((prev) => {
-                if (prev.some((s) => s.url === newSource.url)) return prev;
-                return [...prev, newSource];
+                const mapped = mapSourceProvider(newSource);
+                if (!mapped) return prev;
+                if (prev.some((s) => s.url === mapped.url)) return prev;
+                return [...prev, mapped];
               });
             },
             () => {
@@ -984,7 +1095,10 @@ export default function DetailScreen() {
           setSources((prev) => {
             const merged = new Map(prev.map((s) => [s.url, s]));
             (result.sources ?? []).forEach((s) => {
-              if (!merged.has(s.url)) merged.set(s.url, s);
+              const mapped = mapSourceProvider(s);
+              if (mapped && !merged.has(mapped.url)) {
+                merged.set(mapped.url, mapped);
+              }
             });
             return [...merged.values()];
           });
@@ -997,10 +1111,18 @@ export default function DetailScreen() {
           setIsResolving(false);
           setPlayingEpisode(null);
         }
-      }, 350);
+      }, 600);
     },
-    [detail, providerName],
+    [detail, providerName, showSourcePicker],
   );
+
+  const handleRefreshLinks = useCallback(() => {
+    if (activeEpisodeIndex === null) return;
+    const ep = displayedEpisodes[activeEpisodeIndex];
+    if (ep) {
+      playEpisode(ep, activeEpisodeIndex);
+    }
+  }, [activeEpisodeIndex, displayedEpisodes, playEpisode]);
 
   useEffect(() => {
     if (pendingPlayEpisode && selectedSeason === pendingPlayEpisode.season) {
@@ -1017,11 +1139,13 @@ export default function DetailScreen() {
 
   if (phase === "idle" || !item) return null;
 
-  function onSourceSelect(source: VideoSource) {
+  async function onSourceSelect(source: VideoSource) {
     const originalIndex = sources.findIndex((s) => s.url === source.url);
     if (originalIndex === -1) return;
 
-    const currentEp = displayedEpisodes.find((_, i) => playingEpisode === i);
+    const currentEp = displayedEpisodes.find(
+      (_, i) => activeEpisodeIndex === i,
+    );
     const title = detail?.isSerial
       ? `${detail?.title} - ${currentEp?.label ?? `Episode ${currentEp?.episode ?? 1}`}`
       : `${detail?.title ?? ""}`;
@@ -1053,10 +1177,10 @@ export default function DetailScreen() {
         bridge
           .startTorrentStream(source.url)
           .then((info) => {
-            console.log(
-              "[ZunoPlugin] Native torrent stream info resolved:",
-              info,
-            );
+            // console.log(
+            //   "[ZunoPlugin] Native torrent stream info resolved:",
+            //   info,
+            // );
 
             if (torrentIntervalRef.current) {
               clearInterval(torrentIntervalRef.current);
@@ -1071,6 +1195,18 @@ export default function DetailScreen() {
                 if (status.progress >= 1.5 && status.active) {
                   clearInterval(intervalId);
                   setIsTorrentBuffering(false);
+
+                  // Check if external player mode is enabled
+                  try {
+                    const mode = await AsyncStorage.getItem('@sozo_player_mode');
+                    if (mode === 'external') {
+                      closeSourcePicker();
+                      bridge.playInExternalPlayer(info.streamUrl, null, title);
+                      return;
+                    }
+                  } catch (e) {
+                    console.warn('Failed to read player mode setting:', e);
+                  }
 
                   // Play local HTTP range server stream URL!
                   setPlayerConfig({
@@ -1094,7 +1230,7 @@ export default function DetailScreen() {
                     episode: currentEp?.episode || 1,
                     episodeTitle: currentEp?.label || "",
                     logoUrl: detail?.logoUrl || "",
-                    currentEpisodeIndex: playingEpisode ?? -1,
+                    currentEpisodeIndex: activeEpisodeIndex ?? -1,
                     episodes: allEpisodes,
                   });
                   setPlayerVisible(true);
@@ -1123,6 +1259,18 @@ export default function DetailScreen() {
       return;
     }
 
+    // Direct link: Check if external player mode is enabled
+    try {
+      const mode = await AsyncStorage.getItem('@sozo_player_mode');
+      if (mode === 'external') {
+        closeSourcePicker();
+        bridge.playInExternalPlayer(source.url, null, title);
+        return;
+      }
+    } catch (e) {
+      console.warn('Failed to read player mode setting:', e);
+    }
+
     setPlayerConfig({
       url: source.url,
       headers: source.headers,
@@ -1140,7 +1288,7 @@ export default function DetailScreen() {
       episode: currentEp?.episode || 1,
       episodeTitle: currentEp?.label || "",
       logoUrl: detail?.logoUrl || "",
-      currentEpisodeIndex: playingEpisode ?? -1,
+      currentEpisodeIndex: activeEpisodeIndex ?? -1,
       episodes: allEpisodes,
     });
     setPlayerVisible(true);
@@ -1394,7 +1542,7 @@ export default function DetailScreen() {
                 activeOpacity={0.8}
               >
                 <View style={styles.closeButtonInner}>
-                  <Text style={styles.closeButtonText}>←</Text>
+                  <ArrowLeftIcon size={18} color="#ffffff" />
                 </View>
               </TouchableOpacity>
 
@@ -1408,8 +1556,7 @@ export default function DetailScreen() {
                 activeOpacity={0.8}
               >
                 <View style={styles.closeButtonInner}>
-                  <Ionicons
-                    name={isFav ? "heart" : "heart-outline"}
+                  <HeartIcon
                     size={20}
                     color={isFav ? "#ff4a7d" : "#ffffff"}
                   />
@@ -1448,8 +1595,7 @@ export default function DetailScreen() {
                       ]}
                     />
                   )}
-                  <Ionicons
-                    name="play"
+                  <PlayIcon
                     size={24}
                     color="#fff"
                     style={{ marginLeft: 3 }}
@@ -1557,8 +1703,7 @@ export default function DetailScreen() {
                         tint="dark"
                         style={styles.errorCard}
                       >
-                        <Ionicons
-                          name="alert-circle-outline"
+                        <ExclamationCircleIcon
                           size={42}
                           color={theme.colors.rose}
                           style={{ marginBottom: 12 }}
@@ -1679,18 +1824,51 @@ export default function DetailScreen() {
                         ) : null}
                       </View>
 
+                      {/* Hidden measurement for collapsed description (3 lines) */}
+                      {detail?.description && collapsedDescHeight === 0 && (
+                        <Text
+                          style={[
+                            styles.descriptionText,
+                            { position: "absolute", opacity: 0, zIndex: -1 },
+                          ]}
+                          numberOfLines={3}
+                          onLayout={(e) => {
+                            const { height } = e.nativeEvent.layout;
+                            if (height > 0) setCollapsedDescHeight(height);
+                          }}
+                        >
+                          {detail.description}
+                        </Text>
+                      )}
+
+                      {/* Hidden measurement for full description */}
+                      {detail?.description && fullDescHeight === 0 && (
+                        <Text
+                          style={[
+                            styles.descriptionText,
+                            { position: "absolute", opacity: 0, zIndex: -1 },
+                          ]}
+                          onLayout={(e) => {
+                            const { height } = e.nativeEvent.layout;
+                            if (height > 0) setFullDescHeight(height);
+                          }}
+                        >
+                          {detail.description}
+                        </Text>
+                      )}
+
                       {/* Description */}
                       {detail?.description ? (
-                        <View style={styles.descriptionContainer}>
-                          <Text
-                            style={styles.descriptionText}
-                            numberOfLines={
-                              isDescriptionExpanded ? undefined : 3
-                            }
-                          >
+                        <Animated.View
+                          style={[
+                            styles.descriptionContainer,
+                            descriptionAnimatedStyle,
+                          ]}
+                        >
+                          <Text style={styles.descriptionText}>
                             {detail.description}
                           </Text>
-                        </View>
+                        </Animated.View>
                       ) : null}
 
                       {/* Always Visible: SEE MORE / SEE LESS Toggle in center in capitals */}
@@ -1712,7 +1890,24 @@ export default function DetailScreen() {
                             expandedAnimatedStyle,
                           ]}
                         >
-                          {expandedContent}
+                          <View
+                            onLayout={(e) => {
+                              const { height } = e.nativeEvent.layout;
+                              if (
+                                height > 0 &&
+                                height !== expandedContentHeight
+                              ) {
+                                setExpandedContentHeight(height);
+                              }
+                            }}
+                            style={{
+                              width: "100%",
+                              position: "absolute",
+                              top: 0,
+                            }}
+                          >
+                            {expandedContent}
+                          </View>
                         </Animated.View>
                       )}
 
@@ -1883,7 +2078,12 @@ export default function DetailScreen() {
             onPress={closeSourcePicker}
           />
 
-          <Animated.View style={[styles.sheet, sheetAnimatedStyle]}>
+          <Animated.View
+            style={[
+              styles.sheet,
+              sheetAnimatedStyle,
+            ]}
+          >
             <BlurView
               intensity={100}
               tint="dark"
@@ -1894,443 +2094,505 @@ export default function DetailScreen() {
             <View style={styles.sheetContent}>
               <View style={styles.sheetHandle} />
               <View style={styles.sheetHeaderRow}>
-                {isResolving && (
-                  <ActivityIndicator
-                    size="small"
-                    color="#0047FF"
-                    style={{ marginRight: 8 }}
-                  />
-                )}
-                <Text style={styles.sheetTitle}>Select Source</Text>
+                <TouchableOpacity
+                  style={styles.sheetRefreshButton}
+                  onPress={handleRefreshLinks}
+                  activeOpacity={0.8}
+                  disabled={isResolving}
+                >
+                  <ArrowPathIcon size={18} color="#ffffff" />
+                </TouchableOpacity>
+
+                <View style={styles.sheetTitleRow}>
+                  {isResolving && (
+                    <ActivityIndicator
+                      size="small"
+                      color="#0047FF"
+                      style={{ marginRight: 8 }}
+                    />
+                  )}
+                  <Text style={styles.sheetTitle}>Select Source</Text>
+                </View>
                 <TouchableOpacity
                   style={styles.sheetCloseButton}
                   onPress={closeSourcePicker}
                   activeOpacity={0.8}
                 >
-                  <Ionicons name="close" size={20} color="#ffffff" />
+                  <XMarkIcon size={20} color="#ffffff" />
                 </TouchableOpacity>
               </View>
+                  {/* Dynamic Provider Tabs scroll view */}
+                  {providerTabs.length > 1 && (
+                    <View style={styles.tabsContainer}>
+                      <ScrollView
+                        horizontal
+                        showsHorizontalScrollIndicator={false}
+                        contentContainerStyle={styles.tabsScrollContent}
+                      >
+                        {providerTabs.map((tab) => {
+                          const isActive = activeProviderTab === tab;
 
-              {/* Dynamic Provider Tabs scroll view */}
-              {providerTabs.length > 1 && (
-                <View style={styles.tabsContainer}>
-                  <ScrollView
-                    horizontal
-                    showsHorizontalScrollIndicator={false}
-                    contentContainerStyle={styles.tabsScrollContent}
-                  >
-                    {providerTabs.map((tab) => {
-                      const isActive = activeProviderTab === tab;
+                          // Calculate tab status decorations
+                          const prog = resolvingProgress.find(
+                            (p) => p.providerName === tab,
+                          );
+                          let tabLabel = tab;
+                          const tabSubLabel = cleanErrorMessage(
+                            prog?.errorReason,
+                          );
+                          const isSearching =
+                            (tab === "All" && isResolving) ||
+                            prog?.status === "searching";
 
-                      // Calculate tab status decorations
-                      const prog = resolvingProgress.find(
-                        (p) => p.providerName === tab,
-                      );
-                      let tabLabel = tab;
-                      const tabSubLabel = cleanErrorMessage(prog?.errorReason);
-                      const isSearching =
-                        (tab === "All" && isResolving) ||
-                        prog?.status === "searching";
+                          const tabSourcesCount = sources.filter(
+                            (s) =>
+                              (s.provider ?? "").toLowerCase() ===
+                              tab.toLowerCase(),
+                          ).length;
+                          if (tab === "All") {
+                            tabLabel =
+                              sources.length > 0
+                                ? `All (${sources.length})`
+                                : "All";
+                          } else if (prog) {
+                            if (prog.status === "searching") {
+                              tabLabel =
+                                tabSourcesCount > 0
+                                  ? `${tab} (${tabSourcesCount})`
+                                  : tab;
+                            } else if (prog.status === "found") {
+                              tabLabel = `${tab} (${tabSourcesCount})`;
+                            } else if (prog.status === "none") {
+                              tabLabel = `${tab} (0)`;
+                            } else if (prog.status === "error") {
+                              tabLabel =
+                                tabSourcesCount > 0
+                                  ? `${tab} (${tabSourcesCount})`
+                                  : `${tab} ⚠`;
+                            }
+                          }
 
-                      const tabSourcesCount = sources.filter(
-                        (s) =>
-                          (s.provider ?? "").toLowerCase() ===
-                          tab.toLowerCase(),
-                      ).length;
-                      if (tab === "All") {
-                        tabLabel =
-                          sources.length > 0
-                            ? `All (${sources.length})`
-                            : "All";
-                      } else if (prog) {
-                        if (prog.status === "searching") {
-                          tabLabel =
-                            tabSourcesCount > 0
-                              ? `${tab} (${tabSourcesCount})`
-                              : tab;
-                        } else if (prog.status === "found") {
-                          tabLabel = `${tab} (${tabSourcesCount})`;
-                        } else if (prog.status === "none") {
-                          tabLabel = `${tab} (0)`;
-                        } else if (prog.status === "error") {
-                          tabLabel =
-                            tabSourcesCount > 0
-                              ? `${tab} (${tabSourcesCount})`
-                              : `${tab} ⚠`;
-                        }
-                      }
-
-                      return (
-                        <TouchableOpacity
-                          key={tab}
-                          style={[
-                            styles.tabButton,
-                            isActive && styles.tabButtonActive,
-                            { flexDirection: "row", alignItems: "center" },
-                          ]}
-                          onPress={() => setActiveProviderTab(tab)}
-                          activeOpacity={0.7}
-                        >
-                          {isSearching && (
-                            <ActivityIndicator
-                              size="small"
-                              color={isActive ? "#ffffff" : "#0047FF"}
-                              style={{ marginRight: 6 }}
-                            />
-                          )}
-                          <Text
-                            style={[
-                              styles.tabText,
-                              isActive && styles.tabTextActive,
-                            ]}
-                          >
-                            {tabLabel}
-                          </Text>
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </ScrollView>
-
-                  {/* Left & Right Edge Fades for Tabs ScrollView */}
-                  <LinearGradient
-                    colors={["#141417", "transparent"]}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 0 }}
-                    style={{
-                      position: "absolute",
-                      left: 0,
-                      top: 0,
-                      bottom: 0,
-                      width: 24,
-                      zIndex: 10,
-                    }}
-                    pointerEvents="none"
-                  />
-                  <LinearGradient
-                    colors={["transparent", "#141417"]}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 0 }}
-                    style={{
-                      position: "absolute",
-                      right: 0,
-                      top: 0,
-                      bottom: 0,
-                      width: 24,
-                      zIndex: 10,
-                    }}
-                    pointerEvents="none"
-                  />
-                </View>
-              )}
- 
-              {/* Always show source list when sources exist, even while still resolving */}
-              {filteredSources.length > 0 && (
-                <View style={styles.sheetListContainer}>
-                  {(() => {
-                    const directSources = filteredSources.filter(
-                      (s) => s.type !== "torrent" && !s.url.startsWith("magnet:"),
-                    );
-                    const torrentSources = filteredSources.filter(
-                      (s) => s.type === "torrent" || s.url.startsWith("magnet:"),
-                    );
-
-                    const renderSourceRow = (source: any, idx: number) => {
-                      const isSplitted = source.quality.includes(" · ");
-                      const hostName =
-                        source.host ||
-                        (isSplitted
-                          ? source.quality.split(" · ")[0]
-                          : source.quality) ||
-                        "Direct";
-                      const qualityTag = isSplitted
-                        ? source.quality.split(" · ")[1]
-                        : "Auto";
-                      const hasHeaders =
-                        source.headers &&
-                        Object.keys(source.headers).length > 0;
-                      const protocolLabel = getProtocolLabel(
-                        source.type,
-                        source.url,
-                      );
-
-                      const sizeMatch = source.quality.match(
-                        /\[?(\d+(?:\.\d+)?\s*(?:GB|MB|kb|gigabytes|megabytes))\]?/i,
-                      );
-                      const sizeTag = sizeMatch ? sizeMatch[1] : null;
-                      const showProviderBadge = activeProviderTab === "All";
-                      const isTorrentSource =
-                        source.type === "torrent" ||
-                        source.url.startsWith("magnet:");
-                      const torrentSeeders = (source as any).seeders as
-                        | number
-                        | undefined;
-
-                      return (
-                        <TouchableOpacity
-                          key={`source-${source.type}-${idx}`}
-                          style={styles.sheetRow}
-                          onPress={() => onSourceSelect(source)}
-                          activeOpacity={0.7}
-                        >
-                          <View style={styles.sheetRowInfo}>
-                            <View
+                          return (
+                            <TouchableOpacity
+                              key={tab}
                               style={[
-                                styles.sheetQualityRow,
-                                { flexWrap: "wrap", gap: 6 },
+                                styles.tabButton,
+                                isActive && styles.tabButtonActive,
+                                { flexDirection: "row", alignItems: "center" },
                               ]}
+                              onPress={() => setActiveProviderTab(tab)}
+                              activeOpacity={0.7}
                             >
+                              {isSearching && (
+                                <ActivityIndicator
+                                  size="small"
+                                  color={isActive ? "#ffffff" : "#0047FF"}
+                                  style={{ marginRight: 6 }}
+                                />
+                              )}
                               <Text
                                 style={[
-                                  styles.sheetQuality,
-                                  { marginRight: 4 },
+                                  styles.tabText,
+                                  isActive && styles.tabTextActive,
                                 ]}
                               >
-                                {hostName}
+                                {tabLabel}
                               </Text>
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </ScrollView>
 
-                              <View
-                                style={[
-                                  styles.sheetBadge,
-                                  {
-                                    backgroundColor:
-                                      getQualityBadgeBg(qualityTag),
-                                  },
-                                ]}
+                      {/* Left & Right Edge Fades for Tabs ScrollView */}
+                      <LinearGradient
+                        colors={["#141417", "transparent"]}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 0 }}
+                        style={{
+                          position: "absolute",
+                          left: 0,
+                          top: 0,
+                          bottom: 0,
+                          width: 24,
+                          zIndex: 10,
+                        }}
+                        pointerEvents="none"
+                      />
+                      <LinearGradient
+                        colors={["transparent", "#141417"]}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 0 }}
+                        style={{
+                          position: "absolute",
+                          right: 0,
+                          top: 0,
+                          bottom: 0,
+                          width: 24,
+                          zIndex: 10,
+                        }}
+                        pointerEvents="none"
+                      />
+                    </View>
+                  )}
+
+                  {/* Always show source list when sources exist, even while still resolving */}
+                  <View style={{ flex: 1 }}>
+                    {filteredSources.length > 0 ? (
+                      <View style={styles.sheetListContainer}>
+                        {(() => {
+                          const directSources = filteredSources.filter(
+                            (s) =>
+                              s.type !== "torrent" &&
+                              !s.url.startsWith("magnet:"),
+                          );
+                          const torrentSources = filteredSources.filter(
+                            (s) =>
+                              s.type === "torrent" || s.url.startsWith("magnet:"),
+                          );
+
+                          const renderSourceRow = (source: any, idx: number) => {
+                            const isSplitted = source.quality.includes(" · ");
+                            const hostName =
+                              source.host ||
+                              (isSplitted
+                                ? source.quality.split(" · ")[0]
+                                : source.quality) ||
+                              "Direct";
+                            const qualityTag = isSplitted
+                              ? source.quality.split(" · ")[1]
+                              : "Auto";
+                            const hasHeaders =
+                              source.headers &&
+                              Object.keys(source.headers).length > 0;
+                            const protocolLabel = getProtocolLabel(
+                              source.type,
+                              source.url,
+                            );
+
+                            const sizeMatch = source.quality.match(
+                              /\[?(\d+(?:\.\d+)?\s*(?:GB|MB|kb|gigabytes|megabytes))\]?/i,
+                            );
+                            const sizeTag = sizeMatch ? sizeMatch[1] : null;
+                            const showProviderBadge = activeProviderTab === "All";
+                            const isTorrentSource =
+                              source.type === "torrent" ||
+                              source.url.startsWith("magnet:");
+                            const torrentSeeders = (source as any).seeders as
+                              | number
+                              | undefined;
+
+                            return (
+                              <TouchableOpacity
+                                key={`source-${source.type}-${idx}`}
+                                style={styles.sheetRow}
+                                onPress={() => onSourceSelect(source)}
+                                activeOpacity={0.7}
                               >
-                                <Text
-                                  style={[
-                                    styles.sheetBadgeText,
-                                    { color: "#ffffff", fontWeight: "bold" },
-                                  ]}
-                                >
-                                  {qualityTag}
-                                </Text>
-                              </View>
-
-                              <View style={styles.sheetBadge}>
-                                <Text style={styles.sheetBadgeText}>
-                                  {protocolLabel}
-                                </Text>
-                              </View>
-
-                              {isTorrentSource &&
-                                torrentSeeders !== undefined &&
-                                torrentSeeders > 0 && (
+                                <View style={styles.sheetRowInfo}>
                                   <View
                                     style={[
-                                      styles.sheetBadge,
-                                      {
-                                        backgroundColor:
-                                          torrentSeeders >= 50
-                                            ? "rgba(34, 197, 94, 0.12)"
-                                            : torrentSeeders >= 10
-                                              ? "rgba(234, 179, 8, 0.10)"
-                                              : "rgba(255, 255, 255, 0.06)",
-                                        borderColor:
-                                          torrentSeeders >= 50
-                                            ? "rgba(34, 197, 94, 0.3)"
-                                            : torrentSeeders >= 10
-                                              ? "rgba(234, 179, 8, 0.25)"
-                                              : "rgba(255,255,255,0.1)",
-                                        borderWidth: 0.5,
-                                      },
+                                      styles.sheetQualityRow,
+                                      { flexWrap: "wrap", gap: 6 },
                                     ]}
                                   >
                                     <Text
                                       style={[
-                                        styles.sheetBadgeText,
+                                        styles.sheetQuality,
+                                        { marginRight: 4 },
+                                      ]}
+                                    >
+                                      {hostName}
+                                    </Text>
+
+                                    <View
+                                      style={[
+                                        styles.sheetBadge,
                                         {
-                                          color:
-                                            torrentSeeders >= 50
-                                              ? "#22c55e"
-                                              : torrentSeeders >= 10
-                                                ? "#eab308"
-                                                : "#a0a0a5",
-                                          fontWeight: "600",
+                                          backgroundColor:
+                                            getQualityBadgeBg(qualityTag),
                                         },
                                       ]}
                                     >
-                                      {`👤 ${torrentSeeders}`}
-                                    </Text>
+                                      <Text
+                                        style={[
+                                          styles.sheetBadgeText,
+                                          {
+                                            color: "#ffffff",
+                                            fontWeight: "bold",
+                                          },
+                                        ]}
+                                      >
+                                        {qualityTag}
+                                      </Text>
+                                    </View>
+
+                                    <View style={styles.sheetBadge}>
+                                      <Text style={styles.sheetBadgeText}>
+                                        {protocolLabel}
+                                      </Text>
+                                    </View>
+
+                                    {isTorrentSource &&
+                                      torrentSeeders !== undefined &&
+                                      torrentSeeders > 0 && (
+                                        <View
+                                          style={[
+                                            styles.sheetBadge,
+                                            {
+                                              backgroundColor:
+                                                torrentSeeders >= 50
+                                                  ? "rgba(34, 197, 94, 0.12)"
+                                                  : torrentSeeders >= 10
+                                                    ? "rgba(234, 179, 8, 0.10)"
+                                                    : "rgba(255, 255, 255, 0.06)",
+                                              borderColor:
+                                                torrentSeeders >= 50
+                                                  ? "rgba(34, 197, 94, 0.3)"
+                                                  : torrentSeeders >= 10
+                                                    ? "rgba(234, 179, 8, 0.25)"
+                                                    : "rgba(255,255,255,0.1)",
+                                              borderWidth: 0.5,
+                                            },
+                                          ]}
+                                        >
+                                          <Text
+                                            style={[
+                                              styles.sheetBadgeText,
+                                              {
+                                                color:
+                                                  torrentSeeders >= 50
+                                                    ? "#22c55e"
+                                                    : torrentSeeders >= 10
+                                                      ? "#eab308"
+                                                      : "#a0a0a5",
+                                                fontWeight: "600",
+                                              },
+                                            ]}
+                                          >
+                                            {`👤 ${torrentSeeders}`}
+                                          </Text>
+                                        </View>
+                                      )}
+
+                                    {sizeTag && (
+                                      <View
+                                        style={[
+                                          styles.sheetBadge,
+                                          {
+                                            backgroundColor:
+                                              "rgba(255,255,255,0.06)",
+                                          },
+                                        ]}
+                                      >
+                                        <Text style={styles.sheetBadgeText}>
+                                          {sizeTag}
+                                        </Text>
+                                      </View>
+                                    )}
+
+                                    {showProviderBadge && (
+                                      <View
+                                        style={[
+                                          styles.sheetBadge,
+                                          {
+                                            backgroundColor:
+                                              "rgba(85,128,255,0.1)",
+                                            borderColor: "rgba(85,128,255,0.2)",
+                                            borderWidth: 0.5,
+                                          },
+                                        ]}
+                                      >
+                                        <Text
+                                          style={[
+                                            styles.sheetBadgeText,
+                                            {
+                                              color: "#5580FF",
+                                              fontWeight: "600",
+                                            },
+                                          ]}
+                                        >
+                                          {source.provider}
+                                        </Text>
+                                      </View>
+                                    )}
+
+                                    {hasHeaders && (
+                                      <View
+                                        style={[
+                                          styles.sheetBadge,
+                                          {
+                                            backgroundColor:
+                                              "rgba(0,71,255,0.08)",
+                                            borderColor: "rgba(0,71,255,0.2)",
+                                            borderWidth: 0.5,
+                                          },
+                                        ]}
+                                      >
+                                        <Text
+                                          style={[
+                                            styles.sheetBadgeText,
+                                            { color: theme.colors.accentLight },
+                                          ]}
+                                        >
+                                          Headers
+                                        </Text>
+                                      </View>
+                                    )}
+
+                                    {subtitles.length > 0 && idx === 0 ? (
+                                      <View
+                                        style={[
+                                          styles.sheetBadge,
+                                          {
+                                            backgroundColor:
+                                              "rgba(255,255,255,0.05)",
+                                          },
+                                        ]}
+                                      >
+                                        <Text style={styles.sheetBadgeText}>
+                                          Subs
+                                        </Text>
+                                      </View>
+                                    ) : null}
                                   </View>
-                                )}
-
-                              {sizeTag && (
-                                <View
-                                  style={[
-                                    styles.sheetBadge,
-                                    {
-                                      backgroundColor: "rgba(255,255,255,0.06)",
-                                    },
-                                  ]}
-                                >
-                                  <Text style={styles.sheetBadgeText}>
-                                    {sizeTag}
-                                  </Text>
                                 </View>
-                              )}
+                              </TouchableOpacity>
+                            );
+                          };
 
-                              {showProviderBadge && (
-                                <View
-                                  style={[
-                                    styles.sheetBadge,
-                                    {
-                                      backgroundColor: "rgba(85,128,255,0.1)",
-                                      borderColor: "rgba(85,128,255,0.2)",
-                                      borderWidth: 0.5,
-                                    },
-                                  ]}
-                                >
-                                  <Text
-                                    style={[
-                                      styles.sheetBadgeText,
-                                      { color: "#5580FF", fontWeight: "600" },
-                                    ]}
-                                  >
-                                    {source.provider}
-                                  </Text>
-                                </View>
-                              )}
-
-                              {hasHeaders && (
-                                <View
-                                  style={[
-                                    styles.sheetBadge,
-                                    {
-                                      backgroundColor: "rgba(0,71,255,0.08)",
-                                      borderColor: "rgba(0,71,255,0.2)",
-                                      borderWidth: 0.5,
-                                    },
-                                  ]}
-                                >
-                                  <Text
-                                    style={[
-                                      styles.sheetBadgeText,
-                                      { color: theme.colors.accentLight },
-                                    ]}
-                                  >
-                                    Headers
-                                  </Text>
-                                </View>
-                              )}
-
-                              {subtitles.length > 0 && idx === 0 ? (
-                                <View
-                                  style={[
-                                    styles.sheetBadge,
-                                    {
-                                      backgroundColor: "rgba(255,255,255,0.05)",
-                                    },
-                                  ]}
-                                >
-                                  <Text style={styles.sheetBadgeText}>
-                                    Subs
-                                  </Text>
-                                </View>
-                              ) : null}
-                            </View>
-                          </View>
-                        </TouchableOpacity>
-                      );
-                    };
-
-                    return (
-                      <ScrollView
-                        showsVerticalScrollIndicator={false}
-                        style={styles.sheetList}
-                        contentContainerStyle={{
-                          paddingTop: 12,
-                          paddingBottom: 24,
-                        }}
-                      >
-                        {/* Direct/HLS Sources rendered first */}
-                        {directSources.map((source, idx) => renderSourceRow(source, idx))}
-
-                        {/* Collapsible Torrent Accordion row */}
-                        {torrentSources.length > 0 && (
-                          <>
-                            <TouchableOpacity
-                              onPress={() => setTorrentExpanded(!torrentExpanded)}
-                              style={[
-                                styles.accordionHeader,
-                                torrentExpanded && styles.accordionHeaderActive,
-                              ]}
-                              activeOpacity={0.8}
+                          return (
+                            <ScrollView
+                              showsVerticalScrollIndicator={false}
+                              style={styles.sheetList}
+                              contentContainerStyle={{
+                                paddingTop: 12,
+                                paddingBottom: 24,
+                              }}
                             >
-                              <Ionicons
-                                name="cloud-download-outline"
-                                size={18}
-                                color={theme.colors.rose}
-                                style={{ marginRight: 10 }}
-                              />
-                              <Text style={styles.accordionTitle}>
-                                Torrent & Magnet Links ({torrentSources.length} found)
-                              </Text>
-                              <Ionicons
-                                name={torrentExpanded ? "chevron-up" : "chevron-down"}
-                                size={18}
-                                color="#a0a0a5"
-                              />
-                            </TouchableOpacity>
-
-                            {torrentExpanded &&
-                              torrentSources.map((source, idx) =>
+                              {/* Direct/HLS Sources rendered first */}
+                              {directSources.map((source, idx) =>
                                 renderSourceRow(source, idx),
                               )}
-                          </>
-                        )}
-                      </ScrollView>
-                    );
-                  })()}
 
-                  {/* Top & Bottom Edge Fades for sheetList */}
-                  <LinearGradient
-                    colors={["rgba(20, 18, 24, 0.95)", "transparent"]}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 0, y: 1 }}
-                    style={{
-                      position: "absolute",
-                      left: 0,
-                      right: 0,
-                      top: 0,
-                      height: 16,
-                      zIndex: 10,
-                    }}
-                    pointerEvents="none"
-                  />
-                  <LinearGradient
-                    colors={["transparent", "rgba(20, 18, 24, 0.95)"]}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 0, y: 1 }}
-                    style={{
-                      position: "absolute",
-                      left: 0,
-                      right: 0,
-                      bottom: 0,
-                      height: 24,
-                      zIndex: 10,
-                    }}
-                    pointerEvents="none"
-                  />
-                </View>
-              )}
+                              {/* Collapsible Torrent Accordion row */}
+                              {torrentSources.length > 0 && (
+                                <>
+                                  <TouchableOpacity
+                                    onPress={() => {
+                                      setTorrentExpanded(!torrentExpanded);
+                                    }}
+                                    style={[
+                                      styles.accordionHeader,
+                                      torrentExpanded &&
+                                        styles.accordionHeaderActive,
+                                    ]}
+                                    activeOpacity={0.8}
+                                  >
+                                    <ArrowDownTrayIcon
+                                      size={18}
+                                      color={theme.colors.rose}
+                                      style={{ marginRight: 10 }}
+                                    />
+                                    <Text style={styles.accordionTitle}>
+                                      Torrent & Magnet Links (
+                                      {torrentSources.length} found)
+                                    </Text>
+                                    {torrentExpanded ? (
+                                      <ChevronUpIcon size={18} color="#a0a0a5" />
+                                    ) : (
+                                      <ChevronDownIcon size={18} color="#a0a0a5" />
+                                    )}
+                                  </TouchableOpacity>
 
-              {subtitles.length > 0 && (
-                <View style={styles.sheetSubRow}>
-                  <Text style={styles.sheetSubLabel}>Subtitles: </Text>
-                  <Text style={styles.sheetSubLangs} numberOfLines={1}>
-                    {subtitles.map((s) => s.lang).join(", ")}
-                  </Text>
-                </View>
-              )}
+                                  <Animated.View style={accordionAnimatedStyle}>
+                                    <View
+                                      onLayout={(e) => {
+                                        const { height } = e.nativeEvent.layout;
+                                        if (height > 0 && height !== accordionHeight) {
+                                          setAccordionHeight(height);
+                                        }
+                                      }}
+                                      style={{
+                                        width: "100%",
+                                        position: "absolute",
+                                        top: 0,
+                                      }}
+                                    >
+                                      {torrentSources.map((source, idx) =>
+                                        renderSourceRow(source, idx),
+                                      )}
+                                    </View>
+                                  </Animated.View>
+                                </>
+                              )}
+                            </ScrollView>
+                          );
+                        })()}
 
-              {/* VPN Tip Banner at bottom */}
-              <View style={styles.sheetVpnTip}>
-                <Text style={styles.sheetVpnTipText}>
-                  Tip: Use a VPN app (e.g. ProtonVPN or WARP) if links fail to
-                  load.
-                </Text>
-              </View>
+                        {/* Top & Bottom Edge Fades for sheetList */}
+                        <LinearGradient
+                          colors={["rgba(20, 18, 24, 0.95)", "transparent"]}
+                          start={{ x: 0, y: 0 }}
+                          end={{ x: 0, y: 1 }}
+                          style={{
+                            position: "absolute",
+                            left: 0,
+                            right: 0,
+                            top: 0,
+                            height: 16,
+                            zIndex: 10,
+                          }}
+                          pointerEvents="none"
+                        />
+                        <LinearGradient
+                          colors={["transparent", "rgba(20, 18, 24, 0.95)"]}
+                          start={{ x: 0, y: 0 }}
+                          end={{ x: 0, y: 1 }}
+                          style={{
+                            position: "absolute",
+                            left: 0,
+                            right: 0,
+                            bottom: 0,
+                            height: 24,
+                            zIndex: 10,
+                          }}
+                          pointerEvents="none"
+                        />
+                      </View>
+                    ) : (
+                      // Empty state when there are no sources for this tab
+                      <View
+                        style={{
+                          flex: 1,
+                          alignItems: "center",
+                          justifyContent: "center",
+                        }}
+                      >
+                        <Text style={{ color: "#8E8D92", fontSize: 14 }}>
+                          {isResolving
+                            ? "Resolving links..."
+                            : "No links found for this provider"}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+
+                  {subtitles.length > 0 && (
+                    <View style={styles.sheetSubRow}>
+                      <Text style={styles.sheetSubLabel}>Subtitles: </Text>
+                      <Text style={styles.sheetSubLangs} numberOfLines={1}>
+                        {subtitles.map((s) => s.lang).join(", ")}
+                      </Text>
+                    </View>
+                  )}
+
+                  {/* VPN Tip Banner at bottom */}
+                  <View style={styles.sheetVpnTip}>
+                    <Text style={styles.sheetVpnTipText}>
+                      Tip: Use a VPN app (e.g. ProtonVPN or WARP) if links fail
+                      to load.
+                    </Text>
+                  </View>
             </View>
           </Animated.View>
         </Animated.View>
@@ -2656,11 +2918,11 @@ const styles = StyleSheet.create({
   pillBackground: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "rgba(15, 15, 20, 0.45)", // matching trailer button background
+    backgroundColor: "rgba(15, 15, 20, 0.45)",
     paddingHorizontal: 20,
     paddingVertical: 8,
     borderRadius: 20,
-    overflow: "hidden", // clips the BlurView properly
+    overflow: "hidden",
     gap: 10,
   },
   trailerButton: {
@@ -2683,7 +2945,7 @@ const styles = StyleSheet.create({
     elevation: 6,
   },
   trailerLabel: {
-    color: "#ffffff",
+    color: "#ffffffa9",
     fontSize: 12,
     fontWeight: "700",
     letterSpacing: 0.6,
@@ -2785,6 +3047,11 @@ const styles = StyleSheet.create({
     letterSpacing: -0.5,
     textAlign: "center",
     marginBottom: 8,
+  },
+  sheetTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
   },
   seasonSelector: {
     flexDirection: "row",
@@ -3253,7 +3520,7 @@ const styles = StyleSheet.create({
   sheetContent: {
     flex: 1,
     paddingBottom: 24,
-    paddingHorizontal: 5,
+    paddingHorizontal: 0,
     paddingTop: 8,
   },
   sheetHandle: {
@@ -3273,15 +3540,23 @@ const styles = StyleSheet.create({
   sheetHeaderRow: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
+    justifyContent: "space-between",
     position: "relative",
     width: "100%",
     marginBottom: 20,
+    paddingHorizontal: 16,
   },
   sheetCloseButton: {
-    position: "absolute",
-    right: 0,
-    top: -4,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.12)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  sheetRefreshButton: {
     width: 32,
     height: 32,
     borderRadius: 16,
