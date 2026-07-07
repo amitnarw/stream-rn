@@ -159,6 +159,7 @@ class CloudStreamPluginHost(val appContext: ReactApplicationContext) {
             "Dudefilms" to "https://dudefilms.co",
             "Goojara" to "https://ww1.goojara.to",
             "Desicinemas" to "https://desicinemas.to",
+            "Tamilblasters" to "https://www.1tamilblasters.pro"
         )
     }
 

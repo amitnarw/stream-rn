@@ -596,8 +596,8 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
           const cwSection = {
             name: "Continue Watching",
             items: hist.map((h: any) => ({
-              provider: "Cinemeta",
-              url: h.mediaType + "/" + h.imdbId,
+              provider: h.provider || "Cinemeta",
+              url: h.detailUrl || (h.mediaType + "/" + h.imdbId),
               title: h.videoTitle,
               posterUrl: h.posterUrl,
               type: h.mediaType,
@@ -678,8 +678,8 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
           secs.unshift({
             name: "Continue Watching",
             items: hist.map((h: any) => ({
-              provider: "Cinemeta",
-              url: h.mediaType + "/" + h.imdbId,
+              provider: h.provider || "Cinemeta",
+              url: h.detailUrl || (h.mediaType + "/" + h.imdbId),
               title: h.videoTitle,
               posterUrl: h.posterUrl,
               type: h.mediaType,

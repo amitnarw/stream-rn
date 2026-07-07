@@ -12,9 +12,10 @@ import {
   ActivityIndicator,
   BackHandler,
   ScrollView,
+  Modal,
 } from "react-native";
 import { useVideoPlayer, VideoView } from "expo-video";
-import { BlurView, BlurTargetView } from "expo-blur";
+import { BlurView } from "expo-blur";
 import {
   PlayIcon,
   PauseIcon,
@@ -32,9 +33,12 @@ import {
   ForwardIcon,
   ClockIcon,
   ArrowUpRightIcon,
-  CheckIcon
+  CheckIcon,
+  ExclamationCircleIcon,
+  ArrowPathIcon
 } from "react-native-heroicons/solid";
 import * as bridge from "../api/cloudStreamBridge";
+import { CustomModal } from "./CustomModal";
 import { LinearGradient } from "expo-linear-gradient";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Animated, {
@@ -143,58 +147,75 @@ function parseSubtitles(text: string): Cue[] {
   return cues.sort((a, b) => a.start - b.start);
 }
 
+const isDolbyAudio = (source: VideoSource | null, url: string) => {
+  const text = `${source?.quality || ""} ${source?.host || ""} ${url}`.toLowerCase();
+  return (
+    text.includes("dd5.1") ||
+    text.includes("dd 5.1") ||
+    text.includes("ac3") ||
+    text.includes("ac-3") ||
+    text.includes("eac3") ||
+    text.includes("e-ac-3") ||
+    text.includes("dts") ||
+    text.includes("dolby") ||
+    text.includes("atmos") ||
+    text.includes("5.1ch") ||
+    text.includes("5.1")
+  );
+};
+
 interface PlayerModalProps {
   visible: boolean;
   onClose: () => void;
   title: string;
   children: React.ReactNode;
-  blurTarget: any;
   hideCloseButton?: boolean;
 }
 
-const PlayerModal = ({ visible, onClose, title, children, blurTarget, hideCloseButton = false }: PlayerModalProps) => {
-  if (!visible) return null;
-
+const PlayerModal = ({ visible, onClose, title, children, hideCloseButton = false }: PlayerModalProps) => {
   return (
-    <Animated.View
-      entering={FadeIn.duration(200)}
-      exiting={FadeOut.duration(150)}
-      style={styles.resumePromptOverlay}
+    <Modal
+      visible={visible}
+      transparent={true}
+      animationType="fade"
+      supportedOrientations={["landscape"]}
+      onRequestClose={onClose}
     >
-      <TouchableOpacity
-        style={StyleSheet.absoluteFillObject}
-        onPress={onClose}
-        activeOpacity={1}
-      />
-      <Animated.View
-        entering={ZoomIn.duration(250)}
-        exiting={ZoomOut.duration(200)}
-        style={styles.playerModalContainer}
-      >
-        <BlurView
-          intensity={100}
-          tint="dark"
-          blurTarget={blurTarget}
-          blurMethod="dimezisBlurView"
+      <View style={styles.resumePromptOverlay}>
+        <TouchableOpacity
           style={StyleSheet.absoluteFillObject}
+          onPress={onClose}
+          activeOpacity={1}
         />
-        <View style={styles.modalHeader}>
-          <Text style={styles.resumePromptTitle}>{title}</Text>
-          {!hideCloseButton && (
-            <TouchableOpacity onPress={onClose} style={styles.modalCloseIconBtn}>
-              <XMarkIcon size={20} color="#fff" />
-            </TouchableOpacity>
-          )}
-        </View>
-        <ScrollView
-          showsVerticalScrollIndicator={true}
-          style={styles.modalScrollBody}
-          contentContainerStyle={styles.modalScrollBodyContent}
+        <Animated.View
+          entering={ZoomIn.duration(250)}
+          exiting={ZoomOut.duration(200)}
+          style={styles.playerModalContainer}
         >
-          {children}
-        </ScrollView>
-      </Animated.View>
-    </Animated.View>
+          <View
+            style={[
+              StyleSheet.absoluteFillObject,
+              { backgroundColor: "rgba(15, 15, 20, 0.95)" }
+            ]}
+          />
+          <View style={styles.modalHeader}>
+            <Text style={styles.resumePromptTitle}>{title}</Text>
+            {!hideCloseButton && (
+              <TouchableOpacity onPress={onClose} style={styles.modalCloseIconBtn}>
+                <XMarkIcon size={20} color="#fff" />
+              </TouchableOpacity>
+            )}
+          </View>
+          <ScrollView
+            showsVerticalScrollIndicator={true}
+            style={styles.modalScrollBody}
+            contentContainerStyle={styles.modalScrollBodyContent}
+          >
+            {children}
+          </ScrollView>
+        </Animated.View>
+      </View>
+    </Modal>
   );
 };
 
@@ -218,20 +239,60 @@ export default function CustomVideoPlayer({
 }: CustomVideoPlayerProps) {
   if (!visible) return null;
 
-  // Real-time blur target hooks
-  const [blurTarget, setBlurTarget] = useState<any>(null);
-  const blurTargetRef = useRef<any>(null);
-  const setBlurTargetRef = (val: any) => {
-    blurTargetRef.current = val;
-    if (val !== blurTarget) {
-      setBlurTarget(val);
-    }
-  };
+  // Playback Error and watchdog states
+  const [playerError, setPlayerError] = useState<string | null>(null);
+  const loadingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const hasInitiallyLoadedRef = useRef(false);
 
   // Video source state
   const [selectedSource, setSelectedSource] = useState<VideoSource | null>(
     sources.find((s) => s.url === url) || sources[0] || null
   );
+
+  // Player state variables
+  const [status, setStatus] = useState<string>("idle");
+
+  useEffect(() => {
+    // Reset player error, watchdog, and initial load tracker when loading a new source
+    setPlayerError(null);
+    hasInitiallyLoadedRef.current = false;
+    lastSourceChangeTimeRef.current = Date.now();
+    if (loadingTimeoutRef.current) {
+      clearTimeout(loadingTimeoutRef.current);
+      loadingTimeoutRef.current = null;
+    }
+  }, [selectedSource, url]);
+
+  useEffect(() => {
+    // Only run watchdog timer if this stream has never loaded successfully yet.
+    // This prevents seeking/buffering pauses from triggering a playback failure error.
+    if (!hasInitiallyLoadedRef.current && (status === "loading" || status === "idle")) {
+      if (!loadingTimeoutRef.current) {
+        loadingTimeoutRef.current = setTimeout(() => {
+          setPlayerError(
+            "The video stream is taking too long to load. The server might be overloaded or blocked by your network. Please try a different source."
+          );
+          player.pause();
+        }, 30000); // 30 seconds watchdog
+      }
+    } else {
+      if (loadingTimeoutRef.current) {
+        clearTimeout(loadingTimeoutRef.current);
+        loadingTimeoutRef.current = null;
+      }
+      if (status === "ready" || status === "playing") {
+        hasInitiallyLoadedRef.current = true;
+      }
+    }
+
+    return () => {
+      if (loadingTimeoutRef.current) {
+        clearTimeout(loadingTimeoutRef.current);
+        loadingTimeoutRef.current = null;
+      }
+    };
+  }, [status]);
+
   
   // Subtitle state
   const [activeSubtitleUrl, setActiveSubtitleUrl] = useState<string>(
@@ -247,7 +308,6 @@ export default function CustomVideoPlayer({
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
-  const [status, setStatus] = useState<string>("idle");
   const [pendingSeek, setPendingSeek] = useState<number | null>(null);
 
   // Controls Lock State
@@ -272,6 +332,9 @@ export default function CustomVideoPlayer({
   const [hudType, setHudType] = useState<"volume" | "brightness" | null>(null);
   const hudOpacity = useSharedValue(0);
 
+  // Mute state to avoid reading volumeShared.value in render
+  const [isMuted, setIsMuted] = useState(false);
+
   // Modal Dialogs
   const [activeModal, setActiveModal] = useState<"quality" | "subtitles" | "speed" | null>(null);
 
@@ -281,10 +344,26 @@ export default function CustomVideoPlayer({
   // Active slider tracker for fullscreen slider expand feature
   const [activeSlider, setActiveSlider] = useState<"progress" | "volume" | "brightness" | null>(null);
 
+  const [showDolbyToast, setShowDolbyToast] = useState(false);
+  const [dolbyCountdown, setDolbyCountdown] = useState(8);
+  const dolbyIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (dolbyIntervalRef.current) {
+        clearInterval(dolbyIntervalRef.current);
+      }
+    };
+  }, []);
+
+  const lastSeekTimeRef = useRef(0);
+  const lastSourceChangeTimeRef = useRef(0);
+
   // Load initial system volume on mount
   useEffect(() => {
     bridge.getSystemVolume().then((vol) => {
       volumeShared.value = vol;
+      setIsMuted(vol === 0);
     }).catch(() => {});
   }, []);
 
@@ -319,24 +398,49 @@ export default function CustomVideoPlayer({
       .catch(() => setSavedProgress(0));
   }, [progressKey]);
 
-  // Initializing Expo Video Player with timeUpdateEventInterval & unmute parameters
-  const playerSource = useMemo(() => {
-    const srcObj: any = {
-      uri: selectedSource ? selectedSource.url : url,
-    };
-    const currentHeaders = selectedSource ? selectedSource.headers : headers;
-    if (currentHeaders) {
-      srcObj.headers = currentHeaders;
-    }
-    return srcObj;
-  }, [selectedSource, url, headers]);
-
-  const player = useVideoPlayer(playerSource, (p) => {
-    p.play();
+  // Initializing Expo Video Player with null source for instant layout mounting
+  const player = useVideoPlayer(null, (p) => {
     p.timeUpdateEventInterval = 0.25; // Trigger timeUpdate 4x a second
     p.muted = false; // Force unmute audio
     p.volume = 1.0; // Default full volume
   });
+
+  const hasLoadedInitialSourceRef = useRef(false);
+
+  // Load or replace source dynamically
+  useEffect(() => {
+    if (!hasLoadedInitialSourceRef.current) {
+      // Delay initial source load to let the player UI render instantly
+      const timer = setTimeout(() => {
+        const currentUrl = selectedSource ? selectedSource.url : url;
+        player.replaceAsync({
+          uri: currentUrl,
+          headers: selectedSource ? selectedSource.headers : headers,
+        })
+        .then(() => {
+          player.play();
+        })
+        .catch((err) => {
+          console.warn("[CustomPlayer] Failed to load source asynchronously on mount:", err);
+        });
+        hasLoadedInitialSourceRef.current = true;
+      }, 400);
+      return () => clearTimeout(timer);
+    } else {
+      // Immediate load for quality changes
+      const currentUrl = selectedSource ? selectedSource.url : url;
+      player.replaceAsync({
+        uri: currentUrl,
+        headers: selectedSource ? selectedSource.headers : headers,
+      })
+      .then(() => {
+        player.play();
+      })
+      .catch((err) => {
+        console.warn("[CustomPlayer] Failed to replace source dynamically:", err);
+      });
+    }
+  }, [selectedSource, url, headers]);
 
   // Keep relative player volume at max, control actual loudness via system volume
   useEffect(() => {
@@ -365,11 +469,15 @@ export default function CustomVideoPlayer({
     };
   }, []);
 
+  const shouldUnlockOnUnmountRef = useRef(true);
+
   // Lock orientation to Landscape
   useEffect(() => {
     bridge.lockLandscape();
     return () => {
-      bridge.unlockOrientation();
+      if (shouldUnlockOnUnmountRef.current) {
+        bridge.lockPortrait();
+      }
     };
   }, []);
 
@@ -398,14 +506,55 @@ export default function CustomVideoPlayer({
       }),
       player.addListener("statusChange", (event) => {
         setStatus(event.status);
-        if (event.status === "readyToPlay" && player.duration > 0) {
-          setDuration(player.duration);
+        if (event.status === "readyToPlay") {
+          if (player.duration > 0) {
+            setDuration(player.duration);
+          }
+          if (!hasInitiallyLoadedRef.current) {
+            hasInitiallyLoadedRef.current = true;
+            const currentUrl = selectedSource ? selectedSource.url : url;
+            if (isDolbyAudio(selectedSource, currentUrl)) {
+              setShowDolbyToast(true);
+              setDolbyCountdown(8);
+              if (dolbyIntervalRef.current) clearInterval(dolbyIntervalRef.current);
+              dolbyIntervalRef.current = setInterval(() => {
+                setDolbyCountdown((prev) => {
+                  if (prev <= 1) {
+                    if (dolbyIntervalRef.current) clearInterval(dolbyIntervalRef.current);
+                    setShowDolbyToast(false);
+                    return 0;
+                  }
+                  return prev - 1;
+                });
+              }, 1000);
+            }
+          }
+        } else if (event.status === "error") {
+          // If seeking occurred within the last 10 seconds, ignore transient canceled requests errors!
+          const timeSinceLastSeek = Date.now() - lastSeekTimeRef.current;
+          if (timeSinceLastSeek < 10000) {
+            console.log("[CustomPlayer] Ignoring transient error immediately after seek:", event.error?.message);
+            return;
+          }
+          // If source changed within the last 5 seconds, ignore transient old-source cancelled request errors!
+          const timeSinceLastSourceChange = Date.now() - lastSourceChangeTimeRef.current;
+          if (timeSinceLastSourceChange < 5000) {
+            console.log("[CustomPlayer] Ignoring transient error immediately after source swap:", event.error?.message);
+            return;
+          }
+          const errMsg = event.error?.message || "Source connection failed";
+          let userFriendlyMsg = "This stream source is currently unreachable or invalid. Please try another quality or different provider source.";
+          if (errMsg.toLowerCase().includes("timeout") || errMsg.toLowerCase().includes("connect")) {
+            userFriendlyMsg = "Connection timed out. The host server might be offline or blocked by your network. Try a different source.";
+          }
+          setPlayerError(userFriendlyMsg);
         }
       }),
       player.addListener("sourceLoad", (event) => {
         setDuration(event.duration);
       }),
       player.addListener("playToEnd", () => {
+        if (!hasLoadedInitialSourceRef.current) return; // Ignore playToEnd before the initial source has even loaded!
         if (sleepTimer === "episode") {
           handleClose();
         } else if (isSerial && onEpisodeChange && currentEpisodeIndex < episodes.length - 1) {
@@ -601,6 +750,7 @@ export default function CustomVideoPlayer({
             hudValueShared.value = nextVolume;
             volumeShared.value = nextVolume;
             player.volume = nextVolume;
+            setIsMuted(nextVolume === 0);
           }
         },
         onPanResponderRelease: () => {
@@ -623,15 +773,17 @@ export default function CustomVideoPlayer({
 
   const handleClose = () => {
     player.pause();
-    bridge.unlockOrientation();
+    bridge.lockPortrait();
     onClose();
   };
 
   const handlePlayExternal = () => {
     player.pause();
+    shouldUnlockOnUnmountRef.current = false;
     const currentUrl = selectedSource ? selectedSource.url : url;
-    bridge.playInExternalPlayer(currentUrl, null, title);
-    handleClose();
+    const currentHeaders = selectedSource ? selectedSource.headers : headers;
+    bridge.playInExternalPlayer(currentUrl, null, title, currentHeaders ? JSON.stringify(currentHeaders) : null);
+    onClose();
   };
 
   const formatTime = (secs: number) => {
@@ -665,11 +817,13 @@ export default function CustomVideoPlayer({
   };
 
   const handleSeekBack = () => {
+    lastSeekTimeRef.current = Date.now();
     player.seekBy(-10);
     resetHideTimer();
   };
 
   const handleSeekForward = () => {
+    lastSeekTimeRef.current = Date.now();
     player.seekBy(10);
     resetHideTimer();
   };
@@ -692,10 +846,12 @@ export default function CustomVideoPlayer({
       lastVolumeRef.current = volumeShared.value;
       volumeShared.value = 0;
       bridge.setSystemVolume(0);
+      setIsMuted(true);
     } else {
       const target = lastVolumeRef.current > 0 ? lastVolumeRef.current : 1.0;
       volumeShared.value = target;
       bridge.setSystemVolume(target);
+      setIsMuted(false);
     }
     resetHideTimer();
   };
@@ -705,6 +861,7 @@ export default function CustomVideoPlayer({
     const { pageX, locationX } = evt.nativeEvent;
     const ratio = Math.max(0, Math.min(1, locationX / 110));
     volumeShared.value = ratio;
+    setIsMuted(ratio === 0);
     volumeStartVal.current = ratio;
     volumeStartPageX.current = pageX;
     bridge.setSystemVolume(ratio);
@@ -716,6 +873,7 @@ export default function CustomVideoPlayer({
     const deltaX = pageX - volumeStartPageX.current;
     const nextVal = Math.max(0, Math.min(1, volumeStartVal.current + deltaX / 550));
     volumeShared.value = nextVal;
+    setIsMuted(nextVal === 0);
     bridge.setSystemVolume(nextVal);
     resetHideTimer();
   };
@@ -756,6 +914,7 @@ export default function CustomVideoPlayer({
 
   const handleProgressBarTouchStart = (evt: GestureResponderEvent) => {
     isDraggingProgressRef.current = true;
+    lastSeekTimeRef.current = Date.now();
     setActiveSlider("progress");
     const { pageX, locationX } = evt.nativeEvent;
     const normWidth = SCREEN_WIDTH - 200;
@@ -770,6 +929,7 @@ export default function CustomVideoPlayer({
 
   const handleProgressBarTouchMove = (evt: GestureResponderEvent) => {
     const { pageX } = evt.nativeEvent;
+    lastSeekTimeRef.current = Date.now();
     const deltaX = pageX - progressStartPageX.current;
     const deltaRatio = deltaX / SCREEN_WIDTH;
     const nextTime = Math.max(0, Math.min(duration, progressStartVal.current + deltaRatio * duration));
@@ -780,6 +940,7 @@ export default function CustomVideoPlayer({
 
   const handleProgressBarTouchEnd = () => {
     isDraggingProgressRef.current = false;
+    lastSeekTimeRef.current = Date.now();
     setActiveSlider(null);
   };
 
@@ -865,15 +1026,15 @@ export default function CustomVideoPlayer({
     const isActive = activeSlider === "progress";
     return {
       marginHorizontal: withTiming(isActive ? 0 : 16, { duration: 150 }),
-      height: withTiming(isActive ? 44 : 30, { duration: 150 }),
+      height: withTiming(isActive ? 60 : 40, { duration: 150 }),
     };
   });
 
   const progressTrackStyle = useAnimatedStyle(() => {
     const isActive = activeSlider === "progress";
     return {
-      height: withTiming(isActive ? 8 : 4, { duration: 150 }),
-      borderRadius: withTiming(isActive ? 4 : 2, { duration: 150 }),
+      height: withTiming(isActive ? 40 : 20, { duration: 150 }),
+      borderRadius: withTiming(isActive ? 20 : 10, { duration: 150 }),
     };
   });
 
@@ -883,15 +1044,13 @@ export default function CustomVideoPlayer({
       <View style={[StyleSheet.absoluteFillObject, { zIndex: 99999, backgroundColor: "#050505" }]}>
         <StatusBar hidden />
         <View style={styles.container}>
-          <BlurTargetView ref={setBlurTargetRef as any} style={StyleSheet.absoluteFillObject}>
-            <VideoView
-              player={player}
-              style={StyleSheet.absoluteFill}
-              contentFit={contentFit}
-              nativeControls={false}
-              surfaceType="textureView"
-            />
-          </BlurTargetView>
+          <VideoView
+            player={player}
+            style={StyleSheet.absoluteFill}
+            contentFit={contentFit}
+            nativeControls={false}
+            surfaceType="textureView"
+          />
 
           {/* Vignette Shading Fades at Top & Bottom */}
           <View style={StyleSheet.absoluteFill} pointerEvents="none">
@@ -908,15 +1067,9 @@ export default function CustomVideoPlayer({
           {/* Locked Floating Unlock Controls Button */}
           <View style={styles.lockOverlay} pointerEvents="box-none">
             <TouchableOpacity onPress={() => setIsLocked(false)} activeOpacity={0.8} style={styles.lockBtn}>
-              <BlurView
-                intensity={100}
-                tint="dark"
-                blurTarget={{ current: blurTarget }}
-                blurMethod="dimezisBlurView"
-                style={styles.blurCover}
-              >
+              <View style={styles.blurCover}>
                 <LockOpenIcon size={24} color={theme.colors.accentLight} />
-              </BlurView>
+              </View>
             </TouchableOpacity>
           </View>
         </View>
@@ -928,18 +1081,48 @@ export default function CustomVideoPlayer({
     <View style={[StyleSheet.absoluteFillObject, { zIndex: 99999, backgroundColor: "#050505" }]}>
       <StatusBar hidden />
       <View style={styles.container}>
-        {/* Underlay Video view with BlurTargetView for real native content blur */}
-        <BlurTargetView ref={setBlurTargetRef as any} style={StyleSheet.absoluteFillObject}>
-          <VideoView
-            player={player}
-            style={StyleSheet.absoluteFill}
-            contentFit={contentFit}
-            nativeControls={false}
-            surfaceType="textureView"
-          />
-        </BlurTargetView>
+        <VideoView
+          player={player}
+          style={StyleSheet.absoluteFill}
+          contentFit={contentFit}
+          nativeControls={false}
+          surfaceType="textureView"
+        />
 
-
+        {/* Dolby Audio Warning Modal */}
+        {showDolbyToast && (
+          <Animated.View
+            entering={FadeIn.duration(300)}
+            exiting={FadeOut.duration(300)}
+            style={styles.dolbyWarningOverlay}
+          >
+            <View style={styles.dolbyWarningCard}>
+              <View style={[StyleSheet.absoluteFillObject, { backgroundColor: "rgba(15, 15, 20, 0.95)", borderRadius: 16 }]} />
+              <View style={styles.dolbyWarningHeader}>
+                <View style={{ flexDirection: "row", alignItems: "center" }}>
+                  <SpeakerWaveIcon size={20} color={theme.colors.rose} style={{ marginRight: 10 }} />
+                  <Text style={styles.dolbyWarningTitle}>Dolby Audio Detected</Text>
+                </View>
+                <TouchableOpacity
+                  onPress={() => {
+                    setShowDolbyToast(false);
+                    if (dolbyIntervalRef.current) clearInterval(dolbyIntervalRef.current);
+                  }}
+                  style={styles.dolbyWarningCloseBtn}
+                  activeOpacity={0.8}
+                >
+                  <XMarkIcon size={18} color="#fff" />
+                </TouchableOpacity>
+              </View>
+              <Text style={styles.dolbyWarningMessage}>
+                This stream contains a Dolby 5.1 / AC3 audio track. If you do not hear any sound, please use the "Open in External Player" option at the top-left to play with VLC or MX Player (HW+).
+              </Text>
+              <Text style={styles.dolbyWarningCountdown}>
+                Auto-closing in {dolbyCountdown} seconds...
+              </Text>
+            </View>
+          </Animated.View>
+        )}
 
         {/* Double-tap / Gestures area */}
         <View style={StyleSheet.absoluteFill} {...panResponder.panHandlers}>
@@ -987,13 +1170,7 @@ export default function CustomVideoPlayer({
 
         {/* Volume / Brightness HUD Overlay */}
         <Animated.View style={[styles.hudContainer, hudStyle]} pointerEvents="none">
-          <BlurView
-            intensity={100}
-            tint="dark"
-            blurTarget={{ current: blurTarget }}
-            blurMethod="dimezisBlurView"
-            style={styles.hudBlur}
-          >
+          <View style={styles.hudBlur}>
             {hudType === "brightness" ? (
               <SunIcon size={28} color="#fff" />
             ) : (
@@ -1007,7 +1184,7 @@ export default function CustomVideoPlayer({
                 ]}
               />
             </View>
-          </BlurView>
+          </View>
         </Animated.View>
 
         {/* Top and Bottom Controls Interface - box-none to pass touches to child views */}
@@ -1040,37 +1217,19 @@ export default function CustomVideoPlayer({
             {/* Extreme Left: Back Button & Top Options Capsule */}
             <Animated.View style={[styles.topPanelLeft, otherUIStyle]} pointerEvents={activeSlider === null ? "box-none" : "none"}>
               <TouchableOpacity onPress={handleClose} activeOpacity={0.8} style={styles.circleBlurBtn}>
-                <BlurView
-                  intensity={100}
-                  tint="dark"
-                  blurTarget={{ current: blurTarget }}
-                  blurMethod="dimezisBlurView"
-                  style={[styles.blurCover, { borderRadius: 25 }]}
-                >
+                <View style={[styles.blurCover, { borderRadius: 25 }]}>
                   <XMarkIcon size={26} color="#fff" />
-                </BlurView>
+                </View>
               </TouchableOpacity>
 
               <TouchableOpacity onPress={handlePlayExternal} activeOpacity={0.8} style={styles.circleBlurBtn}>
-                <BlurView
-                  intensity={100}
-                  tint="dark"
-                  blurTarget={{ current: blurTarget }}
-                  blurMethod="dimezisBlurView"
-                  style={[styles.blurCover, { borderRadius: 25 }]}
-                >
+                <View style={[styles.blurCover, { borderRadius: 25 }]}>
                   <ArrowUpRightIcon size={20} color="#fff" />
-                </BlurView>
+                </View>
               </TouchableOpacity>
 
               {/* Top Menu capsule: Controls Lock, Aspect Ratio, and Swipe Gestures Toggle */}
-              <BlurView
-                intensity={100}
-                tint="dark"
-                blurTarget={{ current: blurTarget }}
-                blurMethod="dimezisBlurView"
-                style={styles.topMenuCapsule}
-              >
+              <View style={styles.topMenuCapsule}>
                 <TouchableOpacity
                   onPress={() => {
                     setIsLocked(true);
@@ -1106,20 +1265,13 @@ export default function CustomVideoPlayer({
                     color={gesturesEnabled ? "#fff" : "rgba(255,255,255,0.4)"}
                   />
                 </TouchableOpacity>
-              </BlurView>
+              </View>
             </Animated.View>
 
             {/* Top Right: Volume and Brightness vertical sliders stack */}
             <View style={styles.topRightSlidersStack} pointerEvents="box-none">
               {/* Volume control slider capsule */}
-              <Animated.View style={volumeCapsuleStyle}>
-                <BlurView
-                  intensity={100}
-                  tint="dark"
-                  blurTarget={{ current: blurTarget }}
-                  blurMethod="dimezisBlurView"
-                  style={[StyleSheet.absoluteFillObject, { borderRadius: 22 }]}
-                />
+              <Animated.View style={[styles.sliderCapsule, volumeCapsuleStyle]}>
                 <View style={{ flexDirection: "row", alignItems: "center", width: "100%", height: "100%" }}>
                   <Animated.View
                     style={[styles.sliderTrackContainer, volumeTrackStyle]}
@@ -1135,21 +1287,14 @@ export default function CustomVideoPlayer({
                   <TouchableOpacity onPress={handleMuteToggle} activeOpacity={0.8}>
                     <SpeakerWaveIcon
                       size={20}
-                      color={volumeShared.value === 0 ? theme.colors.rose : "#fff"}
+                      color={isMuted ? theme.colors.rose : "#fff"}
                     />
                   </TouchableOpacity>
                 </View>
               </Animated.View>
 
               {/* Brightness control slider capsule */}
-              <Animated.View style={brightnessCapsuleStyle}>
-                <BlurView
-                  intensity={100}
-                  tint="dark"
-                  blurTarget={{ current: blurTarget }}
-                  blurMethod="dimezisBlurView"
-                  style={[StyleSheet.absoluteFillObject, { borderRadius: 22 }]}
-                />
+              <Animated.View style={[styles.sliderCapsule, brightnessCapsuleStyle]}>
                 <View style={{ flexDirection: "row", alignItems: "center", width: "100%", height: "100%" }}>
                   <Animated.View
                     style={[styles.sliderTrackContainer, brightnessTrackStyle]}
@@ -1175,31 +1320,20 @@ export default function CustomVideoPlayer({
               <TouchableOpacity
                 onPress={() => onEpisodeChange(currentEpisodeIndex - 1)}
                 activeOpacity={0.8}
-                style={styles.centerNavBtn}
+                style={[styles.centerEpBtn, { marginRight: 16 }]}
               >
-                <BlurView
-                  intensity={100}
-                  tint="dark"
-                  blurTarget={{ current: blurTarget }}
-                  blurMethod="dimezisBlurView"
-                  style={[styles.blurCover, { borderRadius: 27 }]}
-                >
-                  <BackwardIcon size={24} color="#fff" />
-                </BlurView>
+                <View style={[styles.blurCover, { borderRadius: 21 }]}>
+                  <BackwardIcon size={20} color="#fff" />
+                </View>
               </TouchableOpacity>
             )}
 
-            {/* Seek Back Button with GoBackward10SecIcon */}
+            {/* Seek Back Button with ArrowPathIcon flipped + "10" inside */}
             <TouchableOpacity onPress={handleSeekBack} activeOpacity={0.8} style={styles.centerNavBtn}>
-              <BlurView
-                intensity={100}
-                tint="dark"
-                blurTarget={{ current: blurTarget }}
-                blurMethod="dimezisBlurView"
-                style={[styles.blurCover, { borderRadius: 27 }]}
-              >
-                <BackwardIcon size={30} color="#fff" />
-              </BlurView>
+              <View style={[styles.blurCover, { borderRadius: 27 }]}>
+                <ArrowPathIcon size={28} color="#fff" style={{ transform: [{ scaleX: -1 }] }} />
+                <Text style={styles.seekIconText}>10</Text>
+              </View>
             </TouchableOpacity>
 
             {/* Play/Pause Button - Shows buffering indicator inside when activeControls are visible */}
@@ -1208,13 +1342,7 @@ export default function CustomVideoPlayer({
               activeOpacity={0.8}
               style={styles.centerPlayBtn}
             >
-              <BlurView
-                intensity={100}
-                tint="dark"
-                blurTarget={{ current: blurTarget }}
-                blurMethod="dimezisBlurView"
-                style={[styles.blurCover, { borderRadius: 44 }]}
-              >
+              <View style={[styles.blurCover, { borderRadius: 44 }]}>
                 {(status === "loading" || status === "idle") ? (
                   <ActivityIndicator size="large" color="#fff" />
                 ) : isPlaying ? (
@@ -1222,20 +1350,15 @@ export default function CustomVideoPlayer({
                 ) : (
                   <PlayIcon size={44} color="#fff" style={{ marginLeft: 6 }} />
                 )}
-              </BlurView>
+              </View>
             </TouchableOpacity>
 
-            {/* Seek Forward Button with GoForward10SecIcon */}
+            {/* Seek Forward Button with ArrowPathIcon + "10" inside */}
             <TouchableOpacity onPress={handleSeekForward} activeOpacity={0.8} style={styles.centerNavBtn}>
-              <BlurView
-                intensity={100}
-                tint="dark"
-                blurTarget={{ current: blurTarget }}
-                blurMethod="dimezisBlurView"
-                style={[styles.blurCover, { borderRadius: 27 }]}
-              >
-                <ForwardIcon size={30} color="#fff" />
-              </BlurView>
+              <View style={[styles.blurCover, { borderRadius: 27 }]}>
+                <ArrowPathIcon size={28} color="#fff" />
+                <Text style={styles.seekIconText}>10</Text>
+              </View>
             </TouchableOpacity>
 
             {/* Show Next Episode Button if Series */}
@@ -1243,17 +1366,11 @@ export default function CustomVideoPlayer({
               <TouchableOpacity
                 onPress={() => onEpisodeChange(currentEpisodeIndex + 1)}
                 activeOpacity={0.8}
-                style={styles.centerNavBtn}
+                style={[styles.centerEpBtn, { marginLeft: 16 }]}
               >
-                <BlurView
-                  intensity={100}
-                  tint="dark"
-                  blurTarget={{ current: blurTarget }}
-                  blurMethod="dimezisBlurView"
-                  style={[styles.blurCover, { borderRadius: 27 }]}
-                >
-                  <ForwardIcon size={24} color="#fff" />
-                </BlurView>
+                <View style={[styles.blurCover, { borderRadius: 21 }]}>
+                  <ForwardIcon size={20} color="#fff" />
+                </View>
               </TouchableOpacity>
             )}
           </Animated.View>
@@ -1282,13 +1399,7 @@ export default function CustomVideoPlayer({
               </View>
 
               {/* Bottom Right: Video/Subtitle settings capsule */}
-              <BlurView
-                intensity={100}
-                tint="dark"
-                blurTarget={{ current: blurTarget }}
-                blurMethod="dimezisBlurView"
-                style={styles.capsuleBlur}
-              >
+              <View style={styles.capsuleBlur}>
                 <TouchableOpacity
                   onPress={() => setActiveModal("subtitles")}
                   activeOpacity={0.8}
@@ -1304,7 +1415,7 @@ export default function CustomVideoPlayer({
                 >
                   <BoltIcon size={20} color="#fff" />
                 </TouchableOpacity>
-              </BlurView>
+              </View>
             </Animated.View>
 
             {/* Row 2: Scrubber timeline full-width at the bottom, and time labels placed beside it (Left/Right) */}
@@ -1335,33 +1446,21 @@ export default function CustomVideoPlayer({
             <Animated.View style={[styles.actionPillsRow, otherUIStyle]} pointerEvents={activeSlider === null ? "auto" : "none"}>
               {/* Show Continue Watching button only if there is valid saved progress */}
               {savedProgress > 5 && duration > 0 && savedProgress < duration - 15 && (
-                <BlurView
-                  intensity={100}
-                  tint="dark"
-                  blurTarget={{ current: blurTarget }}
-                  blurMethod="dimezisBlurView"
-                  style={styles.pillCover}
-                >
+                <View style={styles.pillCover}>
                   <TouchableOpacity onPress={handleContinueWatching} style={styles.pillBtn}>
                     <ClockIcon size={14} color="#fff" style={{ marginRight: 6 }} />
                     <Text style={styles.pillText}>Continue Watching ({formatTime(savedProgress)})</Text>
                   </TouchableOpacity>
-                </BlurView>
+                </View>
               )}
 
               {/* Keep only this Sources button below the progress bar! */}
-              <BlurView
-                intensity={100}
-                tint="dark"
-                blurTarget={{ current: blurTarget }}
-                blurMethod="dimezisBlurView"
-                style={styles.pillCover}
-              >
+              <View style={styles.pillCover}>
                 <TouchableOpacity onPress={() => setActiveModal("quality")} style={styles.pillBtn}>
                   <Square3Stack3DIcon size={14} color="#fff" style={{ marginRight: 6 }} />
                   <Text style={styles.pillText}>Sources</Text>
                 </TouchableOpacity>
-              </BlurView>
+              </View>
             </Animated.View>
           </View>
         </Animated.View>
@@ -1375,7 +1474,6 @@ export default function CustomVideoPlayer({
             setShowResumePrompt(false);
           }}
           title="Resume Playback?"
-          blurTarget={{ current: blurTarget }}
           hideCloseButton={true}
         >
           <View style={{ alignItems: "center", width: "100%" }}>
@@ -1415,7 +1513,6 @@ export default function CustomVideoPlayer({
           visible={activeModal === "quality"}
           onClose={() => setActiveModal(null)}
           title="Select Source"
-          blurTarget={{ current: blurTarget }}
         >
           {sources.map((src, index) => (
             <TouchableOpacity
@@ -1439,7 +1536,6 @@ export default function CustomVideoPlayer({
           visible={activeModal === "subtitles"}
           onClose={() => setActiveModal(null)}
           title="Select Subtitles"
-          blurTarget={{ current: blurTarget }}
         >
           <View style={styles.settingsModalBody}>
             {/* Select Subtitle Track */}
@@ -1573,7 +1669,6 @@ export default function CustomVideoPlayer({
           visible={activeModal === "speed"}
           onClose={() => setActiveModal(null)}
           title="Playback Settings"
-          blurTarget={{ current: blurTarget }}
         >
           <View style={styles.settingsModalBody}>
             <Text style={styles.settingsLabel}>Playback Speed</Text>
@@ -1630,7 +1725,7 @@ export default function CustomVideoPlayer({
                 >
                   <Text style={styles.speedOptionText}>
                     {timer === "off"
-                      ? "Off"
+                       ? "Off"
                       : timer === "episode"
                       ? "End of Ep"
                       : `${timer}m`}
@@ -1640,6 +1735,66 @@ export default function CustomVideoPlayer({
             </View>
           </View>
         </PlayerModal>
+
+        {/* Playback Error Modal */}
+        <CustomModal
+          visible={playerError !== null}
+          onClose={() => {
+            setPlayerError(null);
+            handleClose();
+          }}
+          title="Playback Failed"
+          message={playerError || ""}
+          glowColors={["rgba(255, 74, 125, 0.15)", "transparent"]}
+          Icon={ExclamationCircleIcon}
+          iconColor="#ff4a7d"
+          iconBgColor="rgba(255, 74, 125, 0.1)"
+        >
+          <View style={{ width: "100%", alignItems: "center" }}>
+            <Text style={{ color: "rgba(255,255,255,0.45)", fontSize: 11, textAlign: "center", paddingHorizontal: 24, lineHeight: 16, marginBottom: 12 }}>
+              Tip: If the stream has no audio (e.g. Dolby AC3 codec) or fails to play, use the "Open in External Player" option at the top left to play with VLC or MX Player.
+            </Text>
+            <View style={{ flexDirection: "row", justifyContent: "center", width: "100%", gap: 12 }}>
+              <TouchableOpacity
+                onPress={() => {
+                  setPlayerError(null);
+                  const currentUrl = selectedSource ? selectedSource.url : url;
+                  player.replaceAsync({ uri: currentUrl, headers: selectedSource?.headers })
+                  .then(() => {
+                    player.play();
+                  })
+                  .catch((err) => {
+                    console.warn("[CustomPlayer] Retry replace failed:", err);
+                  });
+                }}
+                activeOpacity={0.8}
+                style={[styles.resumeBtn, { flex: 1, paddingVertical: 12, alignItems: "center" }]}
+              >
+                <Text style={styles.resumeBtnText}>Try Again</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => {
+                  setPlayerError(null);
+                  setActiveModal("quality");
+                }}
+                activeOpacity={0.8}
+                style={[styles.startOverBtn, { flex: 1, paddingVertical: 12, alignItems: "center", borderColor: "rgba(85, 128, 255, 0.45)", backgroundColor: "rgba(85, 128, 255, 0.08)" }]}
+              >
+                <Text style={[styles.startOverBtnText, { color: theme.colors.accentLight }]}>Change Source</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => {
+                  setPlayerError(null);
+                  handleClose();
+                }}
+                activeOpacity={0.8}
+                style={[styles.startOverBtn, { flex: 1, paddingVertical: 12, alignItems: "center" }]}
+              >
+                <Text style={styles.startOverBtnText}>Close Player</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </CustomModal>
       </View>
     </View>
   );
@@ -1685,6 +1840,9 @@ const styles = StyleSheet.create({
     width: 70,
     height: 160,
     borderRadius: 16,
+    backgroundColor: "rgba(20, 18, 24, 0.85)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
     overflow: "hidden",
   },
   hudBlur: {
@@ -1724,6 +1882,9 @@ const styles = StyleSheet.create({
     width: 50,
     height: 50,
     borderRadius: 25,
+    backgroundColor: "rgba(20, 18, 24, 0.85)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
     overflow: "hidden",
   },
   topMenuCapsule: {
@@ -1731,6 +1892,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     height: 50,
     borderRadius: 25,
+    backgroundColor: "rgba(20, 18, 24, 0.85)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
     paddingHorizontal: 8,
     overflow: "hidden",
   },
@@ -1738,12 +1902,27 @@ const styles = StyleSheet.create({
     width: 54,
     height: 54,
     borderRadius: 27,
+    backgroundColor: "rgba(20, 18, 24, 0.85)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
+    overflow: "hidden",
+  },
+  centerEpBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: "rgba(20, 18, 24, 0.85)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
     overflow: "hidden",
   },
   centerPlayBtn: {
     width: 88,
     height: 88,
     borderRadius: 44,
+    backgroundColor: "rgba(20, 18, 24, 0.85)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
     overflow: "hidden",
     marginHorizontal: 24,
   },
@@ -1762,6 +1941,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     height: 44,
     borderRadius: 22,
+    backgroundColor: "rgba(20, 18, 24, 0.85)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
     paddingHorizontal: 16,
     overflow: "hidden",
   },
@@ -1787,6 +1969,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     height: 46,
     borderRadius: 23,
+    backgroundColor: "rgba(20, 18, 24, 0.85)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
     paddingHorizontal: 12,
     overflow: "hidden",
   },
@@ -1867,6 +2052,9 @@ const styles = StyleSheet.create({
   },
   pillCover: {
     borderRadius: 20,
+    backgroundColor: "rgba(20, 18, 24, 0.85)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
     overflow: "hidden",
     marginRight: 8,
   },
@@ -1897,20 +2085,20 @@ const styles = StyleSheet.create({
   },
   progressBarContainer: {
     flex: 1,
-    height: 24,
+    height: 60,
     justifyContent: "center",
   },
   progressBarTrack: {
     width: "100%",
-    height: 8,
+    height: 40,
     backgroundColor: "rgba(255,255,255,0.2)",
-    borderRadius: 4,
+    borderRadius: 20,
     overflow: "hidden",
   },
   progressBarFill: {
     height: "100%",
     backgroundColor: "#ffffff",
-    borderRadius: 4,
+    borderRadius: 20,
   },
   sheetOverlay: {
     ...StyleSheet.absoluteFillObject,
@@ -1927,6 +2115,9 @@ const styles = StyleSheet.create({
     height: 60,
     borderRadius: 30,
     overflow: "hidden",
+    backgroundColor: "rgba(20, 18, 24, 0.85)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
     shadowColor: "#0047FF",
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.5,
@@ -2025,9 +2216,8 @@ const styles = StyleSheet.create({
   seekIconText: {
     position: "absolute",
     color: "#fff",
-    fontSize: 9,
+    fontSize: 8,
     fontWeight: "800",
-    top: 17,
   },
   modalHeader: {
     flexDirection: "row",
@@ -2102,5 +2292,53 @@ const styles = StyleSheet.create({
   },
   sheetContent: {
     display: "none",
+  },
+  dolbyWarningOverlay: {
+    position: "absolute",
+    top: 0,
+    bottom: 0,
+    left: 0,
+    right: 0,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "rgba(0,0,0,0.5)",
+    zIndex: 999999,
+  },
+  dolbyWarningCard: {
+    width: 450,
+    padding: 20,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(255, 74, 125, 0.25)",
+    overflow: "hidden",
+    elevation: 5,
+  },
+  dolbyWarningHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  dolbyWarningTitle: {
+    color: "#fff",
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  dolbyWarningCloseBtn: {
+    padding: 4,
+    borderRadius: 12,
+    backgroundColor: "rgba(255,255,255,0.06)",
+  },
+  dolbyWarningMessage: {
+    color: "#E5E2E3",
+    fontSize: 12,
+    lineHeight: 18,
+    marginBottom: 12,
+  },
+  dolbyWarningCountdown: {
+    color: "rgba(255,255,255,0.45)",
+    fontSize: 11,
+    textAlign: "right",
+    fontWeight: "500",
   },
 });

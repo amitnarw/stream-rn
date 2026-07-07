@@ -22,6 +22,7 @@ import {
   Pressable,
   Animated as RNAnimated,
   Modal,
+  AppState,
 } from "react-native";
 import Animated, {
   Extrapolation,
@@ -46,7 +47,7 @@ import { BlurView, BlurTargetView } from "expo-blur";
 import {
   PlayIcon,
   ArrowLeftIcon,
-  HeartIcon,
+  HeartIcon as HeartIconSolid,
   ExclamationCircleIcon,
   ArrowPathIcon,
   XMarkIcon,
@@ -54,6 +55,7 @@ import {
   ChevronUpIcon,
   ChevronDownIcon
 } from "react-native-heroicons/solid";
+import { HeartIcon as HeartIconOutline } from "react-native-heroicons/outline";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as favoritesApi from "../api/favorites";
 import { LinearGradient } from "expo-linear-gradient";
@@ -552,11 +554,49 @@ export default function DetailScreen() {
   const torrentIntervalRef = useRef<any>(null);
   const resolveTimeoutRef = useRef<any>(null);
 
+  const showSourcePickerRef = useRef(false);
+  useEffect(() => {
+    showSourcePickerRef.current = showSourcePicker;
+  }, [showSourcePicker]);
+
+  const lastProgressUpdateRef = useRef(0);
+  const pendingProgressRef = useRef<bridge.PlaybackProgress[] | null>(null);
+  const progressTimeoutRef = useRef<any>(null);
+
+  const throttledSetProgress = useCallback((progress: bridge.PlaybackProgress[]) => {
+    pendingProgressRef.current = progress;
+    const now = Date.now();
+    const timeSinceLastUpdate = now - lastProgressUpdateRef.current;
+
+    if (timeSinceLastUpdate >= 600) {
+      setResolvingProgress(progress);
+      lastProgressUpdateRef.current = now;
+      if (progressTimeoutRef.current) {
+        clearTimeout(progressTimeoutRef.current);
+        progressTimeoutRef.current = null;
+      }
+    } else {
+      if (!progressTimeoutRef.current) {
+        progressTimeoutRef.current = setTimeout(() => {
+          if (pendingProgressRef.current) {
+            setResolvingProgress(pendingProgressRef.current);
+            lastProgressUpdateRef.current = Date.now();
+          }
+          progressTimeoutRef.current = null;
+        }, 600 - timeSinceLastUpdate);
+      }
+    }
+  }, []);
+
+  const [isOpeningPlayer, setIsOpeningPlayer] = useState(false);
+
   const closeSourcePicker = () => {
     setShowSourcePicker(false);
     setPlayingEpisode(null);
     setActiveEpisodeIndex(null);
     setIsSheetTransitionDone(false);
+    setIsResolving(false);
+    setIsOpeningPlayer(false);
     if (resolveTimeoutRef.current) {
       clearTimeout(resolveTimeoutRef.current);
       resolveTimeoutRef.current = null;
@@ -567,6 +607,11 @@ export default function DetailScreen() {
       clearInterval(torrentIntervalRef.current);
     }
     bridge.stopTorrentStream().catch(() => {});
+    if (progressTimeoutRef.current) {
+      clearTimeout(progressTimeoutRef.current);
+      progressTimeoutRef.current = null;
+    }
+    pendingProgressRef.current = null;
   };
 
   useEffect(() => {
@@ -581,6 +626,31 @@ export default function DetailScreen() {
       bridge.stopTorrentStream().catch(() => {});
     };
   }, []);
+
+  // Handle orientation recovery when returning from external player or canceling chooser
+  useEffect(() => {
+    let timeoutId: any = null;
+
+    if (!playerVisible) {
+      // Force orientation back to portrait after 2 seconds to recover from dismissed app selectors
+      timeoutId = setTimeout(() => {
+        bridge.lockPortrait();
+      }, 2000);
+    }
+
+    const handleAppStateChange = (nextAppState: any) => {
+      if (nextAppState === "active" && !playerVisible) {
+        bridge.lockPortrait();
+      }
+    };
+
+    const subscription = AppState.addEventListener("change", handleAppStateChange);
+
+    return () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      subscription.remove();
+    };
+  }, [playerVisible]);
 
   useEffect(() => {
     if (showSourcePicker) {
@@ -923,28 +993,32 @@ export default function DetailScreen() {
         console.warn("Failed to open trailer URL", err),
       );
     } else {
-      setPlayerConfig({
-        url: trailer.url,
-        headers: trailer.referer ? { Referer: trailer.referer } : undefined,
-        title: `${detail.title} - Trailer`,
-        isSerial: false,
-        season: 1,
-        episode: 1,
-        episodeTitle: "Trailer",
-        logoUrl: detail.logoUrl || "",
-        currentEpisodeIndex: -1,
-        episodes: [],
-        sources: [
+      bridge.playStream(
+        trailer.url,
+        trailer.referer ? { Referer: trailer.referer } : undefined,
+        `${detail.title} - Trailer`,
+        "",
+        [
           {
             quality: "Trailer",
             url: trailer.url,
             type: "direct",
-            headers: trailer.referer ? { Referer: trailer.referer } : undefined,
+            headers: trailer.referer ? { Referer: trailer.referer } : {},
           },
         ],
-        subtitles: [],
-      });
-      setPlayerVisible(true);
+        [],
+        "[]",
+        -1,
+        "",
+        "movie",
+        detail.posterUrl || "",
+        1,
+        1,
+        "Trailer",
+        detail.logoUrl || "",
+        "Cinemeta",
+        ""
+      );
     }
   };
 
@@ -1072,9 +1146,13 @@ export default function DetailScreen() {
             providerName,
             ep.mediaRef,
             (progress) => {
-              setResolvingProgress(progress);
+              if (showSourcePickerRef.current) {
+                throttledSetProgress(progress);
+              }
             },
             (newSource) => {
+              if (!showSourcePickerRef.current) return;
+              if (newSource.provider === "Tamilblasters" && !newSource.url.startsWith("magnet:")) return;
               // Stream sources into UI immediately as each provider returns them
               setSources((prev) => {
                 const mapped = mapSourceProvider(newSource);
@@ -1085,10 +1163,14 @@ export default function DetailScreen() {
             },
             () => {
               // onAllDone: ALL providers have completed — now safe to stop loading
-              setIsResolving(false);
-              setPlayingEpisode(null);
+              if (showSourcePickerRef.current) {
+                setIsResolving(false);
+                setPlayingEpisode(null);
+              }
             },
           );
+
+          if (!showSourcePickerRef.current) return;
 
           setSubtitles(result.subtitles);
           // Merge snapshot sources into live-streamed ones (never overwrite)
@@ -1096,13 +1178,14 @@ export default function DetailScreen() {
             const merged = new Map(prev.map((s) => [s.url, s]));
             (result.sources ?? []).forEach((s) => {
               const mapped = mapSourceProvider(s);
-              if (mapped && !merged.has(mapped.url)) {
+              if (mapped && (mapped.provider !== "Tamilblasters" || mapped.url.startsWith("magnet:")) && !merged.has(mapped.url)) {
                 merged.set(mapped.url, mapped);
               }
             });
             return [...merged.values()];
           });
         } catch (e: any) {
+          if (!showSourcePickerRef.current) return;
           setLinksError(
             e instanceof bridge.OfflineError
               ? "No internet connection. Please check your network."
@@ -1139,159 +1222,175 @@ export default function DetailScreen() {
 
   if (phase === "idle" || !item) return null;
 
-  async function onSourceSelect(source: VideoSource) {
-    const originalIndex = sources.findIndex((s) => s.url === source.url);
-    if (originalIndex === -1) return;
-
-    const currentEp = displayedEpisodes.find(
-      (_, i) => activeEpisodeIndex === i,
-    );
-    const title = detail?.isSerial
-      ? `${detail?.title} - ${currentEp?.label ?? `Episode ${currentEp?.episode ?? 1}`}`
-      : `${detail?.title ?? ""}`;
-    const subUrl = subtitles.length > 0 ? subtitles[0].url : "";
-
-    setSelectedSourceIndex(originalIndex);
-    setPlayingEpisode(null);
-
-    const episodesPayload = allEpisodes.map((e) => ({
-      episode: e.episode,
-      label: e.label,
-      mediaRef: e.mediaRef,
-      season: e.season,
-    }));
-
-    const protocol = getProtocolLabel(source.type, source.url);
-    const isTorrent =
-      protocol === "TORRENT" ||
-      source.url.startsWith("magnet:") ||
-      source.type === "torrent";
-
-    if (isTorrent) {
-      const sourceSeeders = (source as any).seeders ?? 0;
+  function onSourceSelect(source: VideoSource) {
+    setIsOpeningPlayer(true);
+    setTimeout(async () => {
       try {
-        setIsTorrentBuffering(true);
-        setTorrentStatus({ progress: 0, speed: 0, peers: 0, active: true });
-        setSelectedTorrentSeeders(sourceSeeders);
+        const originalIndex = sources.findIndex((s) => s.url === source.url);
+        if (originalIndex === -1) {
+          setIsOpeningPlayer(false);
+          return;
+        }
 
-        bridge
-          .startTorrentStream(source.url)
-          .then((info) => {
-            // console.log(
-            //   "[ZunoPlugin] Native torrent stream info resolved:",
-            //   info,
-            // );
+        const currentEp = displayedEpisodes.find(
+          (_, i) => activeEpisodeIndex === i,
+        );
+        const title = detail?.isSerial
+          ? `${detail?.title} - ${currentEp?.label ?? `Episode ${currentEp?.episode ?? 1}`}`
+          : `${detail?.title ?? ""}`;
+        const subUrl = subtitles.length > 0 ? subtitles[0].url : "";
 
-            if (torrentIntervalRef.current) {
-              clearInterval(torrentIntervalRef.current);
-            }
+        setSelectedSourceIndex(originalIndex);
+        setPlayingEpisode(null);
 
-            const intervalId = setInterval(async () => {
-              try {
-                const status = await bridge.getTorrentStatus();
-                setTorrentStatus(status);
+        const episodesPayload = allEpisodes.map((e) => ({
+          episode: e.episode,
+          label: e.label,
+          mediaRef: e.mediaRef,
+          season: e.season,
+        }));
 
-                // 1.5% represents full indexing download (moov atom / header container tables)
-                if (status.progress >= 1.5 && status.active) {
-                  clearInterval(intervalId);
-                  setIsTorrentBuffering(false);
+        const protocol = getProtocolLabel(source.type, source.url);
+        const isTorrent =
+          protocol === "TORRENT" ||
+          source.url.startsWith("magnet:") ||
+          source.type === "torrent";
 
-                  // Check if external player mode is enabled
-                  try {
-                    const mode = await AsyncStorage.getItem('@sozo_player_mode');
-                    if (mode === 'external') {
-                      closeSourcePicker();
-                      bridge.playInExternalPlayer(info.streamUrl, null, title);
-                      return;
-                    }
-                  } catch (e) {
-                    console.warn('Failed to read player mode setting:', e);
-                  }
+        if (isTorrent) {
+          const sourceSeeders = (source as any).seeders ?? 0;
+          try {
+            setIsTorrentBuffering(true);
+            setTorrentStatus({ progress: 0, speed: 0, peers: 0, active: true });
+            setSelectedTorrentSeeders(sourceSeeders);
 
-                  // Play local HTTP range server stream URL!
-                  setPlayerConfig({
-                    url: info.streamUrl,
-                    headers: source.headers,
-                    title: detail?.title || "",
-                    subUrl,
-                    sources: [
-                      {
-                        quality: "Torrent Stream",
-                        url: info.streamUrl,
-                        type: source.type,
-                        headers: source.headers,
-                        provider: source.provider,
-                        host: "127.0.0.1",
-                      },
-                    ],
-                    subtitles,
-                    isSerial: detail?.isSerial || false,
-                    season: currentEp?.season || 1,
-                    episode: currentEp?.episode || 1,
-                    episodeTitle: currentEp?.label || "",
-                    logoUrl: detail?.logoUrl || "",
-                    currentEpisodeIndex: activeEpisodeIndex ?? -1,
-                    episodes: allEpisodes,
-                  });
-                  setPlayerVisible(true);
+            bridge
+              .startTorrentStream(source.url)
+              .then((info) => {
+                if (torrentIntervalRef.current) {
+                  clearInterval(torrentIntervalRef.current);
                 }
-              } catch (err) {
-                console.warn("[ZunoPlugin] Error polling torrent status:", err);
-              }
-            }, 500);
 
-            torrentIntervalRef.current = intervalId;
-          })
-          .catch((err) => {
+                const intervalId = setInterval(async () => {
+                  try {
+                    const status = await bridge.getTorrentStatus();
+                    setTorrentStatus(status);
+
+                    // 1.5% represents full indexing download (moov atom / header container tables)
+                    if (status.progress >= 1.5 && status.active) {
+                      clearInterval(intervalId);
+                      setIsTorrentBuffering(false);
+
+                      // Check if external player mode is enabled
+                      try {
+                        const mode = await AsyncStorage.getItem('@sozo_player_mode');
+                        if (mode === 'external') {
+                          closeSourcePicker();
+                          bridge.playInExternalPlayer(info.streamUrl, null, title, source.headers ? JSON.stringify(source.headers) : null);
+                          return;
+                        }
+                      } catch (e) {
+                        console.warn('Failed to read player mode setting:', e);
+                      }
+
+                      // Play local HTTP range server stream URL via Kotlin player!
+                      closeSourcePicker();
+                      setIsOpeningPlayer(false);
+                      bridge.playStream(
+                        info.streamUrl,
+                        source.headers,
+                        detail?.title || "",
+                        subUrl,
+                        [
+                          {
+                            quality: "Torrent Stream",
+                            url: info.streamUrl,
+                            type: source.type,
+                            headers: source.headers,
+                            provider: source.provider,
+                          },
+                        ],
+                        subtitles,
+                        allEpisodes ? JSON.stringify(allEpisodes) : "[]",
+                        activeEpisodeIndex ?? -1,
+                        detail?.imdbId || "",
+                        detail?.isSerial ? "series" : "movie",
+                        detail?.posterUrl || "",
+                        currentEp?.season || 1,
+                        currentEp?.episode || 1,
+                        currentEp?.label || "",
+                        detail?.logoUrl || "",
+                        providerName,
+                        detail?.url || item?.url || ""
+                      );
+                    }
+                  } catch (err) {
+                    console.warn("[ZunoPlugin] Error polling torrent status:", err);
+                  }
+                }, 500);
+
+                torrentIntervalRef.current = intervalId;
+              })
+              .catch((err) => {
+                setIsTorrentBuffering(false);
+                setTorrentErrorModal({
+                  visible: true,
+                  message: cleanTorrentError(err.message),
+                });
+              });
+          } catch (e: any) {
             setIsTorrentBuffering(false);
             setTorrentErrorModal({
               visible: true,
-              message: cleanTorrentError(err.message),
+              message: cleanTorrentError(e.message),
             });
-          });
-      } catch (e: any) {
-        setIsTorrentBuffering(false);
-        setTorrentErrorModal({
-          visible: true,
-          message: cleanTorrentError(e.message),
-        });
-      }
-      return;
-    }
+          }
+          return;
+        }
 
-    // Direct link: Check if external player mode is enabled
-    try {
-      const mode = await AsyncStorage.getItem('@sozo_player_mode');
-      if (mode === 'external') {
+        // Direct link: Check if external player mode is enabled
+        try {
+          const mode = await AsyncStorage.getItem('@sozo_player_mode');
+          if (mode === 'external') {
+            closeSourcePicker();
+            bridge.playInExternalPlayer(source.url, null, title, source.headers ? JSON.stringify(source.headers) : null);
+            return;
+          }
+        } catch (e) {
+          console.warn('Failed to read player mode setting:', e);
+        }
+
         closeSourcePicker();
-        bridge.playInExternalPlayer(source.url, null, title);
-        return;
+        setIsOpeningPlayer(false);
+        bridge.playStream(
+          source.url,
+          source.headers,
+          detail?.title || "",
+          subUrl,
+          sources.map((s) => ({
+            quality: s.quality,
+            url: s.url,
+            type: s.type,
+            headers: s.headers,
+            provider: source.provider,
+          })),
+          subtitles,
+          allEpisodes ? JSON.stringify(allEpisodes) : "[]",
+          activeEpisodeIndex ?? -1,
+          detail?.imdbId || "",
+          detail?.isSerial ? "series" : "movie",
+          detail?.posterUrl || "",
+          currentEp?.season || 1,
+          currentEp?.episode || 1,
+          currentEp?.label || "",
+          detail?.logoUrl || "",
+          providerName,
+          detail?.url || item?.url || ""
+        );
+      } catch (e) {
+        console.warn("Failed onSourceSelect:", e);
+        setIsOpeningPlayer(false);
       }
-    } catch (e) {
-      console.warn('Failed to read player mode setting:', e);
-    }
-
-    setPlayerConfig({
-      url: source.url,
-      headers: source.headers,
-      title: detail?.title || "",
-      subUrl,
-      sources: sources.map((s) => ({
-        quality: s.quality,
-        url: s.url,
-        type: s.type,
-        headers: s.headers,
-      })),
-      subtitles,
-      isSerial: detail?.isSerial || false,
-      season: currentEp?.season || 1,
-      episode: currentEp?.episode || 1,
-      episodeTitle: currentEp?.label || "",
-      logoUrl: detail?.logoUrl || "",
-      currentEpisodeIndex: activeEpisodeIndex ?? -1,
-      episodes: allEpisodes,
-    });
-    setPlayerVisible(true);
+    }, 0);
   }
 
   const expandedContent = detail ? (
@@ -1556,10 +1655,17 @@ export default function DetailScreen() {
                 activeOpacity={0.8}
               >
                 <View style={styles.closeButtonInner}>
-                  <HeartIcon
-                    size={20}
-                    color={isFav ? "#ff4a7d" : "#ffffff"}
-                  />
+                  {isFav ? (
+                    <HeartIconSolid
+                      size={20}
+                      color={theme.colors.accent}
+                    />
+                  ) : (
+                    <HeartIconOutline
+                      size={20}
+                      color="#ffffff"
+                    />
+                  )}
                 </View>
               </TouchableOpacity>
             </Animated.View>
@@ -2124,114 +2230,97 @@ export default function DetailScreen() {
                   {/* Dynamic Provider Tabs scroll view */}
                   {providerTabs.length > 1 && (
                     <View style={styles.tabsContainer}>
-                      <ScrollView
-                        horizontal
-                        showsHorizontalScrollIndicator={false}
-                        contentContainerStyle={styles.tabsScrollContent}
+                      <MaskedView
+                        style={styles.tabsMaskedView}
+                        maskElement={
+                          <LinearGradient
+                            colors={["transparent", "black", "black", "transparent"]}
+                            locations={[0, 0.08, 0.92, 1]}
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 1, y: 0 }}
+                            style={StyleSheet.absoluteFillObject}
+                          />
+                        }
                       >
-                        {providerTabs.map((tab) => {
-                          const isActive = activeProviderTab === tab;
+                        <ScrollView
+                          horizontal
+                          showsHorizontalScrollIndicator={false}
+                          contentContainerStyle={styles.tabsScrollContent}
+                        >
+                          {providerTabs.map((tab) => {
+                            const isActive = activeProviderTab === tab;
 
-                          // Calculate tab status decorations
-                          const prog = resolvingProgress.find(
-                            (p) => p.providerName === tab,
-                          );
-                          let tabLabel = tab;
-                          const tabSubLabel = cleanErrorMessage(
-                            prog?.errorReason,
-                          );
-                          const isSearching =
-                            (tab === "All" && isResolving) ||
-                            prog?.status === "searching";
+                            // Calculate tab status decorations
+                            const prog = resolvingProgress.find(
+                              (p) => p.providerName === tab,
+                            );
+                            let tabLabel = tab;
+                            const tabSubLabel = cleanErrorMessage(
+                              prog?.errorReason,
+                            );
+                            const isSearching =
+                              (tab === "All" && isResolving) ||
+                              prog?.status === "searching";
 
-                          const tabSourcesCount = sources.filter(
-                            (s) =>
-                              (s.provider ?? "").toLowerCase() ===
-                              tab.toLowerCase(),
-                          ).length;
-                          if (tab === "All") {
-                            tabLabel =
-                              sources.length > 0
-                                ? `All (${sources.length})`
-                                : "All";
-                          } else if (prog) {
-                            if (prog.status === "searching") {
+                            const tabSourcesCount = sources.filter(
+                              (s) =>
+                                (s.provider ?? "").toLowerCase() ===
+                                tab.toLowerCase(),
+                            ).length;
+                            if (tab === "All") {
                               tabLabel =
-                                tabSourcesCount > 0
-                                  ? `${tab} (${tabSourcesCount})`
-                                  : tab;
-                            } else if (prog.status === "found") {
-                              tabLabel = `${tab} (${tabSourcesCount})`;
-                            } else if (prog.status === "none") {
-                              tabLabel = `${tab} (0)`;
-                            } else if (prog.status === "error") {
-                              tabLabel =
-                                tabSourcesCount > 0
-                                  ? `${tab} (${tabSourcesCount})`
-                                  : `${tab} ⚠`;
+                                sources.length > 0
+                                  ? `All (${sources.length})`
+                                  : "All";
+                            } else if (prog) {
+                              if (prog.status === "searching") {
+                                tabLabel =
+                                  tabSourcesCount > 0
+                                    ? `${tab} (${tabSourcesCount})`
+                                    : tab;
+                              } else if (prog.status === "found") {
+                                tabLabel = `${tab} (${tabSourcesCount})`;
+                              } else if (prog.status === "none") {
+                                tabLabel = `${tab} (0)`;
+                              } else if (prog.status === "error") {
+                                tabLabel =
+                                  tabSourcesCount > 0
+                                    ? `${tab} (${tabSourcesCount})`
+                                    : `${tab} ⚠`;
+                              }
                             }
-                          }
 
-                          return (
-                            <TouchableOpacity
-                              key={tab}
-                              style={[
-                                styles.tabButton,
-                                isActive && styles.tabButtonActive,
-                                { flexDirection: "row", alignItems: "center" },
-                              ]}
-                              onPress={() => setActiveProviderTab(tab)}
-                              activeOpacity={0.7}
-                            >
-                              {isSearching && (
-                                <ActivityIndicator
-                                  size="small"
-                                  color={isActive ? "#ffffff" : "#0047FF"}
-                                  style={{ marginRight: 6 }}
-                                />
-                              )}
-                              <Text
+                            return (
+                              <TouchableOpacity
+                                key={tab}
                                 style={[
-                                  styles.tabText,
-                                  isActive && styles.tabTextActive,
+                                  styles.tabButton,
+                                  isActive && styles.tabButtonActive,
+                                  { flexDirection: "row", alignItems: "center" },
                                 ]}
+                                onPress={() => setActiveProviderTab(tab)}
+                                activeOpacity={0.7}
                               >
-                                {tabLabel}
-                              </Text>
-                            </TouchableOpacity>
-                          );
-                        })}
-                      </ScrollView>
-
-                      {/* Left & Right Edge Fades for Tabs ScrollView */}
-                      <LinearGradient
-                        colors={["#141417", "transparent"]}
-                        start={{ x: 0, y: 0 }}
-                        end={{ x: 1, y: 0 }}
-                        style={{
-                          position: "absolute",
-                          left: 0,
-                          top: 0,
-                          bottom: 0,
-                          width: 24,
-                          zIndex: 10,
-                        }}
-                        pointerEvents="none"
-                      />
-                      <LinearGradient
-                        colors={["transparent", "#141417"]}
-                        start={{ x: 0, y: 0 }}
-                        end={{ x: 1, y: 0 }}
-                        style={{
-                          position: "absolute",
-                          right: 0,
-                          top: 0,
-                          bottom: 0,
-                          width: 24,
-                          zIndex: 10,
-                        }}
-                        pointerEvents="none"
-                      />
+                                {isSearching && (
+                                  <ActivityIndicator
+                                    size="small"
+                                    color={isActive ? "#ffffff" : "#0047FF"}
+                                    style={{ marginRight: 6 }}
+                                  />
+                                )}
+                                <Text
+                                  style={[
+                                    styles.tabText,
+                                    isActive && styles.tabTextActive,
+                                  ]}
+                                >
+                                  {tabLabel}
+                                </Text>
+                              </TouchableOpacity>
+                            );
+                          })}
+                        </ScrollView>
+                      </MaskedView>
                     </View>
                   )}
 
@@ -2374,22 +2463,6 @@ export default function DetailScreen() {
                                         </View>
                                       )}
 
-                                    {sizeTag && (
-                                      <View
-                                        style={[
-                                          styles.sheetBadge,
-                                          {
-                                            backgroundColor:
-                                              "rgba(255,255,255,0.06)",
-                                          },
-                                        ]}
-                                      >
-                                        <Text style={styles.sheetBadgeText}>
-                                          {sizeTag}
-                                        </Text>
-                                      </View>
-                                    )}
-
                                     {showProviderBadge && (
                                       <View
                                         style={[
@@ -2439,6 +2512,31 @@ export default function DetailScreen() {
                                       </View>
                                     )}
 
+                                    {sizeTag && (
+                                      <View
+                                        style={[
+                                          styles.sheetBadge,
+                                          {
+                                            backgroundColor: "rgba(85, 128, 255, 0.12)",
+                                            borderColor: "rgba(85, 128, 255, 0.25)",
+                                            borderWidth: 0.5,
+                                          },
+                                        ]}
+                                      >
+                                        <Text
+                                          style={[
+                                            styles.sheetBadgeText,
+                                            {
+                                              color: "#5580FF",
+                                              fontWeight: "700",
+                                            },
+                                          ]}
+                                        >
+                                          {sizeTag}
+                                        </Text>
+                                      </View>
+                                    )}
+
                                     {subtitles.length > 0 && idx === 0 ? (
                                       <View
                                         style={[
@@ -2461,103 +2559,86 @@ export default function DetailScreen() {
                           };
 
                           return (
-                            <ScrollView
-                              showsVerticalScrollIndicator={false}
-                              style={styles.sheetList}
-                              contentContainerStyle={{
-                                paddingTop: 12,
-                                paddingBottom: 24,
-                              }}
+                            <MaskedView
+                              style={styles.sheetListMaskedView}
+                              maskElement={
+                                <LinearGradient
+                                  colors={["transparent", "black", "black", "transparent"]}
+                                  locations={[0, 0.08, 0.92, 1]}
+                                  start={{ x: 0, y: 0 }}
+                                  end={{ x: 0, y: 1 }}
+                                  style={StyleSheet.absoluteFillObject}
+                                />
+                              }
                             >
-                              {/* Direct/HLS Sources rendered first */}
-                              {directSources.map((source, idx) =>
-                                renderSourceRow(source, idx),
-                              )}
+                              <ScrollView
+                                showsVerticalScrollIndicator={false}
+                                style={styles.sheetList}
+                                contentContainerStyle={{
+                                  paddingTop: 12,
+                                  paddingBottom: 24,
+                                }}
+                              >
+                                {/* Direct/HLS Sources rendered first */}
+                                {directSources.map((source, idx) =>
+                                  renderSourceRow(source, idx),
+                                )}
 
-                              {/* Collapsible Torrent Accordion row */}
-                              {torrentSources.length > 0 && (
-                                <>
-                                  <TouchableOpacity
-                                    onPress={() => {
-                                      setTorrentExpanded(!torrentExpanded);
-                                    }}
-                                    style={[
-                                      styles.accordionHeader,
-                                      torrentExpanded &&
-                                        styles.accordionHeaderActive,
-                                    ]}
-                                    activeOpacity={0.8}
-                                  >
-                                    <ArrowDownTrayIcon
-                                      size={18}
-                                      color={theme.colors.rose}
-                                      style={{ marginRight: 10 }}
-                                    />
-                                    <Text style={styles.accordionTitle}>
-                                      Torrent & Magnet Links (
-                                      {torrentSources.length} found)
-                                    </Text>
-                                    {torrentExpanded ? (
-                                      <ChevronUpIcon size={18} color="#a0a0a5" />
-                                    ) : (
-                                      <ChevronDownIcon size={18} color="#a0a0a5" />
-                                    )}
-                                  </TouchableOpacity>
-
-                                  <Animated.View style={accordionAnimatedStyle}>
-                                    <View
-                                      onLayout={(e) => {
-                                        const { height } = e.nativeEvent.layout;
-                                        if (height > 0 && height !== accordionHeight) {
-                                          setAccordionHeight(height);
-                                        }
+                                {/* Collapsible Torrent Accordion row */}
+                                {torrentSources.length > 0 && (
+                                  <>
+                                    <TouchableOpacity
+                                      onPress={() => {
+                                        setTorrentExpanded(!torrentExpanded);
                                       }}
-                                      style={{
-                                        width: "100%",
-                                        position: "absolute",
-                                        top: 0,
-                                      }}
+                                      style={[
+                                        styles.accordionHeader,
+                                        torrentExpanded &&
+                                          styles.accordionHeaderActive,
+                                      ]}
+                                      activeOpacity={0.8}
                                     >
-                                      {torrentSources.map((source, idx) =>
-                                        renderSourceRow(source, idx),
+                                      <ArrowDownTrayIcon
+                                        size={18}
+                                        color={theme.colors.rose}
+                                        style={{ marginRight: 10 }}
+                                      />
+                                      <Text style={styles.accordionTitle}>
+                                        Torrent & Magnet Links (
+                                        {torrentSources.length} found)
+                                      </Text>
+                                      {torrentExpanded ? (
+                                        <ChevronUpIcon size={18} color="#a0a0a5" />
+                                      ) : (
+                                        <ChevronDownIcon size={18} color="#a0a0a5" />
                                       )}
-                                    </View>
-                                  </Animated.View>
-                                </>
-                              )}
-                            </ScrollView>
+                                    </TouchableOpacity>
+
+                                    <Animated.View style={accordionAnimatedStyle}>
+                                      <View
+                                        onLayout={(e) => {
+                                          const { height } = e.nativeEvent.layout;
+                                          if (height > 0 && height !== accordionHeight) {
+                                            setAccordionHeight(height);
+                                          }
+                                        }}
+                                        style={{
+                                          width: "100%",
+                                          position: "absolute",
+                                          top: 0,
+                                        }}
+                                      >
+                                        {torrentSources.map((source, idx) =>
+                                          renderSourceRow(source, idx),
+                                        )}
+                                      </View>
+                                    </Animated.View>
+                                  </>
+                                )}
+                              </ScrollView>
+                            </MaskedView>
                           );
                         })()}
-
-                        {/* Top & Bottom Edge Fades for sheetList */}
-                        <LinearGradient
-                          colors={["rgba(20, 18, 24, 0.95)", "transparent"]}
-                          start={{ x: 0, y: 0 }}
-                          end={{ x: 0, y: 1 }}
-                          style={{
-                            position: "absolute",
-                            left: 0,
-                            right: 0,
-                            top: 0,
-                            height: 16,
-                            zIndex: 10,
-                          }}
-                          pointerEvents="none"
-                        />
-                        <LinearGradient
-                          colors={["transparent", "rgba(20, 18, 24, 0.95)"]}
-                          start={{ x: 0, y: 0 }}
-                          end={{ x: 0, y: 1 }}
-                          style={{
-                            position: "absolute",
-                            left: 0,
-                            right: 0,
-                            bottom: 0,
-                            height: 24,
-                            zIndex: 10,
-                          }}
-                          pointerEvents="none"
-                        />
                       </View>
                     ) : (
                       // Empty state when there are no sources for this tab
@@ -2594,6 +2675,17 @@ export default function DetailScreen() {
                     </Text>
                   </View>
             </View>
+            {isOpeningPlayer && (
+              <View style={[StyleSheet.absoluteFillObject, { backgroundColor: "rgba(15, 15, 20, 0.92)", alignItems: "center", justifyContent: "center", zIndex: 999, borderTopLeftRadius: 28, borderTopRightRadius: 28 }]}>
+                <ActivityIndicator size="large" color="#0047FF" style={{ marginBottom: 12 }} />
+                <Text style={{ color: "#ffffff", fontSize: 16, fontWeight: "600" }}>
+                  Opening Player...
+                </Text>
+                <Text style={{ color: "#A0A0A5", marginTop: 6, fontSize: 12 }}>
+                  Please wait, initializing stream configuration
+                </Text>
+              </View>
+            )}
           </Animated.View>
         </Animated.View>
       )}
@@ -2657,6 +2749,7 @@ export default function DetailScreen() {
           onClose={() => {
             setPlayerVisible(false);
             setPlayerConfig(null);
+            setIsOpeningPlayer(false);
           }}
           subtitles={playerConfig.subtitles}
           sources={playerConfig.sources}
@@ -3806,6 +3899,14 @@ const styles = StyleSheet.create({
   tabsScrollContent: {
     gap: 8,
     paddingHorizontal: 28, // extra room so first/last tab aren't hidden behind the fade overlays
+  },
+  tabsMaskedView: {
+    width: "100%",
+    height: 38,
+  },
+  sheetListMaskedView: {
+    flex: 1,
+    width: "100%",
   },
   tabButton: {
     paddingHorizontal: 16,

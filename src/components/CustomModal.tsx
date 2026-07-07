@@ -21,6 +21,7 @@ interface CustomModalProps {
   iconColor: string;
   iconBgColor: string;
   confirmDestructive?: boolean;
+  children?: React.ReactNode;
 }
 
 export function CustomModal({
@@ -35,6 +36,7 @@ export function CustomModal({
   iconColor,
   iconBgColor,
   confirmDestructive = false,
+  children,
 }: CustomModalProps) {
   const isConfirmMode = !!confirmText && !!onConfirm;
 
@@ -64,7 +66,9 @@ export function CustomModal({
 
           <Text style={styles.modalMessage}>{message}</Text>
 
-          {isConfirmMode ? (
+          {children ? (
+            children
+          ) : isConfirmMode ? (
             <View style={styles.modalButtonRow}>
               <TouchableOpacity 
                 style={styles.modalCancelBtn} 

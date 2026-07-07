@@ -919,7 +919,8 @@ export async function resolvePlaybackSources(
   
   const addons = [
     { name: 'Torrentio', url: 'https://torrentio.strem.fun' },
-    { name: 'Comet', url: 'https://comet.feels.legal' }
+    { name: 'Comet', url: 'https://comet.feels.legal' },
+    { name: 'DesiFlix', url: 'https://desiflix.stremioaddon.workers.dev' }
   ];
 
   const progressList: PlaybackProgress[] = [];
@@ -1351,6 +1352,8 @@ export function playStream(
   episode?: number,
   episodeTitle?: string,
   logoUrl?: string,
+  provider?: string,
+  detailUrl?: string,
 ) {
   CloudStreamModule.playStream(
     url,
@@ -1368,6 +1371,8 @@ export function playStream(
     episode ?? 1,
     episodeTitle ?? '',
     logoUrl ?? '',
+    provider ?? 'Cinemeta',
+    detailUrl ?? '',
   );
 }
 
@@ -1443,6 +1448,12 @@ export function lockLandscape() {
   }
 }
 
+export function lockPortrait() {
+  if (CloudStreamModule?.lockPortrait) {
+    CloudStreamModule.lockPortrait();
+  }
+}
+
 export function unlockOrientation() {
   if (CloudStreamModule?.unlockOrientation) {
     CloudStreamModule.unlockOrientation();
@@ -1480,9 +1491,9 @@ export function setSystemVolume(volume: number) {
   }
 }
 
-export function playInExternalPlayer(url: string, mimeType: string | null, title: string | null) {
+export function playInExternalPlayer(url: string, mimeType: string | null, title: string | null, headersJson: string | null = null) {
   if (CloudStreamModule?.playInExternalPlayer) {
-    CloudStreamModule.playInExternalPlayer(url, mimeType, title);
+    CloudStreamModule.playInExternalPlayer(url, mimeType, title, headersJson);
   }
 }
 

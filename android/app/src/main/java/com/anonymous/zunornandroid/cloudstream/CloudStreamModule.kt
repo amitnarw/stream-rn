@@ -90,7 +90,7 @@ class CloudStreamModule(reactContext: ReactApplicationContext) :
     fun playWithMediaRef(providerName: String, data: String, title: String) {
         try {
             val context = reactApplicationContext
-            val intent = Intent(context, PlayerActivity::class.java).apply {
+            val intent = Intent(context, KotlinPlayerActivity::class.java).apply {
                 putExtra("providerName", providerName)
                 putExtra("data", data)
                 putExtra("title", title)
@@ -118,11 +118,13 @@ class CloudStreamModule(reactContext: ReactApplicationContext) :
         season: Int,
         episode: Int,
         episodeTitle: String,
-        logoUrl: String
+        logoUrl: String,
+        provider: String,
+        detailUrl: String
     ) {
         try {
             val context = reactApplicationContext
-            val intent = Intent(context, PlayerActivity::class.java).apply {
+            val intent = Intent(context, KotlinPlayerActivity::class.java).apply {
                 putExtra("url", url)
                 putExtra("headers", headers)
                 putExtra("referer", "")
@@ -139,6 +141,8 @@ class CloudStreamModule(reactContext: ReactApplicationContext) :
                 putExtra("episode", episode)
                 putExtra("episodeTitle", episodeTitle)
                 putExtra("logoUrl", logoUrl)
+                putExtra("provider", provider)
+                putExtra("detailUrl", detailUrl)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
             context.startActivity(intent)
@@ -291,6 +295,14 @@ class CloudStreamModule(reactContext: ReactApplicationContext) :
     }
 
     @ReactMethod
+    fun lockPortrait() {
+        val activity = getCurrentActivity()
+        if (activity != null) {
+            activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        }
+    }
+
+    @ReactMethod
     fun unlockOrientation() {
         val activity = getCurrentActivity()
         if (activity != null) {
@@ -365,15 +377,43 @@ class CloudStreamModule(reactContext: ReactApplicationContext) :
     }
 
     @ReactMethod
-    fun playInExternalPlayer(url: String, mimeType: String?, title: String?) {
+    fun playInExternalPlayer(url: String, mimeType: String?, title: String?, headersJson: String?) {
         try {
             val context = reactApplicationContext
             val intent = Intent(Intent.ACTION_VIEW).apply {
                 setDataAndType(android.net.Uri.parse(url), mimeType ?: "video/*")
                 putExtra("title", title ?: "Play Video")
                 putExtra("title_name", title ?: "Play Video")
-                // Support MX Player / VLC title parameters
-                putExtra("title", title ?: "Play Video")
+                
+                // Force MX Player to use HW+ decoder (value 4) for AC3/EAC3 audio decoding support
+                putExtra("decode_mode", 4.toByte())
+                putExtra("decode_mode", 4)
+                
+                // Parse headers and add them as extras for MX Player and VLC
+                if (!headersJson.isNullOrEmpty()) {
+                    try {
+                        val headersObj = org.json.JSONObject(headersJson)
+                        val headersArray = mutableListOf<String>()
+                        val headersBundle = android.os.Bundle()
+                        val iterator = headersObj.keys()
+                        while (iterator.hasNext()) {
+                            val key = iterator.next()
+                            val value = headersObj.getString(key)
+                            headersArray.add(key)
+                            headersArray.add(value)
+                            headersBundle.putString(key, value)
+                        }
+                        
+                        // MX Player HTTP Headers extra (String array of key/value pairs)
+                        putExtra("headers", headersArray.toTypedArray())
+                        
+                        // VLC HTTP Headers extra (Bundle)
+                        putExtra("headers", headersBundle)
+                    } catch (e: Exception) {
+                        Log.e("CloudStreamModule", "Failed to parse headersJson: ${e.message}")
+                    }
+                }
+                
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
             context.startActivity(Intent.createChooser(intent, "Play with").apply {

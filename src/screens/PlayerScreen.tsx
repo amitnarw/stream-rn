@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { View, Text, StyleSheet, SafeAreaView, ActivityIndicator } from "react-native";
 import * as bridge from "../api/cloudStreamBridge";
 
@@ -14,7 +14,7 @@ export default function PlayerScreen({ route }: Props) {
         const mode = await bridge.getPlayerMode();
         if (mode === 'external') {
           setStatus("Opening external player...");
-          bridge.playInExternalPlayer(url, null, title);
+          bridge.playInExternalPlayer(url, null, title, typeof headers === "string" ? headers : JSON.stringify(headers));
         } else {
           setStatus("Starting inbuilt player...");
           bridge.playStream(url, headers, title);

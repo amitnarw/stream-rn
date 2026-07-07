@@ -21,6 +21,6 @@
         <category android:name="android.intent.category.LAUNCHER"/>
       </intent-filter>
     </activity>
-    <activity android:name=".cloudstream.PlayerActivity" android:exported="false" android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout" android:theme="@style/Theme.AppCompat.NoActionBar" android:supportsPictureInPicture="true" />
+    <activity android:name=".cloudstream.KotlinPlayerActivity" android:exported="false" android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout" android:theme="@style/Theme.AppCompat.NoActionBar" android:supportsPictureInPicture="true" />
   </application>
 </manifest>
