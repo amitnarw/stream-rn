@@ -64,7 +64,6 @@ class KotlinPlayerActivity : AppCompatActivity() {
     private var player: ExoPlayer? = null
     private lateinit var playerView: PlayerView
     private lateinit var loadingGroup: View
-    private lateinit var bufferingView: View
     private lateinit var topBar: View
     private lateinit var bottomBar: View
     private lateinit var centerControls: View
@@ -97,7 +96,6 @@ class KotlinPlayerActivity : AppCompatActivity() {
     private lateinit var episodeSubtitleTv: TextView
     private var clipDrawable: android.graphics.drawable.ClipDrawable? = null
     private var logoBitmap: android.graphics.Bitmap? = null
-    private var shimmerAnimator: android.animation.ObjectAnimator? = null
     private var placeholderPulseAnimator: android.animation.ObjectAnimator? = null
     private var logoUrl: String = ""
     private var currentProgressPercentage = 0
@@ -331,10 +329,6 @@ class KotlinPlayerActivity : AppCompatActivity() {
         loadingGroup = createLoadingOverlay()
         root.addView(loadingGroup, matchParent())
 
-        bufferingView = createBufferingOverlay()
-        root.addView(bufferingView, matchParent())
-        bufferingView.visibility = View.GONE
-
         centerControls = createCenterControls()
         root.addView(centerControls, matchParent())
         centerControls.visibility = View.GONE
@@ -500,8 +494,6 @@ class KotlinPlayerActivity : AppCompatActivity() {
         mediaSession = null
         sleepHandler.removeCallbacks(sleepRunnable)
         dolbyRunnable?.let { dolbyHandler.removeCallbacks(it) }
-        shimmerAnimator?.cancel()
-        shimmerAnimator = null
         placeholderPulseAnimator?.cancel()
         placeholderPulseAnimator = null
         window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -598,7 +590,6 @@ class KotlinPlayerActivity : AppCompatActivity() {
         isErrorShowing = true
         loadingGroup.visibility = View.GONE
         loadingGroup.alpha = 1f
-        bufferingView.visibility = View.GONE
         errorMessageTv.text = msg
 
         errorRetryBtn.setOnClickListener {
@@ -901,9 +892,6 @@ class KotlinPlayerActivity : AppCompatActivity() {
                 updateBuffering(playbackState == Player.STATE_BUFFERING)
                 updateCenterPlayPauseIcon()
                 if (playbackState == Player.STATE_READY) {
-                    // Stop shimmer and hide loading overlay
-                    shimmerAnimator?.cancel()
-                    shimmerAnimator = null
                     loadingGroup.animate()
                         .alpha(0f)
                         .setDuration(400)
@@ -913,7 +901,6 @@ class KotlinPlayerActivity : AppCompatActivity() {
                                 loadingGroup.alpha = 1f
                             }
                         }).start()
-                    bufferingView.visibility = View.GONE
                     showControlsAfterLoad()
                     updateMediaSession(getCurrentEpisodeTitle())
                     checkAndShowDolbyWarning(url)
@@ -1180,25 +1167,6 @@ class KotlinPlayerActivity : AppCompatActivity() {
         }
         logoContainer.addView(logoForeground, matchParent())
 
-        // Start shimmer: animate clip level back and forth while waiting for real progress
-        startShimmerAnimation()
-    }
-
-    private fun startShimmerAnimation() {
-        shimmerAnimator?.cancel()
-        val cd = clipDrawable ?: return
-        shimmerAnimator = android.animation.ObjectAnimator.ofInt(cd, "level", 0, 4500).apply {
-            duration = 1100
-            repeatCount = android.animation.ValueAnimator.INFINITE
-            repeatMode = android.animation.ValueAnimator.REVERSE
-            interpolator = android.view.animation.AccelerateDecelerateInterpolator()
-            start()
-        }
-    }
-
-    private fun stopShimmerAnimation() {
-        shimmerAnimator?.cancel()
-        shimmerAnimator = null
     }
 
     private fun updateLoadingProgress(pct: Int) {
@@ -1207,25 +1175,8 @@ class KotlinPlayerActivity : AppCompatActivity() {
         currentProgressPercentage = targetPct
 
         runOnUiThread {
-            // Stop shimmer once real progress data arrives
-            if (targetPct > 0 && shimmerAnimator?.isRunning == true) {
-                stopShimmerAnimation()
-            }
             clipDrawable?.level = currentProgressPercentage * 100
         }
-    }
-
-    private fun createBufferingOverlay(): View {
-        val container = FrameLayout(this)
-        val spinner = ProgressBar(this).apply {
-            indeterminateTintList = ColorStateList.valueOf(Color.parseColor("#0047FF"))
-        }
-        val lp = FrameLayout.LayoutParams(dp(50), dp(50)).apply {
-            gravity = Gravity.CENTER
-        }
-        container.addView(spinner, lp)
-        container.visibility = View.GONE
-        return container
     }
 
     // ─── Center play controls ─── exact TSX sizes: 42×42 ep, 54×54 seek, 88×88 play
@@ -2625,26 +2576,26 @@ class KotlinPlayerActivity : AppCompatActivity() {
             centerPlayProgressBar.visibility = View.VISIBLE
             playPauseCenter.visibility = View.INVISIBLE
             
-            // Show logo loading overlay ONLY during initial load (position < 1s)
             val isInitialLoad = (player?.currentPosition ?: 0L) < 1000L
             if (isInitialLoad) {
                 if (loadingGroup.visibility != View.VISIBLE) {
-                    loadingGroup.alpha = 0.88f
+                    loadingGroup.alpha = 1f
                     loadingGroup.visibility = View.VISIBLE
-                    // Restart shimmer if we have a logo and progress hasn't completed
-                    if (clipDrawable != null && shimmerAnimator?.isRunning != true) {
-                        startShimmerAnimation()
-                    }
                 }
-                bufferingView.visibility = View.GONE
             } else {
-                // Mid-play buffer stall: show centered spinner only if controls are not visible
-                bufferingView.visibility = if (!isControlsVisible) View.VISIBLE else View.GONE
+                // Mid-play buffer stall: show logo width loader overlay if controls are not visible
+                if (!isControlsVisible) {
+                    if (loadingGroup.visibility != View.VISIBLE) {
+                        loadingGroup.alpha = 1f
+                        loadingGroup.visibility = View.VISIBLE
+                    }
+                } else {
+                    loadingGroup.visibility = View.GONE
+                }
             }
         } else {
             centerPlayProgressBar.visibility = View.GONE
             playPauseCenter.visibility = View.VISIBLE
-            bufferingView.visibility = View.GONE
             
             // Buffering ended — hide overlay (STATE_READY will also hide it)
             if (loadingGroup.visibility == View.VISIBLE) {
@@ -2657,7 +2608,6 @@ class KotlinPlayerActivity : AppCompatActivity() {
                             loadingGroup.alpha = 1f
                         }
                     }).start()
-                stopShimmerAnimation()
             }
         }
     }
@@ -2684,7 +2634,7 @@ class KotlinPlayerActivity : AppCompatActivity() {
         bottomBar.animate().alpha(1f).setDuration(fadeDuration).setInterpolator(AccelerateDecelerateInterpolator()).start()
         centerControls.animate().alpha(1f).setDuration(fadeDuration).setInterpolator(AccelerateDecelerateInterpolator()).start()
         syncSliderValues()
-        bufferingView.visibility = View.GONE
+        loadingGroup.visibility = View.GONE
         updateBuffering(isBuffering)
         resetHideTimer()
     }
@@ -2701,7 +2651,7 @@ class KotlinPlayerActivity : AppCompatActivity() {
             .withEndAction { bottomBar.visibility = View.GONE }
         centerControls.animate().alpha(0f).setDuration(fadeDuration).setInterpolator(AccelerateDecelerateInterpolator())
             .withEndAction { centerControls.visibility = View.GONE }
-        bufferingView.visibility = if (isBuffering) View.VISIBLE else View.GONE
+        loadingGroup.visibility = if (isBuffering) View.VISIBLE else View.GONE
         hideHandler.removeCallbacks(hideRunnable)
     }
 
@@ -3099,8 +3049,6 @@ class KotlinPlayerActivity : AppCompatActivity() {
 
     override fun onStop() {
         savePlaybackPosition()
-        shimmerAnimator?.cancel()
-        shimmerAnimator = null
         window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         super.onStop()
         hideHandler.removeCallbacksAndMessages(null)
