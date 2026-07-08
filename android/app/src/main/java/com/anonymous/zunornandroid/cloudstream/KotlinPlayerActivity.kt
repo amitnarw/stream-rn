@@ -108,6 +108,8 @@ class KotlinPlayerActivity : AppCompatActivity() {
     private var isControlsVisible = true
     private var isSeeking = false
     private var isBuffering = false
+    private var isInitialLoadComplete = false
+    private lateinit var loadingTitleTv: TextView
     private var isMuted = false
     private var lastVolumeLevel = 1.0f
     private val hideHandler = Handler(Looper.getMainLooper())
@@ -330,6 +332,7 @@ class KotlinPlayerActivity : AppCompatActivity() {
 
         loadingGroup = createLoadingOverlay()
         root.addView(loadingGroup, matchParent())
+        updateLoadingTitleText()
 
         centerControls = createCenterControls()
         root.addView(centerControls, matchParent())
@@ -514,11 +517,13 @@ class KotlinPlayerActivity : AppCompatActivity() {
         isErrorShowing = false
         errorOverlay.visibility = View.GONE
         
+        isInitialLoadComplete = false
         root.removeView(loadingGroup)
         placeholderPulseAnimator?.cancel()
         loadingGroup = createLoadingOverlay()
         root.addView(loadingGroup, matchParent())
         loadingGroup.visibility = View.VISIBLE
+        updateLoadingTitleText()
         
         currentProgressPercentage = 0
         CoroutineScope(Dispatchers.IO).launch {
@@ -891,6 +896,7 @@ class KotlinPlayerActivity : AppCompatActivity() {
                 updateBuffering(playbackState == Player.STATE_BUFFERING)
                 updateCenterPlayPauseIcon()
                 if (playbackState == Player.STATE_READY) {
+                    isInitialLoadComplete = true
                     loadingGroup.animate()
                         .alpha(0f)
                         .setDuration(400)
@@ -1074,9 +1080,14 @@ class KotlinPlayerActivity : AppCompatActivity() {
         val container = FrameLayout(this)
         container.setBackgroundColor(Color.parseColor("#F2050505"))
 
+        val contentWrapper = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+        }
+
         logoContainer = FrameLayout(this).apply {
-            val lp = FrameLayout.LayoutParams(dp(260), dp(110)).apply {
-                gravity = Gravity.CENTER
+            val lp = LinearLayout.LayoutParams(dp(260), dp(110)).apply {
+                gravity = Gravity.CENTER_HORIZONTAL
             }
             layoutParams = lp
         }
@@ -1092,7 +1103,7 @@ class KotlinPlayerActivity : AppCompatActivity() {
             FrameLayout.LayoutParams.MATCH_PARENT,
             FrameLayout.LayoutParams.MATCH_PARENT
         ))
-        container.addView(logoContainer)
+        contentWrapper.addView(logoContainer)
 
         // Shimmer pulse animation for the placeholder bar
         placeholderPulseAnimator = android.animation.ObjectAnimator.ofFloat(placeholderBar, "alpha", 0.2f, 0.7f).apply {
@@ -1103,7 +1114,52 @@ class KotlinPlayerActivity : AppCompatActivity() {
             start()
         }
 
+        // Loading title
+        loadingTitleTv = TextView(this).apply {
+            setTextColor(Color.parseColor("#E5E2E3"))
+            textSize = 14f
+            typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
+            gravity = Gravity.CENTER
+            setLineSpacing(0f, 1.25f)
+        }
+        contentWrapper.addView(loadingTitleTv, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        ).apply {
+            topMargin = dp(18)
+            leftMargin = dp(40)
+            rightMargin = dp(40)
+        })
+
+        container.addView(contentWrapper, FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.WRAP_CONTENT
+        ).apply { gravity = Gravity.CENTER })
+
         return container
+    }
+
+    private fun updateLoadingTitleText() {
+        if (!::loadingTitleTv.isInitialized) return
+        val mainTitle = intent.getStringExtra("title") ?: ""
+        val mediaType = intent.getStringExtra("mediaType") ?: "movie"
+        val isSer = mediaType == "series" || mediaType == "show"
+        
+        if (isSer && episodesArray != null && currentEpisodeIndex >= 0 && currentEpisodeIndex < episodesArray!!.length()) {
+            try {
+                val ep = episodesArray!!.getJSONObject(currentEpisodeIndex)
+                val epNum = ep.optInt("episode", currentEpisodeIndex + 1)
+                val seasonNum = ep.optInt("season", 1)
+                val epLabel = ep.optString("label", "")
+                
+                val formattedSubtitle = "S${seasonNum}E${epNum}" + (if (epLabel.isNotEmpty()) ": $epLabel" else "")
+                loadingTitleTv.text = "Loading: $mainTitle\n$formattedSubtitle"
+            } catch (_: Exception) {
+                loadingTitleTv.text = "Loading: $mainTitle"
+            }
+        } else {
+            loadingTitleTv.text = "Loading: $mainTitle"
+        }
     }
 
     private fun setupLogoOverlay(bitmap: android.graphics.Bitmap) {
@@ -1994,7 +2050,7 @@ class KotlinPlayerActivity : AppCompatActivity() {
                 setPadding(dp(24), dp(20), dp(24), dp(20))
             }
             setContentView(root)
-            dialogWindow?.setLayout(dp(540), dp(340))
+            dialogWindow?.setLayout(dp(560), dp(360))
 
             val headerRow = LinearLayout(this@KotlinPlayerActivity).apply {
                 orientation = LinearLayout.HORIZONTAL
@@ -2005,7 +2061,7 @@ class KotlinPlayerActivity : AppCompatActivity() {
             val header = TextView(this@KotlinPlayerActivity).apply {
                 text = "PLAYER MANUAL & HELP"
                 setTextColor(Color.WHITE)
-                textSize = 13f
+                textSize = 13.5f
                 typeface = android.graphics.Typeface.DEFAULT_BOLD
             }
             headerRow.addView(header, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
@@ -2038,35 +2094,58 @@ class KotlinPlayerActivity : AppCompatActivity() {
                 0, 1f
             ))
 
-            addHelpSection(listContainer, "Gestures (Brightness & Volume)", "Swipe up or down on the left half of the screen to adjust screen brightness. Swipe on the right half to adjust volume.")
-            addHelpSection(listContainer, "Fast Seeking (Double Tap)", "Double tap the left side of the screen to rewind 10 seconds. Double tap the right side to fast-forward 10 seconds.")
-            addHelpSection(listContainer, "Locking Controls", "Tap the lock icon in the top bar to hide and freeze all player buttons. To unlock, click the open-lock icon shown on the left side of the screen.")
-            addHelpSection(listContainer, "Settings Options", "Click the settings icons in the bottom bar to change video source/quality, select subtitle tracks, adjust playback speed, configure sleep timer, or toggle swipe gestures.")
-            addHelpSection(listContainer, "Episode Navigation", "For series, click the 'Episodes' pill in the bottom bar to view and select cards of other episodes, or use the prev/next buttons in the center controls.")
+            addHelpSection(listContainer, R.drawable.ic_hero_speaker_wave, "Gestures (Brightness & Volume)", "Swipe vertically on the screen to change player levels dynamically:\n• Swipe up/down on the left half to adjust screen brightness.\n• Swipe up/down on the right half to adjust media volume.")
+            addHelpSection(listContainer, R.drawable.ic_hero_forward, "Fast Seeking (Double Tap)", "Quickly jump backward or forward in time:\n• Double tap on the left side of the screen to seek backward 10 seconds.\n• Double tap on the right side of the screen to seek forward 10 seconds.")
+            addHelpSection(listContainer, R.drawable.ic_hero_lock_closed, "Locking Controls", "Tap the lock icon in the top menu bar to freeze the player UI and hide all buttons, avoiding accidental clicks.\n• To unlock, tap the open-lock icon shown on the left side of the screen.")
+            addHelpSection(listContainer, R.drawable.ic_hero_bolt, "Settings Options", "Access advanced options via bottom row controls:\n• Sources: Switch video links, servers, and streaming resolutions.\n• Subtitles: Select embedded or loaded external subtitle tracks.\n• Playback Speed: Slow down or speed up playback (0.25x to 2.0x).\n• Sleep Timer: Set player to close automatically in 15m, 30m, 60m, or at the end of the episode.")
+            addHelpSection(listContainer, R.drawable.ic_hero_square_3_stack_3d, "Episode Browser", "For TV series, tap the 'Episodes' pill in the bottom bar to open a clean panel of episode cards. Each card displays an episode description and visual thumbnail preview. Alternatively, use the Next/Prev skip buttons in the center controls.")
         }
 
-        private fun addHelpSection(container: LinearLayout, title: String, description: String) {
-            val section = LinearLayout(this@KotlinPlayerActivity).apply {
+        private fun addHelpSection(container: LinearLayout, iconRes: Int, title: String, description: String) {
+            val card = LinearLayout(this@KotlinPlayerActivity).apply {
                 orientation = LinearLayout.VERTICAL
-                setPadding(dp(8), dp(8), dp(8), dp(12))
+                setPadding(dp(16), dp(14), dp(16), dp(14))
+                background = GradientDrawable().apply {
+                    setColor(Color.parseColor("#0F22202A"))
+                    cornerRadius = dp(16).toFloat()
+                }
             }
+
+            val header = LinearLayout(this@KotlinPlayerActivity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+
+            val icon = ImageView(this@KotlinPlayerActivity).apply {
+                setImageResource(iconRes)
+                setColorFilter(Color.parseColor("#5580FF"))
+            }
+            header.addView(icon, LinearLayout.LayoutParams(dp(20), dp(20)))
+
             val titleTv = TextView(this@KotlinPlayerActivity).apply {
                 text = title
-                setTextColor(Color.parseColor("#5580FF"))
-                textSize = 12.5f
+                setTextColor(Color.WHITE)
+                textSize = 13f
                 typeface = android.graphics.Typeface.DEFAULT_BOLD
+                setPadding(dp(10), 0, 0, 0)
             }
-            section.addView(titleTv, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-                bottomMargin = dp(4)
-            })
+            header.addView(titleTv, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+            card.addView(header)
+
             val descTv = TextView(this@KotlinPlayerActivity).apply {
                 text = description
                 setTextColor(Color.parseColor("#A0A0A5"))
                 textSize = 11f
-                setLineSpacing(0f, 1.15f)
+                setLineSpacing(0f, 1.25f)
             }
-            section.addView(descTv, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
-            container.addView(section)
+            card.addView(descTv, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                topMargin = dp(8)
+                leftMargin = dp(30)
+            })
+
+            container.addView(card, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                bottomMargin = dp(12)
+            })
         }
     }
 
@@ -2739,7 +2818,7 @@ class KotlinPlayerActivity : AppCompatActivity() {
             centerControls.animate().alpha(0f).setDuration(fadeDuration).setInterpolator(AccelerateDecelerateInterpolator())
                 .withEndAction { centerControls.visibility = View.GONE }
         }
-        loadingGroup.visibility = if (isBuffering) View.VISIBLE else View.GONE
+        loadingGroup.visibility = if (isBuffering || !isInitialLoadComplete) View.VISIBLE else View.GONE
         hideHandler.removeCallbacks(hideRunnable)
     }
 
@@ -2811,7 +2890,6 @@ class KotlinPlayerActivity : AppCompatActivity() {
         }
 
         override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
-            if (loadingGroup.visibility == View.VISIBLE) return true
             toggleControls()
             return true
         }
