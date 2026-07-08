@@ -1332,7 +1332,7 @@ class KotlinPlayerActivity : AppCompatActivity() {
         closeBtn.addView(closeIcon, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
         leftRow.addView(closeBtn, LinearLayout.LayoutParams(dp(50), dp(50)).apply { rightMargin = dp(12) })
 
-        // ↗ External Player — 50×50 glass circle (TSX: circleBlurBtn + ArrowUpRightIcon)
+        // ↗ External Player — 50×50 glass circle (TSX: circleBlurBtn + ArrowTopRightOnSquareIcon)
         val extBtn = FrameLayout(this).apply {
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
@@ -1342,7 +1342,7 @@ class KotlinPlayerActivity : AppCompatActivity() {
         }
         addPremiumTouchAnimation(extBtn)
         val extIcon = ImageView(this).apply {
-            setImageResource(R.drawable.ic_hero_arrow_up_right)
+            setImageResource(R.drawable.ic_hero_arrow_top_right_on_square)
             setColorFilter(Color.WHITE)
             setPadding(dp(13), dp(13), dp(13), dp(13))
         }
@@ -1401,6 +1401,19 @@ class KotlinPlayerActivity : AppCompatActivity() {
         }
         addPremiumTouchAnimation(gesturesBtn)
         capsule.addView(gesturesBtn, LinearLayout.LayoutParams(dp(44), dp(44)))
+
+        // Help button
+        val helpBtn = ImageView(this).apply {
+            setImageResource(R.drawable.ic_hero_question_mark_circle)
+            setColorFilter(Color.WHITE)
+            setPadding(dp(12), dp(12), dp(12), dp(12))
+            setOnClickListener {
+                showHelpDialog()
+                resetHideTimer()
+            }
+        }
+        addPremiumTouchAnimation(helpBtn)
+        capsule.addView(helpBtn, LinearLayout.LayoutParams(dp(44), dp(44)))
 
         leftRow.addView(capsule)
 
@@ -1948,6 +1961,113 @@ class KotlinPlayerActivity : AppCompatActivity() {
             setOnDismissListener { if (!isControlsVisible) updateBackdropBlur(false) }
         }.show()
         resetHideTimer()
+    }
+
+    private fun showHelpDialog() {
+        HelpDialog().apply {
+            setOnShowListener { updateBackdropBlur(true) }
+            setOnDismissListener { if (!isControlsVisible) updateBackdropBlur(false) }
+        }.show()
+        resetHideTimer()
+    }
+
+    private inner class HelpDialog : Dialog(this@KotlinPlayerActivity, android.R.style.Theme_DeviceDefault_Dialog) {
+        override fun onCreate(savedInstanceState: Bundle?) {
+            super.onCreate(savedInstanceState)
+            requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
+
+            val dialogWindow = window
+            dialogWindow?.setBackgroundDrawable(GradientDrawable().apply {
+                setColor(Color.parseColor("#F2141218"))
+                cornerRadius = dp(24).toFloat()
+            })
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                dialogWindow?.addFlags(android.view.WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
+                dialogWindow?.attributes?.let { attrs ->
+                    attrs.blurBehindRadius = dp(20)
+                    dialogWindow.attributes = attrs
+                }
+            }
+
+            val root = LinearLayout(this@KotlinPlayerActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(24), dp(20), dp(24), dp(20))
+            }
+            setContentView(root)
+            dialogWindow?.setLayout(dp(540), dp(340))
+
+            val headerRow = LinearLayout(this@KotlinPlayerActivity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(0, 0, 0, dp(12))
+            }
+
+            val header = TextView(this@KotlinPlayerActivity).apply {
+                text = "PLAYER MANUAL & HELP"
+                setTextColor(Color.WHITE)
+                textSize = 13f
+                typeface = android.graphics.Typeface.DEFAULT_BOLD
+            }
+            headerRow.addView(header, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+
+            val closeBtn = ImageView(this@KotlinPlayerActivity).apply {
+                setImageResource(R.drawable.ic_hero_xmark)
+                setColorFilter(Color.WHITE)
+                setPadding(dp(4), dp(4), dp(4), dp(4))
+                setOnClickListener { dismiss() }
+            }
+            headerRow.addView(closeBtn, LinearLayout.LayoutParams(dp(24), dp(24)))
+            root.addView(headerRow)
+
+            val divider = View(this@KotlinPlayerActivity).apply {
+                setBackgroundColor(Color.parseColor("#14FFFFFF"))
+            }
+            root.addView(divider, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(1)).apply {
+                bottomMargin = dp(12)
+            })
+
+            val scrollView = android.widget.ScrollView(this@KotlinPlayerActivity).apply {
+                isFillViewport = true
+            }
+            val listContainer = LinearLayout(this@KotlinPlayerActivity).apply {
+                orientation = LinearLayout.VERTICAL
+            }
+            scrollView.addView(listContainer)
+            root.addView(scrollView, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                0, 1f
+            ))
+
+            addHelpSection(listContainer, "Gestures (Brightness & Volume)", "Swipe up or down on the left half of the screen to adjust screen brightness. Swipe on the right half to adjust volume.")
+            addHelpSection(listContainer, "Fast Seeking (Double Tap)", "Double tap the left side of the screen to rewind 10 seconds. Double tap the right side to fast-forward 10 seconds.")
+            addHelpSection(listContainer, "Locking Controls", "Tap the lock icon in the top bar to hide and freeze all player buttons. To unlock, click the open-lock icon shown on the left side of the screen.")
+            addHelpSection(listContainer, "Settings Options", "Click the settings icons in the bottom bar to change video source/quality, select subtitle tracks, adjust playback speed, configure sleep timer, or toggle swipe gestures.")
+            addHelpSection(listContainer, "Episode Navigation", "For series, click the 'Episodes' pill in the bottom bar to view and select cards of other episodes, or use the prev/next buttons in the center controls.")
+        }
+
+        private fun addHelpSection(container: LinearLayout, title: String, description: String) {
+            val section = LinearLayout(this@KotlinPlayerActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(8), dp(8), dp(8), dp(12))
+            }
+            val titleTv = TextView(this@KotlinPlayerActivity).apply {
+                text = title
+                setTextColor(Color.parseColor("#5580FF"))
+                textSize = 12.5f
+                typeface = android.graphics.Typeface.DEFAULT_BOLD
+            }
+            section.addView(titleTv, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                bottomMargin = dp(4)
+            })
+            val descTv = TextView(this@KotlinPlayerActivity).apply {
+                text = description
+                setTextColor(Color.parseColor("#A0A0A5"))
+                textSize = 11f
+                setLineSpacing(0f, 1.15f)
+            }
+            section.addView(descTv, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+            container.addView(section)
+        }
     }
 
     private inner class PlayerSettingsDialog(private val startCategory: String = "Quality") : Dialog(this@KotlinPlayerActivity, android.R.style.Theme_DeviceDefault_Dialog) {

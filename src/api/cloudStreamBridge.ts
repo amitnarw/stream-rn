@@ -841,59 +841,71 @@ async function fetchStremioAddonStreams(
     if (!json.streams) return [];
     
     return json.streams.map((stream: any) => {
-      let magnetUrl = '';
+      let isTorrent = false;
+      let streamUrl = '';
+      let type = 'direct';
+      let seeders = 0;
+
       if (stream.infoHash) {
-        magnetUrl = `magnet:?xt=urn:btih:${stream.infoHash}&dn=${encodeURIComponent(stream.title?.split('\n')[0] || 'Torrent')}` +
+        streamUrl = `magnet:?xt=urn:btih:${stream.infoHash}&dn=${encodeURIComponent(stream.title?.split('\n')[0] || 'Torrent')}` +
           `&tr=udp://tracker.coppersurfer.tk:6969/announce` +
           `&tr=udp://tracker.openbittorrent.com:6969/announce` +
           `&tr=udp://tracker.opentrackr.org:1337` +
           `&tr=udp://explodie.org:6969/announce` +
           `&tr=udp://open.demonii.com:1337/announce`;
+        isTorrent = true;
+        type = 'torrent';
       } else if (stream.url && stream.url.startsWith('magnet:')) {
-        magnetUrl = stream.url;
+        streamUrl = stream.url;
+        isTorrent = true;
+        type = 'torrent';
+      } else if (stream.url && (stream.url.startsWith('http://') || stream.url.startsWith('https://'))) {
+        streamUrl = stream.url;
+        isTorrent = false;
+        type = stream.url.includes('.m3u8') ? 'hls' : 'direct';
       }
 
-      if (!magnetUrl) return null;
+      if (!streamUrl) return null;
 
       const titleText = stream.title || '';
-      // Extract seeders count
-      let seeders = 0;
-      const emojiMatch = titleText.match(/👤\s*(\d+)/);
-      if (emojiMatch) {
-        seeders = parseInt(emojiMatch[1], 10);
-      } else {
-        const textMatch = titleText.match(/(?:seeders|seeds|seed):\s*(\d+)/i);
-        if (textMatch) {
-          seeders = parseInt(textMatch[1], 10);
+      
+      if (isTorrent) {
+        // Extract seeders count
+        const emojiMatch = titleText.match(/👤\s*(\d+)/);
+        if (emojiMatch) {
+          seeders = parseInt(emojiMatch[1], 10);
         } else {
-          const sMatch = titleText.match(/\bS:\s*(\d+)/i);
-          if (sMatch) seeders = parseInt(sMatch[1], 10);
+          const textMatch = titleText.match(/(?:seeders|seeds|seed):\s*(\d+)/i);
+          if (textMatch) {
+            seeders = parseInt(textMatch[1], 10);
+          } else {
+            const sMatch = titleText.match(/\bS:\s*(\d+)/i);
+            if (sMatch) seeders = parseInt(sMatch[1], 10);
+          }
         }
-      }
 
-      // Filter out weak/dead links (fewer than 3 seeders)
-      // Torrentio seeder counts are stale cache values — < 3 seeders means
-      // the torrent is very likely dead on the live DHT network right now.
-      const hasSeedersInfo = titleText.includes('👤') || /seeders|seeds|seed/i.test(titleText) || /\bS:\s*\d+/i.test(titleText);
-      if (hasSeedersInfo && seeders < 3) {
-        return null; // Too few seeders — likely dead, discard
+        // Filter out weak/dead links (fewer than 3 seeders)
+        const hasSeedersInfo = titleText.includes('👤') || /seeders|seeds|seed/i.test(titleText) || /\bS:\s*\d+/i.test(titleText);
+        if (hasSeedersInfo && seeders < 3) {
+          return null; // Too few seeders — likely dead, discard
+        }
       }
 
       const qualityMatch = stream.name?.match(/(1080p|720p|2160p|480p)/i);
       const quality = qualityMatch ? qualityMatch[0] : '720p';
       
       const parts = titleText.split('\n') || [];
-      const fileName = parts[0] || 'Torrent Source';
+      const fileName = parts[0] || stream.name || 'Direct Link';
       const stats = parts[1] || '';
 
       return {
-        quality: `${quality} (${stats.trim() || 'Torrent'})`,
-        url: magnetUrl,
-        type: 'torrent',
-        headers: {},
+        quality: isTorrent ? `${quality} (${stats.trim() || 'Torrent'})` : `${quality} (Direct Link)`,
+        url: streamUrl,
+        type: type,
+        headers: stream.behaviorHints?.proxyHeaders?.request ?? {},
         provider: addonName,
         host: fileName,
-        seeders: seeders
+        seeders: isTorrent ? seeders : 99999 // Put direct links first in sorting
       };
     }).filter((s: any) => s !== null);
   } catch (err) {
