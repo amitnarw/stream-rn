@@ -79,6 +79,9 @@ class KotlinPlayerActivity : AppCompatActivity() {
     private lateinit var prevEpBtn: ImageView
     private lateinit var nextEpBtn: ImageView
     private lateinit var sleepTimerBtn: ImageView
+    private lateinit var rewindBtn: FrameLayout
+    private lateinit var ffBtn: FrameLayout
+    private lateinit var playFrame: FrameLayout
     private lateinit var errorOverlay: FrameLayout
     private lateinit var errorMessageTv: TextView
     private lateinit var errorRetryBtn: TextView
@@ -211,7 +214,6 @@ class KotlinPlayerActivity : AppCompatActivity() {
             background = GradientDrawable().apply {
                 setColor(Color.parseColor("#D9141218")) // rgba(20, 18, 24, 0.85)
                 cornerRadius = dp(16).toFloat()
-                setStroke(dp(1), Color.parseColor("#14FFFFFF")) // rgba(255, 255, 255, 0.08)
             }
             visibility = View.GONE
             alpha = 0f
@@ -625,7 +627,6 @@ class KotlinPlayerActivity : AppCompatActivity() {
             background = GradientDrawable().apply {
                 setColor(Color.parseColor("#121214")) // #121214 background
                 cornerRadius = dp(24).toFloat()
-                setStroke(dp(1), Color.parseColor("#14FFFFFF")) // rgba(255, 255, 255, 0.08)
             }
         }
         val cardParams = FrameLayout.LayoutParams(dp(480), FrameLayout.LayoutParams.WRAP_CONTENT).apply {
@@ -754,7 +755,6 @@ class KotlinPlayerActivity : AppCompatActivity() {
             background = GradientDrawable().apply {
                 setColor(Color.parseColor("#145580FF")) // rgba(85, 128, 255, 0.08)
                 cornerRadius = dp(12).toFloat()
-                setStroke(dp(1), Color.parseColor("#735580FF")) // rgba(85, 128, 255, 0.45)
             }
             setPadding(dp(12), dp(12), dp(12), dp(12))
         }
@@ -773,7 +773,6 @@ class KotlinPlayerActivity : AppCompatActivity() {
             background = GradientDrawable().apply {
                 setColor(Color.parseColor("#0DFFFFFF")) // rgba(255, 255, 255, 0.05)
                 cornerRadius = dp(12).toFloat()
-                setStroke(dp(1), Color.parseColor("#14FFFFFF")) // rgba(255, 255, 255, 0.08)
             }
             setPadding(dp(12), dp(12), dp(12), dp(12))
         }
@@ -932,6 +931,9 @@ class KotlinPlayerActivity : AppCompatActivity() {
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 updateCenterPlayPauseIcon()
                 updateMediaSession(getCurrentEpisodeTitle())
+                if (isPlaying && !isControlsVisible) {
+                    hideControls()
+                }
             }
         })
 
@@ -1072,15 +1074,9 @@ class KotlinPlayerActivity : AppCompatActivity() {
         val container = FrameLayout(this)
         container.setBackgroundColor(Color.parseColor("#F2050505"))
 
-        val centerBlock = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER_HORIZONTAL
-        }
-
-        // Logo container
         logoContainer = FrameLayout(this).apply {
-            val lp = LinearLayout.LayoutParams(dp(260), dp(110)).apply {
-                bottomMargin = dp(24)
+            val lp = FrameLayout.LayoutParams(dp(260), dp(110)).apply {
+                gravity = Gravity.CENTER
             }
             layoutParams = lp
         }
@@ -1096,7 +1092,7 @@ class KotlinPlayerActivity : AppCompatActivity() {
             FrameLayout.LayoutParams.MATCH_PARENT,
             FrameLayout.LayoutParams.MATCH_PARENT
         ))
-        centerBlock.addView(logoContainer)
+        container.addView(logoContainer)
 
         // Shimmer pulse animation for the placeholder bar
         placeholderPulseAnimator = android.animation.ObjectAnimator.ofFloat(placeholderBar, "alpha", 0.2f, 0.7f).apply {
@@ -1106,33 +1102,6 @@ class KotlinPlayerActivity : AppCompatActivity() {
             interpolator = android.view.animation.AccelerateDecelerateInterpolator()
             start()
         }
-
-        // Loading spinner
-        val spinner = ProgressBar(this).apply {
-            indeterminateTintList = ColorStateList.valueOf(Color.parseColor("#0047FF")) // Electric Blue!
-        }
-        centerBlock.addView(spinner, LinearLayout.LayoutParams(dp(44), dp(44)))
-
-        // Loading text
-        val loadingText = TextView(this).apply {
-            text = "PREPARING STREAM"
-            setTextColor(Color.parseColor("#8E8D92")) // theme.colors.textMuted
-            textSize = 11f
-            typeface = android.graphics.Typeface.DEFAULT_BOLD
-            gravity = Gravity.CENTER
-        }
-        val textLp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-            topMargin = dp(12)
-        }
-        centerBlock.addView(loadingText, textLp)
-
-        val containerLp = FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.WRAP_CONTENT,
-            FrameLayout.LayoutParams.WRAP_CONTENT
-        ).apply {
-            gravity = Gravity.CENTER
-        }
-        container.addView(centerBlock, containerLp)
 
         return container
     }
@@ -1201,7 +1170,6 @@ class KotlinPlayerActivity : AppCompatActivity() {
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
                 setColor(Color.parseColor("#D9141218"))   // rgba(20,18,24,0.85)
-                setStroke(dp(1), Color.parseColor("#14FFFFFF"))  // rgba(255,255,255,0.08)
             }
             setOnClickListener { playPreviousEpisode() }
         }
@@ -1209,15 +1177,14 @@ class KotlinPlayerActivity : AppCompatActivity() {
         row.addView(prevEpBtn, LinearLayout.LayoutParams(dp(42), dp(42)).apply { rightMargin = dp(16) })
 
         // Rewind 10s — 54×54 glass circle matching centerNavBtn in TSX
-        val rewindBtn = FrameLayout(this).apply {
+        rewindBtn = FrameLayout(this).apply {
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
                 setColor(Color.parseColor("#D9141218"))
-                setStroke(dp(1), Color.parseColor("#14FFFFFF"))
             }
             setOnClickListener {
                 player?.let { p -> p.seekTo((p.currentPosition - 10000).coerceAtLeast(0)) }
-                showSeekFeedback("\u23ea", 10)
+                showSeekFeedback(false, 10)
                 resetHideTimer()
             }
         }
@@ -1241,11 +1208,10 @@ class KotlinPlayerActivity : AppCompatActivity() {
         row.addView(rewindBtn, LinearLayout.LayoutParams(dp(54), dp(54)).apply { rightMargin = dp(24) })
 
         // Play / Pause — 88×88 glass circle matching centerPlayBtn in TSX
-        val playFrame = FrameLayout(this).apply {
+        playFrame = FrameLayout(this).apply {
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
                 setColor(Color.parseColor("#D9141218"))
-                setStroke(dp(1), Color.parseColor("#14FFFFFF"))
             }
             setOnClickListener {
                 player?.let { p -> if (p.isPlaying) p.pause() else p.play() }
@@ -1272,18 +1238,17 @@ class KotlinPlayerActivity : AppCompatActivity() {
         })
 
         // Fast forward 10s — 54×54 glass circle
-        val ffBtn = FrameLayout(this).apply {
+        ffBtn = FrameLayout(this).apply {
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
                 setColor(Color.parseColor("#D9141218"))
-                setStroke(dp(1), Color.parseColor("#14FFFFFF"))
             }
             setOnClickListener {
                 player?.let { p ->
                     val dur = p.duration
                     p.seekTo((p.currentPosition + 10000).coerceAtMost(if (dur > 0) dur else p.currentPosition + 10000))
                 }
-                showSeekFeedback("\u23e9", 10)
+                showSeekFeedback(true, 10)
                 resetHideTimer()
             }
         }
@@ -1313,7 +1278,6 @@ class KotlinPlayerActivity : AppCompatActivity() {
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
                 setColor(Color.parseColor("#D9141218"))
-                setStroke(dp(1), Color.parseColor("#14FFFFFF"))
             }
             setOnClickListener { playNextEpisode() }
         }
@@ -1356,7 +1320,6 @@ class KotlinPlayerActivity : AppCompatActivity() {
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
                 setColor(Color.parseColor("#D9141218"))    // rgba(20,18,24,0.85)
-                setStroke(dp(1), Color.parseColor("#14FFFFFF"))  // rgba(255,255,255,0.08)
             }
             setOnClickListener { finish() }
         }
@@ -1374,7 +1337,6 @@ class KotlinPlayerActivity : AppCompatActivity() {
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
                 setColor(Color.parseColor("#D9141218"))
-                setStroke(dp(1), Color.parseColor("#14FFFFFF"))
             }
             setOnClickListener { openInExternalPlayer() }
         }
@@ -1395,7 +1357,6 @@ class KotlinPlayerActivity : AppCompatActivity() {
             background = GradientDrawable().apply {
                 setColor(Color.parseColor("#D9141218"))
                 cornerRadius = dp(25).toFloat()
-                setStroke(dp(1), Color.parseColor("#14FFFFFF"))
             }
         }
 
@@ -1464,7 +1425,6 @@ class KotlinPlayerActivity : AppCompatActivity() {
             background = GradientDrawable().apply {
                 setColor(Color.parseColor("#D9141218"))
                 cornerRadius = dp(22).toFloat()
-                setStroke(dp(1), Color.parseColor("#14FFFFFF"))
             }
         }
         volumeSeekBar = SeekBar(this, null, android.R.attr.seekBarStyle).apply {
@@ -1497,7 +1457,6 @@ class KotlinPlayerActivity : AppCompatActivity() {
             background = GradientDrawable().apply {
                 setColor(Color.parseColor("#D9141218"))
                 cornerRadius = dp(22).toFloat()
-                setStroke(dp(1), Color.parseColor("#14FFFFFF"))
             }
         }
         brightnessSeekBar = SeekBar(this, null, android.R.attr.seekBarStyle).apply {
@@ -1596,7 +1555,6 @@ class KotlinPlayerActivity : AppCompatActivity() {
             background = GradientDrawable().apply {
                 setColor(Color.parseColor("#8C000000")) // rgba(0,0,0,0.55)
                 cornerRadius = dp(10).toFloat()
-                setStroke(1, Color.parseColor("#14FFFFFF")) // rgba(255,255,255,0.08)
             }
             setPadding(dp(10), dp(6), dp(10), dp(6))
         }
@@ -1632,7 +1590,6 @@ class KotlinPlayerActivity : AppCompatActivity() {
             background = GradientDrawable().apply {
                 setColor(Color.parseColor("#D9141218"))
                 cornerRadius = dp(23).toFloat()
-                setStroke(dp(1), Color.parseColor("#14FFFFFF"))
             }
         }
 
@@ -1707,7 +1664,6 @@ class KotlinPlayerActivity : AppCompatActivity() {
             background = GradientDrawable().apply {
                 setColor(Color.parseColor("#D9141218"))
                 cornerRadius = dp(20).toFloat()
-                setStroke(dp(1), Color.parseColor("#14FFFFFF"))
             }
             visibility = View.GONE
         }
@@ -1742,7 +1698,6 @@ class KotlinPlayerActivity : AppCompatActivity() {
             background = GradientDrawable().apply {
                 setColor(Color.parseColor("#D9141218"))
                 cornerRadius = dp(20).toFloat()
-                setStroke(dp(1), Color.parseColor("#14FFFFFF"))
             }
             setOnClickListener { showSettingsDialog("Quality") }
         }
@@ -1776,7 +1731,6 @@ class KotlinPlayerActivity : AppCompatActivity() {
                 background = GradientDrawable().apply {
                     setColor(Color.parseColor("#D9141218"))
                     cornerRadius = dp(20).toFloat()
-                    setStroke(dp(1), Color.parseColor("#14FFFFFF"))
                 }
                 setOnClickListener { showEpisodesDialog() }
             }
@@ -1864,7 +1818,6 @@ class KotlinPlayerActivity : AppCompatActivity() {
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
                 setColor(Color.parseColor("#66100E14"))
-                setStroke(dp(1), Color.parseColor("#26FFFFFF"))
             }
             setOnClickListener { onClick() }
         }
@@ -1879,7 +1832,6 @@ class KotlinPlayerActivity : AppCompatActivity() {
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
                 setColor(Color.parseColor("#66100E14"))
-                setStroke(dp(1), Color.parseColor("#26FFFFFF"))
             }
             setOnClickListener { onClick() }
         }
@@ -2019,7 +1971,6 @@ class KotlinPlayerActivity : AppCompatActivity() {
             dialogWindow?.setBackgroundDrawable(GradientDrawable().apply {
                 setColor(Color.parseColor("#F2141218"))
                 cornerRadius = dp(24).toFloat()
-                setStroke(dp(1), Color.parseColor("#14FFFFFF"))
             })
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 dialogWindow?.addFlags(android.view.WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
@@ -2336,7 +2287,6 @@ class KotlinPlayerActivity : AppCompatActivity() {
             dialogWindow?.setBackgroundDrawable(GradientDrawable().apply {
                 setColor(Color.parseColor("#F20A0A0E"))
                 cornerRadius = dp(24).toFloat()
-                setStroke(dp(1), Color.parseColor("#14FFFFFF"))
             })
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 dialogWindow?.addFlags(android.view.WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
@@ -2412,11 +2362,9 @@ class KotlinPlayerActivity : AppCompatActivity() {
                         background = if (isSelected) GradientDrawable().apply {
                             setColor(Color.parseColor("#1A0047FF"))
                             cornerRadius = dp(16).toFloat()
-                            setStroke(dp(1), Color.parseColor("#400047FF"))
                         } else GradientDrawable().apply {
                             setColor(Color.parseColor("#0F141218"))
                             cornerRadius = dp(16).toFloat()
-                            setStroke(dp(1), Color.parseColor("#08FFFFFF"))
                         }
                         setOnClickListener {
                             currentEpisodeIndex = i
@@ -2629,6 +2577,14 @@ class KotlinPlayerActivity : AppCompatActivity() {
         centerControls.alpha = 0f
         topBar.visibility = View.VISIBLE
         bottomBar.visibility = View.VISIBLE
+        
+        prevEpBtn.visibility = View.VISIBLE
+        rewindBtn.visibility = View.VISIBLE
+        playFrame.visibility = View.VISIBLE
+        ffBtn.visibility = View.VISIBLE
+        nextEpBtn.visibility = View.VISIBLE
+        updateEpisodeButtonState()
+        
         centerControls.visibility = View.VISIBLE
         topBar.animate().alpha(1f).setDuration(fadeDuration).setInterpolator(AccelerateDecelerateInterpolator()).start()
         bottomBar.animate().alpha(1f).setDuration(fadeDuration).setInterpolator(AccelerateDecelerateInterpolator()).start()
@@ -2649,8 +2605,20 @@ class KotlinPlayerActivity : AppCompatActivity() {
             .withEndAction { topBar.visibility = View.GONE }
         bottomBar.animate().alpha(0f).setDuration(fadeDuration).setInterpolator(AccelerateDecelerateInterpolator())
             .withEndAction { bottomBar.visibility = View.GONE }
-        centerControls.animate().alpha(0f).setDuration(fadeDuration).setInterpolator(AccelerateDecelerateInterpolator())
-            .withEndAction { centerControls.visibility = View.GONE }
+            
+        val isPaused = player?.playWhenReady == false
+        if (isPaused) {
+            centerControls.visibility = View.VISIBLE
+            centerControls.alpha = 1f
+            prevEpBtn.visibility = View.GONE
+            rewindBtn.visibility = View.GONE
+            ffBtn.visibility = View.GONE
+            nextEpBtn.visibility = View.GONE
+            playFrame.visibility = View.VISIBLE
+        } else {
+            centerControls.animate().alpha(0f).setDuration(fadeDuration).setInterpolator(AccelerateDecelerateInterpolator())
+                .withEndAction { centerControls.visibility = View.GONE }
+        }
         loadingGroup.visibility = if (isBuffering) View.VISIBLE else View.GONE
         hideHandler.removeCallbacks(hideRunnable)
     }
@@ -2685,7 +2653,6 @@ class KotlinPlayerActivity : AppCompatActivity() {
             background = GradientDrawable().apply {
                 setColor(Color.parseColor("#E6141218"))
                 cornerRadius = dp(12).toFloat()
-                setStroke(dp(1), Color.parseColor("#26FFFFFF"))
             }
             setPadding(dp(20), dp(10), dp(20), dp(10))
         }
@@ -2716,8 +2683,8 @@ class KotlinPlayerActivity : AppCompatActivity() {
                     }
                     p.seekTo(target.coerceIn(0, dur))
                     showControlsAfterLoad()
-                    val direction = if (e.x < widthPx / 2f) "⏪" else "⏩"
-                    showSeekFeedback(direction, seekAmount / 1000)
+                    val isForward = e.x >= widthPx / 2f
+                    showSeekFeedback(isForward, seekAmount / 1000)
                 }
             }
             return true
@@ -2762,10 +2729,10 @@ class KotlinPlayerActivity : AppCompatActivity() {
         }
     }
 
-    private fun showSeekFeedback(direction: String, seconds: Long) {
+    private fun showSeekFeedback(isForward: Boolean, seconds: Long) {
         // Exact TSX glass-pill style: dark glass card centered
         val overlay = TextView(this).apply {
-            text = "$direction ${seconds}s"
+            text = if (isForward) "+${seconds}s" else "-${seconds}s"
             setTextColor(Color.WHITE)
             textSize = 22f
             typeface = android.graphics.Typeface.DEFAULT_BOLD
@@ -2773,7 +2740,6 @@ class KotlinPlayerActivity : AppCompatActivity() {
             background = GradientDrawable().apply {
                 setColor(Color.parseColor("#E6141218"))   // rgba(20,18,24,0.9)
                 cornerRadius = dp(16).toFloat()
-                setStroke(dp(1), Color.parseColor("#14FFFFFF"))
             }
             setPadding(dp(28), dp(14), dp(28), dp(14))
             elevation = dp(8).toFloat()
@@ -2810,7 +2776,6 @@ class KotlinPlayerActivity : AppCompatActivity() {
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
                 setColor(Color.parseColor("#D9141218"))
-                setStroke(dp(1), Color.parseColor("#14FFFFFF"))
             }
             setOnClickListener {
                 isLocked = false
@@ -2902,7 +2867,6 @@ class KotlinPlayerActivity : AppCompatActivity() {
             background = GradientDrawable().apply {
                 setColor(Color.parseColor("#F2100E14"))
                 cornerRadius = dp(24).toFloat()
-                setStroke(dp(1), Color.parseColor("#14FFFFFF"))
             }
         }
 
@@ -2957,7 +2921,6 @@ class KotlinPlayerActivity : AppCompatActivity() {
             background = GradientDrawable().apply {
                 setColor(Color.parseColor("#14FFFFFF"))
                 cornerRadius = dp(16).toFloat()
-                setStroke(dp(1), Color.parseColor("#1EFFFFFF"))
             }
             setPadding(dp(28), dp(14), dp(28), dp(14))
             setOnClickListener {
@@ -3183,7 +3146,6 @@ class KotlinPlayerActivity : AppCompatActivity() {
             background = GradientDrawable().apply {
                 setColor(Color.parseColor("#F20F0F14"))
                 cornerRadius = dp(16).toFloat()
-                setStroke(dp(1), Color.parseColor("#40FF4A7D"))
             }
         }
         val cardParams = FrameLayout.LayoutParams(dp(420), FrameLayout.LayoutParams.WRAP_CONTENT).apply {
