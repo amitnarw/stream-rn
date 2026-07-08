@@ -337,12 +337,17 @@ class KotlinPlayerActivity : AppCompatActivity() {
 
         centerControls = createCenterControls()
         root.addView(centerControls, matchParent())
+        centerControls.visibility = View.GONE
 
         topBar = createTopBar(videoTitle)
         root.addView(topBar, matchParent())
+        topBar.visibility = View.GONE
 
         bottomBar = createBottomBar()
         root.addView(bottomBar, matchParent())
+        bottomBar.visibility = View.GONE
+
+        isControlsVisible = false
 
         errorOverlay = createErrorOverlay()
         root.addView(errorOverlay, matchParent())
@@ -437,7 +442,6 @@ class KotlinPlayerActivity : AppCompatActivity() {
         } else if (currentUrl.isNotEmpty()) {
             loadingGroup.visibility = View.VISIBLE
             updateLoadingProgress(10)
-            showControlsAfterLoad()
             setupExoPlayer(currentUrl, currentHeadersJson, getCurrentSubtitleUrl())
         }
 
@@ -577,16 +581,6 @@ class KotlinPlayerActivity : AppCompatActivity() {
                                 }
                             }
                             val subUrl = if (subs.isNotEmpty() && currentSubtitleIndex >= 0) subs[0] else ""
-                            loadingGroup.animate()
-                                .alpha(0f)
-                                .setDuration(300)
-                                .setListener(object : AnimatorListenerAdapter() {
-                                    override fun onAnimationEnd(animation: Animator) {
-                                        loadingGroup.visibility = View.GONE
-                                        loadingGroup.alpha = 1f
-                                    }
-                                })
-                            showControlsAfterLoad()
                             setupExoPlayer(currentUrl, currentHeadersJson, subUrl)
                         } ?: showError("No playable source found", providerName, mediaRef)
                     } else {
@@ -920,6 +914,7 @@ class KotlinPlayerActivity : AppCompatActivity() {
                             }
                         }).start()
                     bufferingView.visibility = View.GONE
+                    showControlsAfterLoad()
                     updateMediaSession(getCurrentEpisodeTitle())
                     checkAndShowDolbyWarning(url)
 
@@ -2759,6 +2754,7 @@ class KotlinPlayerActivity : AppCompatActivity() {
     private inner class PlayerGestureListener : GestureDetector.SimpleOnGestureListener() {
 
         override fun onDoubleTap(e: MotionEvent): Boolean {
+            if (loadingGroup.visibility == View.VISIBLE) return true
             player?.let { p ->
                 val dur = p.duration
                 if (dur > 0) {
@@ -2778,11 +2774,13 @@ class KotlinPlayerActivity : AppCompatActivity() {
         }
 
         override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
+            if (loadingGroup.visibility == View.VISIBLE) return true
             toggleControls()
             return true
         }
 
         override fun onScroll(e1: MotionEvent?, e2: MotionEvent, distanceX: Float, distanceY: Float): Boolean {
+            if (loadingGroup.visibility == View.VISIBLE) return false
             if (!gesturesEnabled) return false
             if (e1 == null) return false
 
