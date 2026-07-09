@@ -392,6 +392,42 @@ function getProtocolLabel(type: string, url: string) {
   return "DIRECT";
 }
 
+function getCleanHostName(s: VideoSource) {
+  const quality = s.quality || "";
+  const host = s.host || "";
+  let baseName = host || quality || "Direct";
+  
+  const separators = [/ • /, / · /, / - /, / \| /];
+  for (const sep of separators) {
+    if (sep.test(baseName)) {
+      const parts = baseName.split(sep);
+      const nonResolutionPart = parts.find((p: string) => !/(?:2160|1080|720|480|360|4k|hd|sd)/i.test(p));
+      if (nonResolutionPart) {
+        baseName = nonResolutionPart.trim();
+        break;
+      }
+    }
+  }
+
+  baseName = baseName.replace(/\[?\d+(?:\.\d+)?\s*(?:GB|MB|kb|gigabytes|megabytes)\]?/gi, "").trim();
+  baseName = baseName.replace(/\[(?:bluray|hdr|dv|dolby|hevc|x265|x264|h264|h265|ddp\d|aac|atmos|dts|web-dl|webrip|hdrip|brrip|hdtv|internal)[^\]]*\]/gi, "").trim();
+  baseName = baseName.replace(/\b(?:2160p|1080p|720p|480p|360p|4k|2160|1080|720|480|360)\b/gi, "").trim();
+  baseName = baseName.replace(/\s+/g, " ").trim();
+
+  return baseName || "Direct";
+}
+
+function extractResolutionTag(s: VideoSource) {
+  const textToSearch = `${s.quality} ${s.host || ""}`.toLowerCase();
+  if (textToSearch.includes("4k") || textToSearch.includes("2160")) return "2160p";
+  if (textToSearch.includes("1080")) return "1080p";
+  if (textToSearch.includes("720")) return "720p";
+  if (textToSearch.includes("480")) return "480p";
+  if (textToSearch.includes("360")) return "360p";
+  const match = textToSearch.match(/(\d+)(p|k|fps)/);
+  return match ? `${match[1]}p` : "Auto";
+}
+
 export default function DetailScreen() {
   const [blurTarget, setBlurTarget] = useState<any>(null);
   const blurTargetRef = useRef<any>(null);
@@ -456,11 +492,24 @@ export default function DetailScreen() {
   const [isResolving, setIsResolving] = useState(false);
   const [linksError, setLinksError] = useState<string | null>(null);
   const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(false);
+  const [textLinesLimit, setTextLinesLimit] = useState<number | undefined>(3);
   const [collapsedDescHeight, setCollapsedDescHeight] = useState(0);
   const [fullDescHeight, setFullDescHeight] = useState(0);
   const [expandedContentHeight, setExpandedContentHeight] = useState(0);
   const [accordionHeight, setAccordionHeight] = useState(0);
   const [torrentExpanded, setTorrentExpanded] = useState(false);
+
+  const [prevDetailTitle, setPrevDetailTitle] = useState<string | null>(null);
+  const currentTitle = detail?.title || null;
+  if (currentTitle !== prevDetailTitle) {
+    setPrevDetailTitle(currentTitle);
+    setCollapsedDescHeight(0);
+    setFullDescHeight(0);
+    setExpandedContentHeight(0);
+    setIsDescriptionExpanded(false);
+    setTorrentExpanded(false);
+    setTextLinesLimit(3);
+  }
 
   const expandProgress = useSharedValue(0);
   const descExpandShared = useSharedValue(0);
@@ -476,10 +525,21 @@ export default function DetailScreen() {
 
   // Animate description text
   useEffect(() => {
-    descExpandShared.value = withTiming(isDescriptionExpanded ? 1 : 0, {
-      duration: 300,
-      easing: Easing.bezier(0.25, 1, 0.5, 1),
-    });
+    if (isDescriptionExpanded) {
+      setTextLinesLimit(undefined);
+    }
+    descExpandShared.value = withTiming(
+      isDescriptionExpanded ? 1 : 0,
+      {
+        duration: 300,
+        easing: Easing.bezier(0.25, 1, 0.5, 1),
+      },
+      (finished) => {
+        if (finished && !isDescriptionExpanded) {
+          runOnJS(setTextLinesLimit)(3);
+        }
+      },
+    );
   }, [isDescriptionExpanded]);
 
   // Animate Torrent Accordion
@@ -497,6 +557,7 @@ export default function DetailScreen() {
     setExpandedContentHeight(0);
     setIsDescriptionExpanded(false);
     setTorrentExpanded(false);
+    setTextLinesLimit(3);
   }, [detail?.description, detail?.title]);
 
   const expandedAnimatedStyle = useAnimatedStyle(() => {
@@ -515,13 +576,15 @@ export default function DetailScreen() {
   });
 
   const descriptionAnimatedStyle = useAnimatedStyle(() => {
-    if (collapsedDescHeight === 0 || fullDescHeight === 0) {
-      return {};
+    if (collapsedDescHeight === 0) {
+      // Heights not yet measured. Return overflow:hidden so the Text's
+      // own numberOfLines={3} prop keeps it at 3 lines — no jerk.
+      return { overflow: "hidden" };
     }
     const targetHeight = interpolate(
       descExpandShared.value,
       [0, 1],
-      [collapsedDescHeight, fullDescHeight],
+      [collapsedDescHeight, fullDescHeight === 0 ? collapsedDescHeight : fullDescHeight],
     );
     return {
       height: targetHeight,
@@ -898,16 +961,90 @@ export default function DetailScreen() {
               (s.provider ?? "").toLowerCase() ===
               activeProviderTab.toLowerCase(),
           );
-    // Always render: direct/HLS links first, torrent/magnet links last (sorted by seeders desc)
-    return [...list].sort((x, y) => {
+
+    const getGroupBase = (host: string): string => {
+      let name = host
+        .replace(/\s*\[.*?\]/g, '')                              // strip [CDN/codec] brackets
+        .replace(/\s*[·•]\s*Server\s*\d+(?:\s*[·•]\s*backup)?\b/gi, '') // · Server N [· backup]
+        .replace(/\s+Server\s*\d+\b/gi, '')                      // " Server N" without separator
+        .replace(/\s*[·•]\s*backup\b/gi, '')                     // lone · backup
+        .replace(/^\s*\d{3,4}p\s*[·•]\s*/i, '')                  // leading "1080p · "
+        .replace(/\s*[·•]\s*\d{3,4}p\b/g, '')                   // trailing "· 1080p"
+        .trim()
+        .replace(/[·•\-\s]+$/, '')                               // trailing separators
+        .trim();
+      return name || host;
+    };
+
+    const getQualityResolution = (quality: string) => {
+      // The resolution suffix is always after " · " e.g. "HD Server · 1080p"
+      const parts = quality.split(" · ");
+      const res = parts.length > 1 ? parts[parts.length - 1] : quality;
+      const q = res.toLowerCase();
+      if (q.includes("4k") || q.includes("2160")) return 2160;
+      if (q.includes("1080")) return 1080;
+      if (q.includes("720")) return 720;
+      if (q.includes("480")) return 480;
+      if (q.includes("360")) return 360;
+      const match = q.match(/(\d+)p/);
+      return match ? parseInt(match[1], 10) : 0;
+    };
+
+    const getResolutionTag = (quality: string): string => {
+      // The resolution is always the last part after " · "
+      const parts = quality.split(" · ");
+      const res = parts.length > 1 ? parts[parts.length - 1].trim() : null;
+      if (!res) return "Auto";
+      if (res.toLowerCase().includes("4k") || res.includes("2160")) return "2160p";
+      if (res.includes("1080")) return "1080p";
+      if (res.includes("720")) return "720p";
+      if (res.includes("480")) return "480p";
+      if (res.includes("360")) return "360p";
+      const match = res.match(/(\d+)p/i);
+      return match ? match[0] : res;
+    };
+
+    const groups: Record<string, any[]> = {};
+    list.forEach((s) => {
+      const provider = s.provider || "Unknown";
+      const isTorrent = s.type === "torrent" || s.url.startsWith("magnet:");
+      const host = s.host || s.quality?.split(" · ")[0] || "Direct";
+      const groupBase = getGroupBase(host);
+      const key = isTorrent ? `${provider}|||torrent|||${s.url}` : `${provider}|||${groupBase}`;
+
+      if (!groups[key]) groups[key] = [];
+      groups[key].push({ ...s, _groupBase: isTorrent ? host : groupBase });
+    });
+
+    const groupedList: any[] = [];
+    Object.values(groups).forEach((groupSources) => {
+      // Sort highest resolution first within the group
+      groupSources.sort((a, b) =>
+        getQualityResolution(b.quality || "") - getQualityResolution(a.quality || "")
+      );
+
+      const primary = { ...groupSources[0] };
+      primary.groupSources = groupSources; // keep all for player switching
+      primary.groupLength = groupSources.length;
+      primary.displayName = groupSources[0]._groupBase;
+
+      // Unique resolution tags for this group, e.g. ["1080p", "720p"]
+      const tags = groupSources
+        .map((s) => getResolutionTag(s.quality || ""))
+        .filter((v, i, arr) => arr.indexOf(v) === i);
+      primary.availableQualities = tags;
+
+      groupedList.push(primary);
+    });
+
+    // Direct/HLS first, torrents last (by seeders)
+    return groupedList.sort((x, y) => {
       const xIsTorrent = x.type === "torrent" || x.url.startsWith("magnet:");
       const yIsTorrent = y.type === "torrent" || y.url.startsWith("magnet:");
       if (xIsTorrent && !yIsTorrent) return 1;
       if (!xIsTorrent && yIsTorrent) return -1;
       if (xIsTorrent && yIsTorrent) {
-        const xSeed = (x as any).seeders ?? 0;
-        const ySeed = (y as any).seeders ?? 0;
-        return ySeed - xSeed;
+        return ((y as any).seeders ?? 0) - ((x as any).seeders ?? 0);
       }
       return 0;
     });
@@ -1275,6 +1412,17 @@ export default function DetailScreen() {
                     const status = await bridge.getTorrentStatus();
                     setTorrentStatus(status);
 
+                    if (!status.active) {
+                      clearInterval(intervalId);
+                      setIsTorrentBuffering(false);
+                      setIsOpeningPlayer(false);
+                      setTorrentErrorModal({
+                        visible: true,
+                        message: "Torrent stream connection timed out or went inactive.",
+                      });
+                      return;
+                    }
+
                     // 1.5% represents full indexing download (moov atom / header container tables)
                     if (status.progress >= 1.5 && status.active) {
                       clearInterval(intervalId);
@@ -1332,6 +1480,7 @@ export default function DetailScreen() {
               })
               .catch((err) => {
                 setIsTorrentBuffering(false);
+                setIsOpeningPlayer(false);
                 setTorrentErrorModal({
                   visible: true,
                   message: cleanTorrentError(err.message),
@@ -1339,6 +1488,7 @@ export default function DetailScreen() {
               });
           } catch (e: any) {
             setIsTorrentBuffering(false);
+            setIsOpeningPlayer(false);
             setTorrentErrorModal({
               visible: true,
               message: cleanTorrentError(e.message),
@@ -1371,7 +1521,8 @@ export default function DetailScreen() {
             url: s.url,
             type: s.type,
             headers: s.headers,
-            provider: source.provider,
+            provider: s.provider || source.provider,
+            host: s.host,
           })),
           subtitles,
           allEpisodes ? JSON.stringify(allEpisodes) : "[]",
@@ -1971,23 +2122,42 @@ export default function DetailScreen() {
                             descriptionAnimatedStyle,
                           ]}
                         >
-                          <Text style={styles.descriptionText}>
+                          <Text
+                            style={styles.descriptionText}
+                            numberOfLines={
+                              // Always constrain to 3 lines until BOTH heights are
+                              // measured — this prevents any jerk during initial load.
+                              collapsedDescHeight === 0 || fullDescHeight === 0
+                                ? 3
+                                : textLinesLimit
+                            }
+                          >
                             {detail.description}
                           </Text>
                         </Animated.View>
                       ) : null}
 
                       {/* Always Visible: SEE MORE / SEE LESS Toggle in center in capitals */}
-                      <TouchableOpacity
-                        onPress={() => {
-                          setIsDescriptionExpanded(!isDescriptionExpanded);
-                        }}
-                        style={styles.seeMoreBtn}
-                      >
-                        <Text style={styles.seeMoreText}>
-                          {isDescriptionExpanded ? "SEE LESS" : "SEE MORE"}
-                        </Text>
-                      </TouchableOpacity>
+                      {detail?.description && (
+                        <TouchableOpacity
+                          disabled={collapsedDescHeight === 0 || fullDescHeight <= collapsedDescHeight}
+                          onPress={() => {
+                            setIsDescriptionExpanded(!isDescriptionExpanded);
+                          }}
+                          style={[
+                            styles.seeMoreBtn,
+                            collapsedDescHeight === 0 
+                              ? { opacity: 0 } 
+                              : (fullDescHeight > collapsedDescHeight 
+                                ? { opacity: 1 } 
+                                : { opacity: 0, height: 0, paddingVertical: 0, marginTop: 0, marginBottom: 0, borderWidth: 0 })
+                          ]}
+                        >
+                          <Text style={styles.seeMoreText}>
+                            {isDescriptionExpanded ? "SEE LESS" : "SEE MORE"}
+                          </Text>
+                        </TouchableOpacity>
+                      )}
 
                       {detail && (
                         <Animated.View
@@ -2158,6 +2328,7 @@ export default function DetailScreen() {
                 style={styles.torrentCancelButton}
                 onPress={() => {
                   setIsTorrentBuffering(false);
+                  setIsOpeningPlayer(false);
                   if (torrentIntervalRef.current) {
                     clearInterval(torrentIntervalRef.current);
                   }
@@ -2166,6 +2337,46 @@ export default function DetailScreen() {
                 activeOpacity={0.8}
               >
                 <Text style={styles.torrentCancelText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+      )}
+
+      {/* Torrent Error Modal */}
+      {torrentErrorModal.visible && (
+        <Modal
+          transparent
+          animationType="fade"
+          visible={torrentErrorModal.visible}
+          onRequestClose={() => setTorrentErrorModal({ visible: false, message: "" })}
+        >
+          <View style={styles.torrentModalContainer}>
+            <BlurView
+              intensity={90}
+              tint="dark"
+              style={StyleSheet.absoluteFillObject}
+            />
+
+            <View style={styles.torrentContentCard}>
+              <View style={{ width: 56, height: 56, borderRadius: 28, backgroundColor: "rgba(255, 74, 125, 0.1)", alignItems: "center", justifyContent: "center", marginBottom: 16 }}>
+                <Text style={{ color: "#ff4a7d", fontSize: 24 }}>⚠️</Text>
+              </View>
+
+              <Text style={[styles.torrentTitleText, { color: "#ff4a7d" }]}>
+                Playback Error
+              </Text>
+              <Text style={[styles.torrentSubTitleText, { textAlign: "center", marginTop: 8, paddingHorizontal: 16 }]}>
+                {torrentErrorModal.message}
+              </Text>
+
+              {/* Close Button */}
+              <TouchableOpacity
+                style={[styles.torrentCancelButton, { marginTop: 24, backgroundColor: "#ff4a7d" }]}
+                onPress={() => setTorrentErrorModal({ visible: false, message: "" })}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.torrentCancelText}>Dismiss</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -2334,22 +2545,17 @@ export default function DetailScreen() {
                               s.type !== "torrent" &&
                               !s.url.startsWith("magnet:"),
                           );
-                          const torrentSources = filteredSources.filter(
-                            (s) =>
-                              s.type === "torrent" || s.url.startsWith("magnet:"),
-                          );
+                          const torrentSources = filteredSources
+                            .filter(
+                              (s) =>
+                                s.type === "torrent" || s.url.startsWith("magnet:"),
+                            )
+                            .slice(0, 30);
 
                           const renderSourceRow = (source: any, idx: number) => {
-                            const isSplitted = source.quality.includes(" · ");
-                            const hostName =
-                              source.host ||
-                              (isSplitted
-                                ? source.quality.split(" · ")[0]
-                                : source.quality) ||
-                              "Direct";
-                            const qualityTag = isSplitted
-                              ? source.quality.split(" · ")[1]
-                              : "Auto";
+                            // displayName = normalised group base (e.g. "Movies Plus", "4K HDHUB")
+                            const hostName = source.displayName || source.host || source.quality?.split(" · ")[0] || "Direct";
+                            const qualityTag = source.availableQualities?.[0] ?? "Auto";
                             const hasHeaders =
                               source.headers &&
                               Object.keys(source.headers).length > 0;
@@ -2358,10 +2564,7 @@ export default function DetailScreen() {
                               source.url,
                             );
 
-                            const sizeMatch = source.quality.match(
-                              /\[?(\d+(?:\.\d+)?\s*(?:GB|MB|kb|gigabytes|megabytes))\]?/i,
-                            );
-                            const sizeTag = sizeMatch ? sizeMatch[1] : null;
+
                             const showProviderBadge = activeProviderTab === "All";
                             const isTorrentSource =
                               source.type === "torrent" ||
@@ -2393,27 +2596,30 @@ export default function DetailScreen() {
                                       {hostName}
                                     </Text>
 
-                                    <View
-                                      style={[
-                                        styles.sheetBadge,
-                                        {
-                                          backgroundColor:
-                                            getQualityBadgeBg(qualityTag),
-                                        },
-                                      ]}
-                                    >
-                                      <Text
+                                    {(source.availableQualities || [qualityTag]).map((tag: string, tagIdx: number) => (
+                                      <View
+                                        key={`tag-${tagIdx}`}
                                         style={[
-                                          styles.sheetBadgeText,
+                                          styles.sheetBadge,
                                           {
-                                            color: "#ffffff",
-                                            fontWeight: "bold",
+                                            backgroundColor:
+                                              getQualityBadgeBg(tag),
                                           },
                                         ]}
                                       >
-                                        {qualityTag}
-                                      </Text>
-                                    </View>
+                                        <Text
+                                          style={[
+                                            styles.sheetBadgeText,
+                                            {
+                                              color: "#ffffff",
+                                              fontWeight: "bold",
+                                            },
+                                          ]}
+                                        >
+                                          {tag}
+                                        </Text>
+                                      </View>
+                                    ))}
 
                                     <View style={styles.sheetBadge}>
                                       <Text style={styles.sheetBadgeText}>
@@ -2512,30 +2718,7 @@ export default function DetailScreen() {
                                       </View>
                                     )}
 
-                                    {sizeTag && (
-                                      <View
-                                        style={[
-                                          styles.sheetBadge,
-                                          {
-                                            backgroundColor: "rgba(85, 128, 255, 0.12)",
-                                            borderColor: "rgba(85, 128, 255, 0.25)",
-                                            borderWidth: 0.5,
-                                          },
-                                        ]}
-                                      >
-                                        <Text
-                                          style={[
-                                            styles.sheetBadgeText,
-                                            {
-                                              color: "#5580FF",
-                                              fontWeight: "700",
-                                            },
-                                          ]}
-                                        >
-                                          {sizeTag}
-                                        </Text>
-                                      </View>
-                                    )}
+
 
                                     {subtitles.length > 0 && idx === 0 ? (
                                       <View

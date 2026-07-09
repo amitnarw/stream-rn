@@ -10,6 +10,7 @@ import {
   Modal,
   Pressable,
   PanResponder,
+  TextInput,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BlurView, BlurTargetView } from 'expo-blur';
@@ -215,6 +216,9 @@ export default function SettingsScreen({ navigation }: Props) {
   const [clearing, setClearing] = useState(false);
   const [clearingLinks, setClearingLinks] = useState(false);
 
+  const [torrentioUrlInput, setTorrentioUrlInput] = useState('');
+  const [cometUrlInput, setCometUrlInput] = useState('');
+
   const [blurTarget, setBlurTarget] = useState<any>(null);
   const blurTargetRef = useRef<any>(null);
   const setBlurTargetRef = useCallback((val: any) => {
@@ -267,6 +271,11 @@ export default function SettingsScreen({ navigation }: Props) {
       } else {
         setPlayerMode('inbuilt');
       }
+
+      const savedTorrentio = await AsyncStorage.getItem('@torrentio_url');
+      setTorrentioUrlInput(savedTorrentio || '');
+      const savedComet = await AsyncStorage.getItem('@comet_url');
+      setCometUrlInput(savedComet || '');
     } catch (e) {
       console.warn('Failed to load settings:', e);
     } finally {
@@ -398,6 +407,26 @@ export default function SettingsScreen({ navigation }: Props) {
     );
   }
 
+  async function handleSaveAddonUrls() {
+    try {
+      if (torrentioUrlInput.trim()) {
+        await AsyncStorage.setItem('@torrentio_url', torrentioUrlInput.trim());
+      } else {
+        await AsyncStorage.removeItem('@torrentio_url');
+      }
+
+      if (cometUrlInput.trim()) {
+        await AsyncStorage.setItem('@comet_url', cometUrlInput.trim());
+      } else {
+        await AsyncStorage.removeItem('@comet_url');
+      }
+      
+      triggerSuccessModal('Success', 'Stremio addon configuration URLs updated successfully.');
+    } catch (e) {
+      triggerSuccessModal('Error', 'Failed to save addon configurations.', true);
+    }
+  }
+
   if (loading) {
     return (
       <SafeAreaView style={styles.loadingContainer}>
@@ -524,6 +553,50 @@ export default function SettingsScreen({ navigation }: Props) {
                 <Text style={[styles.modeOptionText, playerMode === 'external' && styles.modeOptionTextActive]}>
                   External Player
                 </Text>
+              </TouchableOpacity>
+            </View>
+           </View>
+
+          {/* Stremio Addons Setup Card */}
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>Stremio Addons Setup</Text>
+            <Text style={styles.cardDescription}>
+              Configure custom URLs for Torrentio and Comet. You can paste the manifest links generated from Torrentio or Comet configuration pages (including your Real-Debrid API keys) to fetch premium [RD+] direct streams.
+            </Text>
+
+            <View style={{ gap: 16, marginTop: 12 }}>
+              <View>
+                <Text style={{ color: '#E5E2E3', fontSize: 13, marginBottom: 6, fontWeight: '500' }}>Custom Torrentio URL</Text>
+                <TextInput
+                  style={styles.textInput}
+                  value={torrentioUrlInput}
+                  onChangeText={setTorrentioUrlInput}
+                  placeholder="https://torrentio.strem.fun"
+                  placeholderTextColor="rgba(255,255,255,0.3)"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+              </View>
+
+              <View>
+                <Text style={{ color: '#E5E2E3', fontSize: 13, marginBottom: 6, fontWeight: '500' }}>Custom Comet URL</Text>
+                <TextInput
+                  style={styles.textInput}
+                  value={cometUrlInput}
+                  onChangeText={setCometUrlInput}
+                  placeholder="https://comet.feels.legal"
+                  placeholderTextColor="rgba(255,255,255,0.3)"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+              </View>
+
+              <TouchableOpacity
+                style={[styles.clearBtn, { backgroundColor: theme.colors.accent, borderColor: theme.colors.accentLight, borderWidth: 1 }]}
+                onPress={handleSaveAddonUrls}
+                activeOpacity={0.8}
+              >
+                <Text style={[styles.clearBtnText, { color: '#ffffff' }]}>Save Custom URLs</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -681,6 +754,17 @@ export default function SettingsScreen({ navigation }: Props) {
 }
 
 const styles = StyleSheet.create({
+  textInput: {
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderWidth: 1,
+    borderRadius: 12,
+    color: '#ffffff',
+    fontSize: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginTop: 2,
+  },
   container: {
     flex: 1,
     backgroundColor: theme.colors.background,

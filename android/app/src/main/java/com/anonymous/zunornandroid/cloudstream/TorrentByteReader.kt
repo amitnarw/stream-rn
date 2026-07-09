@@ -26,12 +26,17 @@ class TorrentByteReader(
         // Prioritize these pieces and wait for them to download
         for (p in startPiece..endPiece) {
             if (!handle.havePiece(p)) {
-                // Set high priority for the pieces currently being requested
+                // Set high priority and set deadline to 1 second
                 handle.piecePriority(p, Priority.SEVEN)
+                try {
+                    handle.setPieceDeadline(p, 1000)
+                } catch (e: Exception) {
+                    Log.w("ZunoTorrent", "Failed to set piece deadline: ${e.message}")
+                }
                 
                 // Wait loop
                 var waited = 0
-                val timeout = 15000 // 15 seconds max wait per piece
+                val timeout = 10000 // 10 seconds max wait per piece
                 while (!handle.havePiece(p) && waited < timeout) {
                     Thread.sleep(100)
                     waited += 100

@@ -846,17 +846,38 @@ async function fetchStremioAddonStreams(
       let type = 'direct';
       let seeders = 0;
 
+      const activeTrackers = [
+        "udp://tracker.opentrackr.org:1337/announce",
+        "udp://open.stealth.si:80/announce",
+        "udp://tracker.torrent.eu.org:451/announce",
+        "udp://tracker.cyberia.is:6969/announce",
+        "udp://ipv4.tracker.harry.lu:80/announce",
+        "udp://valukas.io:6969/announce",
+        "udp://tracker.tiny-vps.com:6969/announce",
+        "udp://tracker.moeking.me:6969/announce",
+        "udp://opentracker.i2p.rocks:6969/announce",
+        "http://tracker.gbitt.info:80/announce",
+        "udp://9.rarbg.com:2710/announce",
+        "udp://explodie.org:6969/announce"
+      ];
+
+      const appendTrackers = (magnetUrl: string): string => {
+        let cleanUrl = magnetUrl;
+        activeTrackers.forEach(tr => {
+          if (!cleanUrl.includes(encodeURIComponent(tr)) && !cleanUrl.includes(tr)) {
+            cleanUrl += `&tr=${encodeURIComponent(tr)}`;
+          }
+        });
+        return cleanUrl;
+      };
+
       if (stream.infoHash) {
-        streamUrl = `magnet:?xt=urn:btih:${stream.infoHash}&dn=${encodeURIComponent(stream.title?.split('\n')[0] || 'Torrent')}` +
-          `&tr=udp://tracker.coppersurfer.tk:6969/announce` +
-          `&tr=udp://tracker.openbittorrent.com:6969/announce` +
-          `&tr=udp://tracker.opentrackr.org:1337` +
-          `&tr=udp://explodie.org:6969/announce` +
-          `&tr=udp://open.demonii.com:1337/announce`;
+        streamUrl = `magnet:?xt=urn:btih:${stream.infoHash}&dn=${encodeURIComponent(stream.title?.split('\n')[0] || 'Torrent')}`;
+        streamUrl = appendTrackers(streamUrl);
         isTorrent = true;
         type = 'torrent';
       } else if (stream.url && stream.url.startsWith('magnet:')) {
-        streamUrl = stream.url;
+        streamUrl = appendTrackers(stream.url);
         isTorrent = true;
         type = 'torrent';
       } else if (stream.url && (stream.url.startsWith('http://') || stream.url.startsWith('https://'))) {
@@ -929,10 +950,39 @@ export async function resolvePlaybackSources(
   const allProviders = await getProviders();
   const providers = allProviders.filter(p => p.hasSearch !== false);
   
+  let rawTorrentioUrl = 'https://torrentio.strem.fun';
+  let rawCometUrl = 'https://comet.feels.legal';
+  try {
+    const savedTorrentio = await AsyncStorage.getItem('@torrentio_url');
+    if (savedTorrentio && savedTorrentio.trim()) {
+      rawTorrentioUrl = savedTorrentio;
+    }
+    const savedComet = await AsyncStorage.getItem('@comet_url');
+    if (savedComet && savedComet.trim()) {
+      rawCometUrl = savedComet;
+    }
+  } catch (e) {
+    console.warn('Failed to load custom addon URLs from storage:', e);
+  }
+
+  const normalizeAddonUrl = (url: string, defaultUrl: string): string => {
+    if (!url || !url.trim()) return defaultUrl;
+    let clean = url.trim().replace(/^stremio:\/\//i, 'https://');
+    if (clean.endsWith('/manifest.json')) {
+      clean = clean.substring(0, clean.length - '/manifest.json'.length);
+    }
+    if (clean.endsWith('/')) {
+      clean = clean.substring(0, clean.length - 1);
+    }
+    return clean;
+  };
+
+  const torrentioUrl = normalizeAddonUrl(rawTorrentioUrl, 'https://torrentio.strem.fun');
+  const cometUrl = normalizeAddonUrl(rawCometUrl, 'https://comet.feels.legal');
+
   const addons = [
-    { name: 'Torrentio', url: 'https://torrentio.strem.fun' },
-    { name: 'Comet', url: 'https://comet.feels.legal' },
-    { name: 'DesiFlix', url: 'https://desiflix.stremioaddon.workers.dev' }
+    { name: 'Torrentio', url: torrentioUrl },
+    { name: 'Comet', url: cometUrl }
   ];
 
   const progressList: PlaybackProgress[] = [];

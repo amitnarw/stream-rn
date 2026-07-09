@@ -14,10 +14,10 @@ class LocalHttpServer(private val port: Int, private val streamer: TorrentStream
     private var serverThread: Thread? = null
 
     fun start() {
+        serverSocket = ServerSocket(port) // throws synchronously if port is in use
         isRunning = true
         serverThread = Thread {
             try {
-                serverSocket = ServerSocket(port)
                 Log.i(TAG, "Local HTTP range server listening on port $port")
                 while (isRunning) {
                     val clientSocket = serverSocket?.accept() ?: break
@@ -26,7 +26,9 @@ class LocalHttpServer(private val port: Int, private val streamer: TorrentStream
                     }.start()
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Server error: ${e.message}")
+                if (isRunning) {
+                    Log.e(TAG, "Server error: ${e.message}")
+                }
             }
         }.apply { start() }
     }
@@ -78,13 +80,22 @@ class LocalHttpServer(private val port: Int, private val streamer: TorrentStream
                 }
             }
 
+            val contentType = when (streamer.getFileName().substringAfterLast(".").lowercase(Locale.US)) {
+                "mkv" -> "video/x-matroska"
+                "mp4" -> "video/mp4"
+                "webm" -> "video/webm"
+                "avi" -> "video/x-msvideo"
+                "mov" -> "video/quicktime"
+                else -> "video/mp4"
+            }
+
             val contentLength = endByte - startByte + 1
             val out = BufferedOutputStream(socket.getOutputStream())
 
             // Send HTTP headers
             val headers = StringBuilder()
             headers.append("HTTP/1.1 206 Partial Content\r\n")
-            headers.append("Content-Type: video/mp4\r\n")
+            headers.append("Content-Type: $contentType\r\n")
             headers.append("Content-Length: $contentLength\r\n")
             headers.append("Content-Range: bytes $startByte-$endByte/$fileSize\r\n")
             headers.append("Accept-Ranges: bytes\r\n")

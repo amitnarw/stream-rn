@@ -35,7 +35,10 @@ import {
   ArrowUpRightIcon,
   CheckIcon,
   ExclamationCircleIcon,
-  ArrowPathIcon
+  ArrowPathIcon,
+  ArrowDownTrayIcon,
+  ChevronUpIcon,
+  ChevronDownIcon
 } from "react-native-heroicons/solid";
 import * as bridge from "../api/cloudStreamBridge";
 import { CustomModal } from "./CustomModal";
@@ -50,6 +53,7 @@ import Animated, {
   FadeOut,
   ZoomIn,
   ZoomOut,
+  Easing,
 } from "react-native-reanimated";
 import { theme } from "../theme";
 
@@ -163,6 +167,34 @@ const isDolbyAudio = (source: VideoSource | null, url: string) => {
     text.includes("5.1")
   );
 };
+
+function getQualityBadgeBg(quality: string) {
+  const q = quality.toLowerCase();
+  if (q.includes("4k") || q.includes("2160")) return "#ff4a7d";
+  if (q.includes("1080")) return "#0047FF";
+  if (q.includes("720")) return "#2ecc71";
+  if (q.includes("480") || q.includes("360")) return "#f39c12";
+  return "rgba(255, 255, 255, 0.08)";
+}
+
+function getDomain(url: string) {
+  try {
+    const domain = url.match(
+      /^(?:https?:\/\/)?(?:[^@\n]+@)?(?:www\.)?([^:\/\n?]+)/im,
+    );
+    return domain ? domain[1] : "";
+  } catch {
+    return "";
+  }
+}
+
+function getProtocolLabel(type: string, url: string) {
+  const t = type.toLowerCase();
+  if (t === "hls" || url.includes(".m3u8")) return "M3U8";
+  if (t === "torrent" || url.startsWith("magnet:")) return "TORRENT";
+  if (t === "dash" || url.includes(".mpd")) return "DASH";
+  return "DIRECT";
+}
 
 interface PlayerModalProps {
   visible: boolean;
@@ -337,6 +369,26 @@ export default function CustomVideoPlayer({
 
   // Modal Dialogs
   const [activeModal, setActiveModal] = useState<"quality" | "subtitles" | "speed" | null>(null);
+
+  // Accordion state for source select
+  const [torrentExpanded, setTorrentExpanded] = useState(false);
+  const [accordionHeight, setAccordionHeight] = useState(0);
+  const accordionExpandShared = useSharedValue(0);
+
+  useEffect(() => {
+    accordionExpandShared.value = withTiming(torrentExpanded ? 1 : 0, {
+      duration: 250,
+      easing: Easing.bezier(0.25, 1, 0.5, 1),
+    });
+  }, [torrentExpanded]);
+
+  const accordionAnimatedStyle = useAnimatedStyle(() => {
+    return {
+      height: accordionExpandShared.value * accordionHeight,
+      opacity: accordionExpandShared.value,
+      overflow: "hidden",
+    };
+  });
 
   // Playback Rate
   const [playbackRate, setPlaybackRate] = useState(1.0);
@@ -1514,21 +1566,301 @@ export default function CustomVideoPlayer({
           onClose={() => setActiveModal(null)}
           title="Select Source"
         >
-          {sources.map((src, index) => (
-            <TouchableOpacity
-              key={index}
-              style={[
-                styles.modalItem,
-                selectedSource?.url === src.url && styles.modalItemActive,
-              ]}
-              onPress={() => selectQuality(src)}
-            >
-              <Text style={styles.modalItemText}>{src.quality}</Text>
-              {selectedSource?.url === src.url && (
-                <CheckIcon size={16} color={theme.colors.accentLight} />
-              )}
-            </TouchableOpacity>
-          ))}
+          {(() => {
+            const directSources = sources.filter(
+              (s) =>
+                s.type !== "torrent" &&
+                !s.url.startsWith("magnet:"),
+            );
+            const torrentSources = sources.filter(
+              (s) =>
+                s.type === "torrent" || s.url.startsWith("magnet:"),
+            );
+
+            const renderSourceRow = (source: any, idx: number) => {
+              const isSplitted = source.quality.includes(" · ");
+              const hostName =
+                source.host ||
+                (isSplitted
+                  ? source.quality.split(" · ")[0]
+                  : source.quality) ||
+                "Direct";
+              const qualityTag = isSplitted
+                ? source.quality.split(" · ")[1]
+                : "Auto";
+              const hasHeaders =
+                source.headers &&
+                Object.keys(source.headers).length > 0;
+              const protocolLabel = getProtocolLabel(
+                source.type,
+                source.url,
+              );
+
+              const sizeMatch = source.quality.match(
+                /\[?(\d+(?:\.\d+)?\s*(?:GB|MB|kb|gigabytes|megabytes))\]?/i,
+              );
+              const sizeTag = sizeMatch ? sizeMatch[1] : null;
+              const isTorrentSource =
+                source.type === "torrent" ||
+                source.url.startsWith("magnet:");
+              const torrentSeeders = source.seeders as
+                | number
+                | undefined;
+
+              const isSelected = selectedSource?.url === source.url;
+
+              return (
+                <TouchableOpacity
+                  key={`source-${source.type}-${idx}`}
+                  style={[styles.sheetRow, isSelected && styles.sheetRowActive]}
+                  onPress={() => selectQuality(source)}
+                  activeOpacity={0.7}
+                >
+                  <View style={styles.sheetRowInfo}>
+                    <View
+                      style={[
+                        styles.sheetQualityRow,
+                        { flexWrap: "wrap", gap: 6 },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.sheetQuality,
+                          isSelected && styles.sheetQualityActive,
+                          { marginRight: 4 },
+                        ]}
+                      >
+                        {hostName}
+                      </Text>
+
+                      <View
+                        style={[
+                          styles.sheetBadge,
+                          {
+                            backgroundColor:
+                              getQualityBadgeBg(qualityTag),
+                          },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.sheetBadgeText,
+                            {
+                              color: "#ffffff",
+                              fontWeight: "bold",
+                            },
+                          ]}
+                        >
+                          {qualityTag}
+                        </Text>
+                      </View>
+
+                      <View style={styles.sheetBadge}>
+                        <Text style={styles.sheetBadgeText}>
+                          {protocolLabel}
+                        </Text>
+                      </View>
+
+                      {isTorrentSource &&
+                        torrentSeeders !== undefined &&
+                        torrentSeeders > 0 && (
+                          <View
+                            style={[
+                              styles.sheetBadge,
+                              {
+                                backgroundColor:
+                                  torrentSeeders >= 50
+                                    ? "rgba(34, 197, 94, 0.12)"
+                                    : torrentSeeders >= 10
+                                      ? "rgba(234, 179, 8, 0.10)"
+                                      : "rgba(255, 255, 255, 0.06)",
+                                borderColor:
+                                  torrentSeeders >= 50
+                                    ? "rgba(34, 197, 94, 0.3)"
+                                    : torrentSeeders >= 10
+                                      ? "rgba(234, 179, 8, 0.25)"
+                                      : "rgba(255,255,255,0.1)",
+                                borderWidth: 0.5,
+                              },
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.sheetBadgeText,
+                                {
+                                  color:
+                                    torrentSeeders >= 50
+                                      ? "#22c55e"
+                                      : torrentSeeders >= 10
+                                        ? "#eab308"
+                                        : "#a0a0a5",
+                                  fontWeight: "600",
+                                },
+                              ]}
+                            >
+                              {`👤 ${torrentSeeders}`}
+                            </Text>
+                          </View>
+                        )}
+
+                      {source.provider && (
+                        <View
+                          style={[
+                            styles.sheetBadge,
+                            {
+                              backgroundColor:
+                                "rgba(85,128,255,0.1)",
+                              borderColor: "rgba(85,128,255,0.2)",
+                              borderWidth: 0.5,
+                            },
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.sheetBadgeText,
+                              {
+                                color: "#5580FF",
+                                fontWeight: "600",
+                              },
+                            ]}
+                          >
+                            {source.provider}
+                          </Text>
+                        </View>
+                      )}
+
+                      {hasHeaders && (
+                        <View
+                          style={[
+                            styles.sheetBadge,
+                            {
+                              backgroundColor:
+                                "rgba(0,71,255,0.08)",
+                              borderColor: "rgba(0,71,255,0.2)",
+                              borderWidth: 0.5,
+                            },
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.sheetBadgeText,
+                              { color: theme.colors.accentLight },
+                            ]}
+                          >
+                            Headers
+                          </Text>
+                        </View>
+                      )}
+
+                      {sizeTag && (
+                        <View
+                          style={[
+                            styles.sheetBadge,
+                            {
+                              backgroundColor: "rgba(85, 128, 255, 0.12)",
+                              borderColor: "rgba(85, 128, 255, 0.25)",
+                              borderWidth: 0.5,
+                            },
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.sheetBadgeText,
+                              {
+                                color: "#5580FF",
+                                fontWeight: "700",
+                              },
+                            ]}
+                          >
+                            {sizeTag}
+                          </Text>
+                        </View>
+                      )}
+
+                      {subtitles.length > 0 && idx === 0 ? (
+                        <View
+                          style={[
+                            styles.sheetBadge,
+                            {
+                              backgroundColor:
+                                "rgba(255,255,255,0.05)",
+                            },
+                          ]}
+                        >
+                          <Text style={styles.sheetBadgeText}>
+                            Subs
+                          </Text>
+                        </View>
+                      ) : null}
+                    </View>
+                  </View>
+                  {isSelected && (
+                    <CheckIcon size={16} color={theme.colors.accentLight} />
+                  )}
+                </TouchableOpacity>
+              );
+            };
+
+            return (
+              <View style={{ width: "100%" }}>
+                {/* Direct/HLS Sources rendered first */}
+                {directSources.map((source, idx) =>
+                  renderSourceRow(source, idx),
+                )}
+
+                {/* Collapsible Torrent Accordion row */}
+                {torrentSources.length > 0 && (
+                  <>
+                    <TouchableOpacity
+                      onPress={() => {
+                        setTorrentExpanded(!torrentExpanded);
+                      }}
+                      style={[
+                        styles.accordionHeader,
+                        torrentExpanded &&
+                          styles.accordionHeaderActive,
+                      ]}
+                      activeOpacity={0.8}
+                    >
+                      <ArrowDownTrayIcon
+                        size={18}
+                        color={theme.colors.rose}
+                        style={{ marginRight: 10 }}
+                      />
+                      <Text style={styles.accordionTitle}>
+                        Torrent & Magnet Links ({torrentSources.length} found)
+                      </Text>
+                      {torrentExpanded ? (
+                        <ChevronUpIcon size={18} color="#a0a0a5" />
+                      ) : (
+                        <ChevronDownIcon size={18} color="#a0a0a5" />
+                      )}
+                    </TouchableOpacity>
+
+                    <Animated.View style={accordionAnimatedStyle}>
+                      <View
+                        onLayout={(e) => {
+                          const { height } = e.nativeEvent.layout;
+                          if (height > 0 && height !== accordionHeight) {
+                            setAccordionHeight(height);
+                          }
+                        }}
+                        style={{
+                          width: "100%",
+                          position: "absolute",
+                          top: 0,
+                        }}
+                      >
+                        {torrentSources.map((source, idx) =>
+                          renderSourceRow(source, idx),
+                        )}
+                      </View>
+                    </Animated.View>
+                  </>
+                )}
+              </View>
+            );
+          })()}
         </PlayerModal>
 
         {/* Subtitles modal */}
@@ -2340,5 +2672,73 @@ const styles = StyleSheet.create({
     fontSize: 11,
     textAlign: "right",
     fontWeight: "500",
+  },
+  sheetRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 16,
+    backgroundColor: "rgba(255,255,255,0.02)",
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.04)",
+    width: "100%",
+  },
+  sheetRowActive: {
+    backgroundColor: "rgba(255,255,255,0.07)",
+    borderColor: "rgba(255,255,255,0.15)",
+  },
+  sheetRowInfo: {
+    flex: 1,
+  },
+  sheetQualityRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 4,
+  },
+  sheetQuality: {
+    color: "rgba(255,255,255,0.85)",
+    fontSize: 15,
+    fontWeight: "600",
+  },
+  sheetQualityActive: {
+    color: "#fff",
+  },
+  sheetBadge: {
+    backgroundColor: "rgba(255,255,255,0.08)",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  sheetBadgeText: {
+    color: "rgba(255,255,255,0.5)",
+    fontSize: 10,
+    fontWeight: "700",
+    letterSpacing: 0.5,
+  },
+  accordionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 16,
+    backgroundColor: "rgba(255,255,255,0.04)",
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+    marginTop: 8,
+    width: "100%",
+  },
+  accordionHeaderActive: {
+    backgroundColor: "rgba(255,255,255,0.08)",
+    borderColor: "rgba(255,255,255,0.15)",
+  },
+  accordionTitle: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "700",
+    flex: 1,
   },
 });

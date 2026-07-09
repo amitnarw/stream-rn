@@ -41,7 +41,18 @@ class TorrentStreamer private constructor(private val context: Context) {
                 }
             }
         })
-        sessionManager.start()
+        // Configure DHT bootstrap nodes via SettingsPack
+        try {
+            val sp = SettingsPack()
+            sp.setString(com.frostwire.jlibtorrent.swig.settings_pack.string_types.dht_bootstrap_nodes.swigValue(), "router.bittorrent.com:6881,router.utorrent.com:6881,dht.libtorrent.org:25401,dht.transmissionbt.com:6881")
+            sessionManager.start()
+            sessionManager.applySettings(sp)
+            Log.i(TAG, "Applied SettingsPack with manual DHT bootstrap nodes.")
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to apply SettingsPack: ${e.message}")
+            sessionManager.start()
+        }
+
         sessionManager.startDht()
     }
 
@@ -61,6 +72,11 @@ class TorrentStreamer private constructor(private val context: Context) {
         }
         return list
     }
+
+    private var resolvedPort = 11470
+
+    fun getFileName(): String = videoFileName
+    fun getPort(): Int = resolvedPort
 
     fun startStream(magnetUrl: String): TorrentStreamInfo {
         stopStream() // Stop any active stream first
@@ -164,13 +180,31 @@ class TorrentStreamer private constructor(private val context: Context) {
 
         Log.i(TAG, "Selected file: $videoFileName (size: $videoFileSize bytes, index: $videoFileIndex)")
 
-        // Start HTTP range server
-        val server = LocalHttpServer(11470, this)
-        server.start()
+        // Start HTTP range server with dynamic port fallback loop
+        var port = 11470
+        var serverStarted = false
+        var attempts = 0
+        var server: LocalHttpServer? = null
+        while (!serverStarted && attempts < 20) {
+            try {
+                server = LocalHttpServer(port, this)
+                server.start()
+                serverStarted = true
+                resolvedPort = port
+                Log.i(TAG, "Successfully started HTTP range server on port $port")
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to start HTTP server on port $port, trying next port: ${e.message}")
+                port++
+                attempts++
+            }
+        }
+        if (!serverStarted || server == null) {
+            throw IllegalStateException("Failed to bind any port from 11470 to 11490 for LocalHttpServer")
+        }
         activeServer = server
 
         return TorrentStreamInfo(
-            streamUrl = "http://127.0.0.1:11470/stream",
+            streamUrl = "http://127.0.0.1:$resolvedPort/stream",
             fileName = videoFileName,
             fileSize = videoFileSize
         )
