@@ -244,12 +244,12 @@ class CloudStreamModule(reactContext: ReactApplicationContext) :
         Thread {
             try {
                 val info = TorrentStreamer.getInstance(context).startStream(magnetUrl)
-                val map = Arguments.createMap().apply {
-                    putString("streamUrl", info.streamUrl)
-                    putString("fileName", info.fileName)
-                    putDouble("fileSize", info.fileSize.toDouble())
-                }
-                promise.resolve(map)
+                val json = org.json.JSONObject().apply {
+                    put("streamUrl", info.streamUrl)
+                    put("fileName", info.fileName)
+                    put("fileSize", info.fileSize)
+                }.toString()
+                promise.resolve(json)
             } catch (e: Exception) {
                 promise.reject("TORRENT_START_ERROR", e.message, e)
             }
@@ -274,13 +274,13 @@ class CloudStreamModule(reactContext: ReactApplicationContext) :
         val context = reactApplicationContext
         try {
             val status = TorrentStreamer.getInstance(context).getStatus()
-            val map = Arguments.createMap().apply {
-                putDouble("progress", status.progress.toDouble())
-                putDouble("speed", status.downloadRate.toDouble())
-                putInt("peers", status.numPeers)
-                putBoolean("active", status.active)
-            }
-            promise.resolve(map)
+            val json = org.json.JSONObject().apply {
+                put("progress", status.progress.toDouble())
+                put("speed", status.downloadRate.toDouble())
+                put("peers", status.numPeers)
+                put("active", status.active)
+            }.toString()
+            promise.resolve(json)
         } catch (e: Exception) {
             promise.reject("TORRENT_STATUS_ERROR", e.message, e)
         }

@@ -14,6 +14,7 @@ import {
   Linking,
   PanResponder,
   ScrollView,
+  Share,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -73,6 +74,7 @@ import { useTransition } from "../context/TransitionContext";
 import type { CardLayout } from "../context/TransitionContext";
 import { CustomModal } from "../components/CustomModal";
 import CustomVideoPlayer from "../components/CustomVideoPlayer";
+import Svg, { Circle, Defs, LinearGradient as SvgLinearGradient, Stop } from 'react-native-svg';
 
 function getHighQualityImageUrl(
   url: string | null | undefined,
@@ -122,6 +124,103 @@ function isIspBlock(err: string | undefined): boolean {
     e.includes("timeout")
   );
 }
+
+const TorrentCircularProgress = ({ progress, speed }: { progress: number; speed: number }) => {
+  const rotateVal = useSharedValue(0);
+
+  useEffect(() => {
+    rotateVal.value = withRepeat(
+      withTiming(360, {
+        duration: 3000,
+        easing: Easing.linear,
+      }),
+      -1,
+      false
+    );
+  }, [rotateVal]);
+
+  const animatedRotStyle = useAnimatedStyle(() => {
+    return {
+      transform: [{ rotate: `${rotateVal.value}deg` }],
+    };
+  });
+
+  const size = 120;
+  const strokeWidth = 5;
+  const radius = 48;
+  const center = size / 2;
+  const circumference = 2 * Math.PI * radius;
+  
+  const pct = Math.min(100, Math.max(0, (progress / 1.5) * 100));
+  const strokeDashoffset = circumference * (1 - pct / 100);
+
+  const speedText = speed ? (speed >= 1024 * 1024 ? `${(speed / (1024 * 1024)).toFixed(1)} MB/s` : `${(speed / 1024).toFixed(0)} kB/s`) : "0 kB/s";
+
+  return (
+    <View style={styles.circularContainer}>
+      <View style={{ width: size, height: size, justifyContent: 'center', alignItems: 'center' }}>
+        <Animated.View
+          style={[
+            {
+              position: 'absolute',
+              width: size + 16,
+              height: size + 16,
+            },
+            animatedRotStyle,
+          ]}
+        >
+          <Svg width={size + 16} height={size + 16}>
+            <Circle
+              cx={(size + 16) / 2}
+              cy={(size + 16) / 2}
+              r={radius + 6}
+              stroke="rgba(0, 71, 255, 0.18)"
+              strokeWidth={1.5}
+              strokeDasharray="6, 8"
+              fill="transparent"
+            />
+          </Svg>
+        </Animated.View>
+
+        <Svg width={size} height={size}>
+          <Defs>
+            <SvgLinearGradient id="blueGlow" x1="0%" y1="0%" x2="100%" y2="100%">
+              <Stop offset="0%" stopColor="#0047FF" />
+              <Stop offset="100%" stopColor="#5580FF" />
+            </SvgLinearGradient>
+          </Defs>
+          <Circle
+            cx={center}
+            cy={center}
+            r={radius}
+            stroke="rgba(255, 255, 255, 0.04)"
+            strokeWidth={strokeWidth}
+            fill="transparent"
+          />
+          <Circle
+            cx={center}
+            cy={center}
+            r={radius}
+            stroke="url(#blueGlow)"
+            strokeWidth={strokeWidth}
+            strokeDasharray={circumference}
+            strokeDashoffset={strokeDashoffset}
+            strokeLinecap="round"
+            fill="transparent"
+            transform={`rotate(-90 ${center} ${center})`}
+          />
+        </Svg>
+
+        <View style={styles.circularTextWrapper}>
+          <Text style={styles.circularPercentText}>{Math.round(pct)}%</Text>
+          <View style={styles.circularSpeedBadge}>
+            <Text style={styles.circularSpeedText}>{speedText}</Text>
+          </View>
+        </View>
+      </View>
+    </View>
+  );
+};
 
 function cleanErrorMessage(err: string | undefined): string {
   if (!err) return "";
@@ -610,11 +709,15 @@ export default function DetailScreen() {
   const [torrentStatus, setTorrentStatus] =
     useState<bridge.TorrentStatus | null>(null);
   const [selectedTorrentSeeders, setSelectedTorrentSeeders] = useState(0);
+  const [selectedSourceQuality, setSelectedSourceQuality] = useState("");
+  const [selectedSourceProvider, setSelectedSourceProvider] = useState("");
+  const [selectedTorrentTitle, setSelectedTorrentTitle] = useState("");
   const [torrentErrorModal, setTorrentErrorModal] = useState<{
     visible: boolean;
     message: string;
   }>({ visible: false, message: "" });
   const torrentIntervalRef = useRef<any>(null);
+  const torrentSessionIdRef = useRef<number>(0);
   const resolveTimeoutRef = useRef<any>(null);
 
   const showSourcePickerRef = useRef(false);
@@ -653,13 +756,14 @@ export default function DetailScreen() {
 
   const [isOpeningPlayer, setIsOpeningPlayer] = useState(false);
 
-  const closeSourcePicker = () => {
+  const closeSourcePicker = (keepTorrentActive = false) => {
     setShowSourcePicker(false);
     setPlayingEpisode(null);
     setActiveEpisodeIndex(null);
     setIsSheetTransitionDone(false);
     setIsResolving(false);
     setIsOpeningPlayer(false);
+    torrentSessionIdRef.current++; // Invalidate active torrent load session
     if (resolveTimeoutRef.current) {
       clearTimeout(resolveTimeoutRef.current);
       resolveTimeoutRef.current = null;
@@ -669,7 +773,9 @@ export default function DetailScreen() {
     if (torrentIntervalRef.current) {
       clearInterval(torrentIntervalRef.current);
     }
-    bridge.stopTorrentStream().catch(() => {});
+    if (!keepTorrentActive) {
+      bridge.stopTorrentStream().catch(() => {});
+    }
     if (progressTimeoutRef.current) {
       clearTimeout(progressTimeoutRef.current);
       progressTimeoutRef.current = null;
@@ -1386,7 +1492,6 @@ export default function DetailScreen() {
           mediaRef: e.mediaRef,
           season: e.season,
         }));
-
         const protocol = getProtocolLabel(source.type, source.url);
         const isTorrent =
           protocol === "TORRENT" ||
@@ -1396,26 +1501,43 @@ export default function DetailScreen() {
         if (isTorrent) {
           const sourceSeeders = (source as any).seeders ?? 0;
           try {
+            const sessionId = ++torrentSessionIdRef.current;
             setIsTorrentBuffering(true);
             setTorrentStatus({ progress: 0, speed: 0, peers: 0, active: true });
             setSelectedTorrentSeeders(sourceSeeders);
+            setSelectedSourceQuality(source.quality);
+            setSelectedSourceProvider(source.provider ?? "");
+            setSelectedTorrentTitle(title);
 
             bridge
               .startTorrentStream(source.url)
               .then((info) => {
+                if (sessionId !== torrentSessionIdRef.current) return;
+
                 if (torrentIntervalRef.current) {
                   clearInterval(torrentIntervalRef.current);
                 }
 
                 const intervalId = setInterval(async () => {
                   try {
-                    const status = await bridge.getTorrentStatus();
-                    setTorrentStatus(status);
+                    if (sessionId !== torrentSessionIdRef.current) {
+                      clearInterval(intervalId);
+                      return;
+                    }
 
+                    const status = await bridge.getTorrentStatus();
+                    
+                    if (sessionId !== torrentSessionIdRef.current) {
+                      clearInterval(intervalId);
+                      return;
+                    }
+
+                    setTorrentStatus(status);
                     if (!status.active) {
                       clearInterval(intervalId);
                       setIsTorrentBuffering(false);
                       setIsOpeningPlayer(false);
+                      bridge.stopTorrentStream().catch(() => {}); // Stop background stream on error to save resources
                       setTorrentErrorModal({
                         visible: true,
                         message: "Torrent stream connection timed out or went inactive.",
@@ -1432,7 +1554,7 @@ export default function DetailScreen() {
                       try {
                         const mode = await AsyncStorage.getItem('@sozo_player_mode');
                         if (mode === 'external') {
-                          closeSourcePicker();
+                          closeSourcePicker(true); // Keep torrent active for VLC / external players!
                           bridge.playInExternalPlayer(info.streamUrl, null, title, source.headers ? JSON.stringify(source.headers) : null);
                           return;
                         }
@@ -1441,7 +1563,7 @@ export default function DetailScreen() {
                       }
 
                       // Play local HTTP range server stream URL via Kotlin player!
-                      closeSourcePicker();
+                      closeSourcePicker(true); // Keep torrent active so Kotlin player can read from local http server!
                       setIsOpeningPlayer(false);
                       bridge.playStream(
                         info.streamUrl,
@@ -1479,6 +1601,7 @@ export default function DetailScreen() {
                 torrentIntervalRef.current = intervalId;
               })
               .catch((err) => {
+                if (sessionId !== torrentSessionIdRef.current) return;
                 setIsTorrentBuffering(false);
                 setIsOpeningPlayer(false);
                 setTorrentErrorModal({
@@ -1497,7 +1620,6 @@ export default function DetailScreen() {
           return;
         }
 
-        // Direct link: Check if external player mode is enabled
         try {
           const mode = await AsyncStorage.getItem('@sozo_player_mode');
           if (mode === 'external') {
@@ -2260,128 +2382,95 @@ export default function DetailScreen() {
       </Animated.View>
 
       {/* Torrent Buffering Overlay */}
-      {isTorrentBuffering && (
-        <Modal
-          transparent
-          animationType="fade"
-          visible={isTorrentBuffering}
-          onRequestClose={() => {
+      <CustomModal
+        visible={isTorrentBuffering}
+        onClose={() => {
+          setIsTorrentBuffering(false);
+          setIsOpeningPlayer(false);
+          torrentSessionIdRef.current++; // Invalidate active torrent load session
+          if (torrentIntervalRef.current) {
+            clearInterval(torrentIntervalRef.current);
+          }
+          bridge.stopTorrentStream().catch(() => {});
+        }}
+        title="Torrent Engine"
+        message={selectedTorrentTitle || "Streaming Video"}
+        Icon={ArrowDownTrayIcon}
+        iconColor="#0047FF"
+        iconBgColor="rgba(0, 71, 255, 0.1)"
+        glowColors={["rgba(0, 71, 255, 0.15)", "transparent"] as const}
+      >
+        {/* Subtitle with quality and provider */}
+        <Text style={styles.torrentSubtitle}>
+          {selectedSourceQuality ? `${selectedSourceQuality} · ` : ""}{selectedSourceProvider || "P2P Source"}
+        </Text>
+
+        {/* Circular Progress piece */}
+        <TorrentCircularProgress
+          progress={torrentStatus?.progress ?? 0}
+          speed={torrentStatus?.speed ?? 0}
+        />
+
+        {/* Stats row - Side-by-side glass cards */}
+        <View style={styles.torrentStatsContainer}>
+          <View style={styles.torrentStatBox}>
+            <Text style={styles.torrentStatLabel}>👥 Peers</Text>
+            <Text style={styles.torrentStatValue}>
+              {torrentStatus?.peers && torrentStatus.peers > 0
+                ? `${torrentStatus.peers}`
+                : selectedTorrentSeeders > 0
+                  ? `${selectedTorrentSeeders}`
+                  : "0"}
+            </Text>
+          </View>
+          <View style={styles.torrentStatBox}>
+            <Text style={styles.torrentStatLabel}>📶 Status</Text>
+            <Text style={styles.torrentStatValue} numberOfLines={1} ellipsizeMode="tail">
+              {torrentStatus?.peers && torrentStatus.peers > 0
+                ? "Streaming"
+                : selectedTorrentSeeders > 0
+                  ? "Resolving"
+                  : "Searching"}
+            </Text>
+          </View>
+        </View>
+
+        {/* Helpful tooltip caption to prevent user anxiety */}
+        <Text style={styles.torrentCaption}>
+          First piece download may take a moment to bootstrap DHT peers.
+        </Text>
+
+        {/* Cancel Button - Rose themed glass pill */}
+        <TouchableOpacity
+          style={styles.torrentCancelBtn}
+          onPress={() => {
             setIsTorrentBuffering(false);
+            setIsOpeningPlayer(false);
+            torrentSessionIdRef.current++;
             if (torrentIntervalRef.current) {
               clearInterval(torrentIntervalRef.current);
             }
             bridge.stopTorrentStream().catch(() => {});
           }}
+          activeOpacity={0.8}
         >
-          <View style={styles.torrentModalContainer}>
-            <BlurView
-              intensity={90}
-              tint="dark"
-              style={StyleSheet.absoluteFillObject}
-            />
-
-            <View style={styles.torrentContentCard}>
-              <ActivityIndicator size="large" color="#0047FF" />
-
-              <Text style={styles.torrentTitleText}>
-                Connecting to Peers...
-              </Text>
-              <Text style={styles.torrentSubTitleText}>
-                {torrentStatus?.peers && torrentStatus.peers > 0
-                  ? `Connected to ${torrentStatus.peers} live peer${torrentStatus.peers > 1 ? "s" : ""}`
-                  : selectedTorrentSeeders > 0
-                    ? `Locating ${selectedTorrentSeeders} known seeders on network...`
-                    : "Searching for peers..."}
-              </Text>
-
-              {/* Progress bar */}
-              <View style={styles.torrentProgressTrack}>
-                <View
-                  style={[
-                    styles.torrentProgressFill,
-                    {
-                      width: `${Math.min(100, Math.max(0, ((torrentStatus?.progress ?? 0) / 1.5) * 100))}%`,
-                    },
-                  ]}
-                />
-              </View>
-
-              <View style={styles.torrentStatsRow}>
-                <Text style={styles.torrentStatsText}>
-                  Progress:{" "}
-                  {Math.min(
-                    100,
-                    Math.round(((torrentStatus?.progress ?? 0) / 1.5) * 100),
-                  )}
-                  %
-                </Text>
-                <Text style={styles.torrentStatsText}>
-                  Speed:{" "}
-                  {torrentStatus?.speed
-                    ? `${(torrentStatus.speed / 1024).toFixed(0)} kB/s`
-                    : "0 kB/s"}
-                </Text>
-              </View>
-
-              {/* Cancel Button */}
-              <TouchableOpacity
-                style={styles.torrentCancelButton}
-                onPress={() => {
-                  setIsTorrentBuffering(false);
-                  setIsOpeningPlayer(false);
-                  if (torrentIntervalRef.current) {
-                    clearInterval(torrentIntervalRef.current);
-                  }
-                  bridge.stopTorrentStream().catch(() => {});
-                }}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.torrentCancelText}>Cancel</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </Modal>
-      )}
-
+          <Text style={styles.torrentCancelBtnText}>Cancel Stream</Text>
+        </TouchableOpacity>
+      </CustomModal>
+ 
       {/* Torrent Error Modal */}
-      {torrentErrorModal.visible && (
-        <Modal
-          transparent
-          animationType="fade"
-          visible={torrentErrorModal.visible}
-          onRequestClose={() => setTorrentErrorModal({ visible: false, message: "" })}
-        >
-          <View style={styles.torrentModalContainer}>
-            <BlurView
-              intensity={90}
-              tint="dark"
-              style={StyleSheet.absoluteFillObject}
-            />
-
-            <View style={styles.torrentContentCard}>
-              <View style={{ width: 56, height: 56, borderRadius: 28, backgroundColor: "rgba(255, 74, 125, 0.1)", alignItems: "center", justifyContent: "center", marginBottom: 16 }}>
-                <Text style={{ color: "#ff4a7d", fontSize: 24 }}>⚠️</Text>
-              </View>
-
-              <Text style={[styles.torrentTitleText, { color: "#ff4a7d" }]}>
-                Playback Error
-              </Text>
-              <Text style={[styles.torrentSubTitleText, { textAlign: "center", marginTop: 8, paddingHorizontal: 16 }]}>
-                {torrentErrorModal.message}
-              </Text>
-
-              {/* Close Button */}
-              <TouchableOpacity
-                style={[styles.torrentCancelButton, { marginTop: 24, backgroundColor: "#ff4a7d" }]}
-                onPress={() => setTorrentErrorModal({ visible: false, message: "" })}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.torrentCancelText}>Dismiss</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </Modal>
-      )}
+      <CustomModal
+        visible={torrentErrorModal.visible}
+        onClose={() => setTorrentErrorModal({ visible: false, message: "" })}
+        title="Playback Error"
+        message={torrentErrorModal.message}
+        Icon={ExclamationCircleIcon}
+        iconColor="#ff4a7d"
+        iconBgColor="rgba(255, 74, 125, 0.1)"
+        glowColors={["rgba(255, 74, 125, 0.15)", "transparent"] as const}
+        confirmText="Dismiss"
+        onConfirm={() => setTorrentErrorModal({ visible: false, message: "" })}
+      />
 
       {/* Source Picker Bottom Sheet Overlay */}
       {showSourcePicker && (
@@ -2392,7 +2481,7 @@ export default function DetailScreen() {
         >
           <Pressable
             style={StyleSheet.absoluteFillObject}
-            onPress={closeSourcePicker}
+            onPress={() => closeSourcePicker()}
           />
 
           <Animated.View
@@ -2432,7 +2521,7 @@ export default function DetailScreen() {
                 </View>
                 <TouchableOpacity
                   style={styles.sheetCloseButton}
-                  onPress={closeSourcePicker}
+                  onPress={() => closeSourcePicker()}
                   activeOpacity={0.8}
                 >
                   <XMarkIcon size={20} color="#ffffff" />
@@ -2573,13 +2662,24 @@ export default function DetailScreen() {
                               | number
                               | undefined;
 
+                            const handleCopyMagnet = async () => {
+                              try {
+                                await Share.share({ message: source.url });
+                              } catch (e) {
+                                // ignore
+                              }
+                            };
+
                             return (
-                              <TouchableOpacity
+                              <View
                                 key={`source-${source.type}-${idx}`}
-                                style={styles.sheetRow}
-                                onPress={() => onSourceSelect(source)}
-                                activeOpacity={0.7}
+                                style={[styles.sheetRow, { flexDirection: 'row', alignItems: 'center', paddingRight: 0 }]}
                               >
+                                <TouchableOpacity
+                                  style={{ flex: 1 }}
+                                  onPress={() => onSourceSelect(source)}
+                                  activeOpacity={0.7}
+                                >
                                 <View style={styles.sheetRowInfo}>
                                   <View
                                     style={[
@@ -2737,7 +2837,26 @@ export default function DetailScreen() {
                                     ) : null}
                                   </View>
                                 </View>
-                              </TouchableOpacity>
+                                </TouchableOpacity>
+
+                                {isTorrentSource && (
+                                  <TouchableOpacity
+                                    onPress={handleCopyMagnet}
+                                    activeOpacity={0.7}
+                                    style={{
+                                      paddingHorizontal: 12,
+                                      paddingVertical: 10,
+                                      alignSelf: 'stretch',
+                                      justifyContent: 'center',
+                                      alignItems: 'center',
+                                      borderLeftWidth: 1,
+                                      borderLeftColor: 'rgba(255,255,255,0.07)',
+                                    }}
+                                  >
+                                    <Text style={{ fontSize: 11, color: '#5580FF', fontWeight: '700', letterSpacing: 0.5 }}>COPY{"\n"}MAGNET</Text>
+                                  </TouchableOpacity>
+                                )}
+                              </View>
                             );
                           };
 
@@ -4285,6 +4404,162 @@ const styles = StyleSheet.create({
     color: "#ffffff",
     fontSize: 14,
     fontWeight: "600",
+  },
+  torrentCancelButtonCustom: {
+    backgroundColor: "rgba(255, 255, 255, 0.05)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 24,
+    width: "100%",
+  },
+  torrentOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(5, 5, 5, 0.88)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  torrentGlassCard: {
+    width: "88%",
+    backgroundColor: "rgba(20, 18, 24, 0.93)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
+    borderRadius: 32,
+    padding: 24,
+    alignItems: "center",
+    overflow: "hidden",
+    elevation: 12,
+    shadowColor: "#0047FF",
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.28,
+    shadowRadius: 28,
+  },
+  torrentGlow: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 140,
+  },
+  torrentBadgeContainer: {
+    backgroundColor: "rgba(0, 71, 255, 0.08)",
+    borderWidth: 1.5,
+    borderColor: "rgba(0, 71, 255, 0.25)",
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 8,
+  },
+  torrentBadgeText: {
+    color: "#5580FF",
+    fontSize: 10,
+    fontWeight: "800",
+    letterSpacing: 1.2,
+  },
+  torrentTitle: {
+    color: "#ffffff",
+    fontSize: 18,
+    fontWeight: "800",
+    textAlign: "center",
+    marginTop: 8,
+    marginBottom: 4,
+    paddingHorizontal: 12,
+  },
+  torrentSubtitle: {
+    color: "#8E8D92",
+    fontSize: 12,
+    fontWeight: "500",
+    textAlign: "center",
+    marginBottom: 16,
+  },
+  torrentStatsContainer: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    width: "100%",
+    gap: 12,
+    marginTop: 16,
+    marginBottom: 12,
+  },
+  torrentStatBox: {
+    flex: 1,
+    backgroundColor: "rgba(255, 255, 255, 0.03)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.06)",
+    borderRadius: 16,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  torrentStatLabel: {
+    color: "#8E8D92",
+    fontSize: 11,
+    fontWeight: "600",
+    marginBottom: 4,
+  },
+  torrentStatValue: {
+    color: "#E5E2E3",
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  torrentCaption: {
+    color: "#8E8D92",
+    fontSize: 11,
+    textAlign: "center",
+    lineHeight: 16,
+    paddingHorizontal: 16,
+    marginBottom: 24,
+  },
+  torrentCancelBtn: {
+    backgroundColor: "rgba(255, 74, 125, 0.08)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 74, 125, 0.22)",
+    paddingVertical: 14,
+    borderRadius: 20,
+    alignItems: "center",
+    justifyContent: "center",
+    width: "100%",
+  },
+  torrentCancelBtnText: {
+    color: "#ff4a7d",
+    fontSize: 14,
+    fontWeight: "700",
+    letterSpacing: 0.6,
+  },
+  circularContainer: {
+    alignItems: "center",
+    justifyContent: "center",
+    marginVertical: 16,
+    width: "100%",
+  },
+  circularTextWrapper: {
+    position: "absolute",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  circularPercentText: {
+    color: "#ffffff",
+    fontSize: 26,
+    fontWeight: "800",
+  },
+  circularSpeedBadge: {
+    backgroundColor: "rgba(0, 71, 255, 0.08)",
+    borderWidth: 1,
+    borderColor: "rgba(0, 71, 255, 0.2)",
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    marginTop: 4,
+  },
+  circularSpeedText: {
+    color: "#5580FF",
+    fontSize: 10,
+    fontWeight: "700",
   },
   accordionHeader: {
     flexDirection: "row",

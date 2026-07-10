@@ -1343,9 +1343,14 @@ class KotlinPlayerActivity : AppCompatActivity() {
         if (!::logoContainer.isInitialized || loadingGroup.visibility != View.VISIBLE) {
             logoPulseAnimatorSet?.cancel()
             logoPulseAnimatorSet = null
+            if (::logoContainer.isInitialized) {
+                logoContainer.scaleX = 1f
+                logoContainer.scaleY = 1f
+            }
             return
         }
-        if (logoPulseAnimatorSet != null) return // Already running
+        
+        logoPulseAnimatorSet?.cancel()
         
         val scaleXAnimator = android.animation.ObjectAnimator.ofFloat(logoContainer, "scaleX", 0.95f, 1.05f).apply {
             duration = 1000
@@ -4157,8 +4162,11 @@ class KotlinPlayerActivity : AppCompatActivity() {
                 val streamer = TorrentStreamer.getInstance(this@KotlinPlayerActivity)
                 var status = streamer.getStatus()
 
-                // Wait until we have resolved metadata and buffered at least 1.0% to prevent immediate playback errors
-                while (status.progress < 1.0f && !isCancelled) {
+                // Wait until we have at least 0.1% buffered before launching the player.
+                // Previously this was 1.0% which meant 40MB on a 4GB file before ExoPlayer
+                // even started — 30-120s of silent waiting. ExoPlayer handles the rest via
+                // HTTP range requests to our local server.
+                while (status.progress < 0.1f && !isCancelled) {
                     val speedKb = status.downloadRate / 1024
                     val speedText = if (speedKb > 1024) String.format(Locale.US, "%.2f MB/s", speedKb.toFloat() / 1024f) else "$speedKb KB/s"
                     statsTv.text = String.format(Locale.US, "Peers: %d  ·  Speed: %s  ·  Buffered: %.1f%%", status.numPeers, speedText, status.progress)
@@ -4316,19 +4324,15 @@ class KotlinPlayerActivity : AppCompatActivity() {
             
             val isInitialLoad = (player?.currentPosition ?: 0L) < 1000L
             if (isInitialLoad) {
-                if (loadingGroup.visibility != View.VISIBLE) {
-                    loadingGroup.alpha = 1f
-                    loadingGroup.visibility = View.VISIBLE
-                    startLogoPulseAnimation()
-                }
+                loadingGroup.alpha = 1f
+                loadingGroup.visibility = View.VISIBLE
+                startLogoPulseAnimation()
             } else {
                 // Mid-play buffer stall: show logo width loader overlay if controls are not visible
                 if (!isControlsVisible) {
-                    if (loadingGroup.visibility != View.VISIBLE) {
-                        loadingGroup.alpha = 1f
-                        loadingGroup.visibility = View.VISIBLE
-                        startLogoPulseAnimation()
-                    }
+                    loadingGroup.alpha = 1f
+                    loadingGroup.visibility = View.VISIBLE
+                    startLogoPulseAnimation()
                 } else {
                     loadingGroup.visibility = View.GONE
                     logoPulseAnimatorSet?.cancel()
@@ -4412,7 +4416,12 @@ class KotlinPlayerActivity : AppCompatActivity() {
             centerControls.animate().alpha(0f).setDuration(fadeDuration).setInterpolator(AccelerateDecelerateInterpolator())
                 .withEndAction { centerControls.visibility = View.GONE }
         }
-        loadingGroup.visibility = if (isBuffering || !isInitialLoadComplete) View.VISIBLE else View.GONE
+        if (isBuffering || !isInitialLoadComplete) {
+            loadingGroup.visibility = View.VISIBLE
+            startLogoPulseAnimation()
+        } else {
+            loadingGroup.visibility = View.GONE
+        }
         hideHandler.removeCallbacks(hideRunnable)
     }
 

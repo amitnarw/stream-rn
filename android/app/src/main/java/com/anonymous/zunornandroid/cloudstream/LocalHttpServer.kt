@@ -108,17 +108,36 @@ class LocalHttpServer(private val port: Int, private val streamer: TorrentStream
             // Stream file contents
             val buffer = ByteArray(64 * 1024) // 64kB chunks
             var currentOffset = startByte
+            var consecutiveTimeouts = 0
+            val maxConsecutiveTimeouts = 120 // 120 × 1s sleep = up to 2 minutes patience
+
             while (currentOffset <= endByte && isRunning) {
                 val toRead = Math.min(buffer.size.toLong(), endByte - currentOffset + 1).toInt()
                 val read = byteReader.readBytes(buffer, currentOffset, toRead)
-                if (read <= 0) {
-                    // Piece download timed out or was interrupted, break connection to let player retry
-                    Log.w(TAG, "Read failed or timed out at offset $currentOffset. Closing connection.")
-                    break
+                when {
+                    read < 0 -> {
+                        // EOF — we've read past end of file, done
+                        Log.i(TAG, "EOF reached at offset $currentOffset. Stream complete.")
+                        break
+                    }
+                    read == 0 -> {
+                        // Piece not yet downloaded — wait and retry instead of closing.
+                        // Closing here caused ExoPlayer to see a broken stream immediately.
+                        consecutiveTimeouts++
+                        if (consecutiveTimeouts > maxConsecutiveTimeouts) {
+                            Log.w(TAG, "Too many consecutive piece timeouts at offset $currentOffset. Closing.")
+                            break
+                        }
+                        Log.d(TAG, "Piece not ready at offset $currentOffset, waiting 1s (attempt $consecutiveTimeouts/$maxConsecutiveTimeouts)")
+                        Thread.sleep(1000)
+                    }
+                    else -> {
+                        consecutiveTimeouts = 0 // reset on successful read
+                        out.write(buffer, 0, read)
+                        out.flush()
+                        currentOffset += read
+                    }
                 }
-                out.write(buffer, 0, read)
-                out.flush()
-                currentOffset += read
             }
         } catch (e: Exception) {
             Log.w(TAG, "Client handler exception: ${e.message}")

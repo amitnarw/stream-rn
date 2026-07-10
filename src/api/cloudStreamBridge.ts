@@ -1493,7 +1493,8 @@ export interface TorrentStatus {
 }
 
 export async function startTorrentStream(magnetUrl: string): Promise<TorrentStreamInfo> {
-  return await CloudStreamModule.startTorrentStream(magnetUrl);
+  const res = await CloudStreamModule.startTorrentStream(magnetUrl);
+  return typeof res === "string" ? JSON.parse(res) : res;
 }
 
 export async function stopTorrentStream(): Promise<boolean> {
@@ -1501,7 +1502,8 @@ export async function stopTorrentStream(): Promise<boolean> {
 }
 
 export async function getTorrentStatus(): Promise<TorrentStatus> {
-  return await CloudStreamModule.getTorrentStatus();
+  const res = await CloudStreamModule.getTorrentStatus();
+  return typeof res === "string" ? JSON.parse(res) : res;
 }
 
 export function lockLandscape() {
