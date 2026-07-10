@@ -1416,6 +1416,7 @@ export function playStream(
   logoUrl?: string,
   provider?: string,
   detailUrl?: string,
+  isTorrentStream?: boolean,
 ) {
   CloudStreamModule.playStream(
     url,
@@ -1435,6 +1436,7 @@ export function playStream(
     logoUrl ?? '',
     provider ?? 'Cinemeta',
     detailUrl ?? '',
+    isTorrentStream ?? false,
   );
 }
 

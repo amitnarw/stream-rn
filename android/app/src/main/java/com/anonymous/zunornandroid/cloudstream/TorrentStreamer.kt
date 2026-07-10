@@ -2,300 +2,203 @@ package com.anonymous.zunornandroid.cloudstream
 
 import android.content.Context
 import android.util.Log
-import com.frostwire.jlibtorrent.*
-import com.frostwire.jlibtorrent.alerts.*
+import com.github.se_bastiaan.torrentstream.Torrent
+import com.github.se_bastiaan.torrentstream.TorrentOptions
+import com.github.se_bastiaan.torrentstream.TorrentStream
+import com.github.se_bastiaan.torrentstream.listeners.TorrentListener
+import com.github.se_bastiaan.torrentstream.StreamStatus
 import java.io.File
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 class TorrentStreamer private constructor(private val context: Context) {
 
-    private val sessionManager = SessionManager()
-    private var torrentHandle: TorrentHandle? = null
-    private var videoFileIndex: Int = -1
-    private var videoFileName: String = ""
-    private var videoFileSize: Long = 0L
-    private val saveDir: File = File(context.cacheDir, "torrents")
+    @Volatile private var torrentStream: TorrentStream? = null
+    private var currentTorrent: Torrent? = null
+    @Volatile private var activeServer: LocalHttpServer? = null
 
-    private var activeServer: LocalHttpServer? = null
-    private var isStreaming = false
-    private var activeReader: TorrentByteReader? = null
-    private val torrentLock = Any()
+    @Volatile var progress: Float = 0f
+    @Volatile var downloadSpeed: Long = 0L
+    @Volatile var peerCount: Int = 0
+    @Volatile var isActive: Boolean = false
+    @Volatile var streamUrl: String = ""
+    @Volatile var videoFileName: String = ""
+    @Volatile var videoFileSize: Long = 0L
 
-    init {
-        if (!saveDir.exists()) {
-            saveDir.mkdirs()
-        }
-        // Build SettingsPack with DHT bootstrap nodes BEFORE starting the session.
-        // If we start() first and applySettings() after, libtorrent has already
-        // performed its initial DHT bootstrap with an empty node list — too late.
-        // Start libtorrent session with a filtered alert listener for diagnostics.
-        // Exclude high-frequency alerts (like STATS or BLOCK_DOWNLOADING) to prevent JNI flooding and native SEGV crashes.
-        sessionManager.addListener(object : AlertListener {
-            override fun types(): IntArray = intArrayOf(
-                AlertType.DHT_BOOTSTRAP.swig(),
-                AlertType.METADATA_RECEIVED.swig(),
-                AlertType.LISTEN_FAILED.swig(),
-                AlertType.LISTEN_SUCCEEDED.swig(),
-                AlertType.TRACKER_ERROR.swig(),
-                AlertType.TRACKER_REPLY.swig(),
-                AlertType.PEER_CONNECT.swig(),
-                AlertType.PEER_DISCONNECTED.swig()
-            )
-            override fun alert(alert: Alert<*>) {
-                val typeName = alert.type().name
-                val message = alert.message()
-                Log.d("LibTorrentAlert", "[$typeName] $message")
-            }
-        })
+    @Volatile private var streamReadyLatch: CountDownLatch? = null
+    private var streamError: Exception? = null
+    @Volatile private var currentListener: TorrentListener? = null
 
+    fun startStream(magnetUrl: String): TorrentStreamInfo {
+        stopStream()
+
+        val saveDir = File(context.cacheDir, "torrents")
         try {
-            val sp = SettingsPack()
-            sp.setString(
-                com.frostwire.jlibtorrent.swig.settings_pack.string_types.dht_bootstrap_nodes.swigValue(),
-                "router.bittorrent.com:6881,router.utorrent.com:6881," +
-                "dht.libtorrent.org:25401,dht.transmissionbt.com:6881," +
-                "dht.aelitis.com:6881"
-            )
-            // Enable trackers, DHT, PeX, LSD
-            sp.setBoolean(com.frostwire.jlibtorrent.swig.settings_pack.bool_types.enable_dht.swigValue(), true)
-            sp.setBoolean(com.frostwire.jlibtorrent.swig.settings_pack.bool_types.enable_lsd.swigValue(), true)
-            sp.setBoolean(com.frostwire.jlibtorrent.swig.settings_pack.bool_types.enable_upnp.swigValue(), true)
-            sp.setBoolean(com.frostwire.jlibtorrent.swig.settings_pack.bool_types.enable_natpmp.swigValue(), true)
-
-            sessionManager.start(SessionParams(sp))
-            Log.i(TAG, "Session started with SettingsPack DHT bootstrap nodes.")
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to start with SettingsPack (${e.message}), falling back to default start")
-            sessionManager.start()
-        }
-
-        sessionManager.startDht()
-        Log.i(TAG, "DHT started and bootstrap nodes configured in SettingsPack")
-    }
-
-    private fun getTorrentHandles(): List<TorrentHandle> {
-        val list = mutableListOf<TorrentHandle>()
-        try {
-            val vector = sessionManager.swig().get_torrents()
-            val size = vector.size().toInt()
-            for (i in 0 until size) {
-                val swigHandle = vector.get(i)
-                if (swigHandle != null) {
-                    list.add(TorrentHandle(swigHandle))
-                }
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error getting torrent handles: ${e.message}")
-        }
-        return list
-    }
-
-    private var resolvedPort = 11470
-
-    fun getFileName(): String = videoFileName
-    fun getPort(): Int = resolvedPort
-
-    fun startStream(magnetUrl: String): TorrentStreamInfo = synchronized(torrentLock) {
-        stopStream() // Stop any active stream first
-
-        Log.i(TAG, "Starting stream for magnet: $magnetUrl")
-        isStreaming = true
-
-        // Clean save dir to prevent space issues
-        saveDir.deleteRecursively()
+            saveDir.deleteRecursively()
+        } catch (_: Exception) {}
         saveDir.mkdirs()
 
+        if (torrentStream == null) {
+            val options = TorrentOptions.Builder()
+                .saveLocation(saveDir.absolutePath)
+                .removeFilesAfterStop(true)
+                .autoDownload(true)
+                .prepareSize(10L * 1024L * 1024L)
+                .build()
+            torrentStream = TorrentStream.init(options)
+        } else {
+            torrentStream!!.resumeSession()
+        }
+
+        isActive = true
+        progress = 0f
+        downloadSpeed = 0L
+        peerCount = 0
+        streamUrl = ""
+        videoFileName = ""
+        videoFileSize = 0L
+        streamError = null
+
         val latch = CountDownLatch(1)
-        var resolvedHandle: TorrentHandle? = null
+        streamReadyLatch = latch
 
-        // Bug #2 fix: register listener BEFORE calling download() to avoid a
-        // race where metadata arrives before the listener is attached.
-        val tempListener = object : AlertListener {
-            override fun types(): IntArray = intArrayOf(AlertType.METADATA_RECEIVED.swig())
-            override fun alert(alert: Alert<*>) {
-                if (alert is MetadataReceivedAlert) {
-                    Log.i(TAG, "Metadata resolved inside temp listener!")
-                    latch.countDown()
+        val listener = object : TorrentListener {
+            override fun onStreamPrepared(torrent: Torrent) {
+                Log.i(TAG, "Torrent prepared, download starting automatically")
+            }
+            override fun onStreamStarted(torrent: Torrent) {
+                Log.i(TAG, "Torrent stream started")
+            }
+            override fun onStreamError(torrent: Torrent?, e: Exception) {
+                Log.e(TAG, "Torrent stream error: ${e.message}")
+                streamError = e
+                isActive = false
+                latch.countDown()
+            }
+            override fun onStreamReady(torrent: Torrent) {
+                Log.i(TAG, "Torrent stream ready")
+                currentTorrent = torrent
+                try {
+                    val videoFile = torrent.videoFile
+                    videoFileName = videoFile.name
+                    videoFileSize = videoFile.length()
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to read video file info", e)
+                    streamError = e
+                    isActive = false
                 }
+                latch.countDown()
+            }
+            override fun onStreamProgress(torrent: Torrent, status: StreamStatus) {
+                progress = status.progress
+                downloadSpeed = status.downloadSpeed.toLong()
+                peerCount = status.seeds
+            }
+            override fun onStreamStopped() {
+                isActive = false
+                latch.countDown()
             }
         }
 
-        sessionManager.addListener(tempListener)
+        currentListener = listener
+        torrentStream!!.addListener(listener)
         try {
-            sessionManager.download(magnetUrl, saveDir)
-
-            // Wait for the torrent handle to register in the session (up to 5s)
-            var retries = 0
-            while (resolvedHandle == null && retries < 50) {
-                val torrents = getTorrentHandles()
-                if (torrents.isNotEmpty()) {
-                    resolvedHandle = torrents[0]
-                } else {
-                    Thread.sleep(100)
-                    retries++
-                }
-            }
-
-            if (resolvedHandle == null) {
-                throw IllegalStateException("Failed to add torrent handle")
-            }
-
-            // Force resume the handle to ensure metadata download starts immediately
-            resolvedHandle.resume()
-
-            Log.i(TAG, "Torrent handle registered, waiting for metadata (up to 60s)...")
-            // Wait up to 60 seconds for metadata (was 30s — not enough on slow DHT)
-            // Check status().hasMetadata() safely to avoid Native SIGSEGV crash
-            if (!resolvedHandle.status().hasMetadata()) {
-                latch.await(60, TimeUnit.SECONDS)
-            }
-
-            if (!resolvedHandle.status().hasMetadata()) {
-                throw IllegalStateException("Metadata resolution timed out (no peers found or bad magnet)")
-            }
-
-        } finally {
-            sessionManager.removeListener(tempListener)
+            torrentStream!!.startStream(magnetUrl)
+        } catch (e: Exception) {
+            torrentStream!!.removeListener(listener)
+            currentListener = null
+            isActive = false
+            throw e
         }
 
-        val torrentInfo = resolvedHandle.torrentFile() ?: throw IllegalStateException("Metadata resolved but torrentInfo is null")
-        val fileStorage = torrentInfo.files()
-        // Find the largest video file
-        var largestSize = 0L
-        var largestIndex = -1
-        for (i in 0 until torrentInfo.numFiles()) {
-            val path = fileStorage.filePath(i).lowercase()
-            val size = fileStorage.fileSize(i)
-            if (isVideoFile(path) && size > largestSize) {
-                largestSize = size
-                largestIndex = i
+        var interrupted = false
+        try {
+            if (!latch.await(120, TimeUnit.SECONDS)) {
+                torrentStream!!.removeListener(listener)
+                currentListener = null
+                isActive = false
+                torrentStream?.stopStream()
+                throw IllegalStateException("Torrent stream timed out after 120 seconds")
             }
+        } catch (e: InterruptedException) {
+            torrentStream!!.removeListener(listener)
+            currentListener = null
+            isActive = false
+            Thread.currentThread().interrupt()
+            torrentStream?.stopStream()
+            interrupted = true
         }
 
-        if (largestIndex == -1) {
-            // Fallback to largest file overall if no video extension matches
-            for (i in 0 until torrentInfo.numFiles()) {
-                val size = fileStorage.fileSize(i)
-                if (size > largestSize) {
-                    largestSize = size
-                    largestIndex = i
-                }
-            }
+        streamError?.let {
+            torrentStream!!.removeListener(listener)
+            currentListener = null
+            isActive = false
+            torrentStream?.stopStream()
+            throw it
         }
 
-        if (largestIndex == -1) {
-            throw IllegalStateException("No files found in torrent")
+        if (interrupted) {
+            throw IllegalStateException("Torrent stream was interrupted")
         }
 
-        videoFileIndex = largestIndex
-        videoFileName = fileStorage.fileName(largestIndex)
-        videoFileSize = largestSize
-        torrentHandle = resolvedHandle
+        val torrent = currentTorrent
+        if (torrent == null) {
+            torrentStream!!.removeListener(listener)
+            currentListener = null
+            isActive = false
+            torrentStream?.stopStream()
+            throw IllegalStateException("Torrent not available after stream ready")
+        }
 
-        // Set sequential download flag
-        resolvedHandle.setFlags(TorrentFlags.SEQUENTIAL_DOWNLOAD)
+        videoFileName = torrent.videoFile.name
+        videoFileSize = torrent.videoFile.length()
 
-        // Set file priorities: ignore other files, prioritize the video file
-        val priorities = Array(torrentInfo.numFiles()) { Priority.IGNORE }
-        priorities[largestIndex] = Priority.SEVEN
-        resolvedHandle.prioritizeFiles(priorities)
-
-        Log.i(TAG, "Selected file: $videoFileName (size: $videoFileSize bytes, index: $videoFileIndex)")
-
-        // Start HTTP range server with dynamic port fallback loop
         var port = 11470
         var serverStarted = false
         var attempts = 0
         var server: LocalHttpServer? = null
         while (!serverStarted && attempts < 20) {
             try {
-                server = LocalHttpServer(port, this)
+                server = LocalHttpServer(torrent, port)
                 server.start()
                 serverStarted = true
-                resolvedPort = port
-                Log.i(TAG, "Successfully started HTTP range server on port $port")
             } catch (e: Exception) {
-                Log.w(TAG, "Failed to start HTTP server on port $port, trying next port: ${e.message}")
+                Log.w(TAG, "Port $port in use, trying next: ${e.message}")
                 port++
                 attempts++
             }
         }
         if (!serverStarted || server == null) {
-            throw IllegalStateException("Failed to bind any port from 11470 to 11490 for LocalHttpServer")
+            torrentStream!!.removeListener(listener)
+            currentListener = null
+            isActive = false
+            torrentStream?.stopStream()
+            throw IllegalStateException("Failed to bind any port from 11470 to 11490")
         }
         activeServer = server
+        streamUrl = "http://127.0.0.1:$port/stream"
+        Log.i(TAG, "HTTP server ready on port $port")
 
-        return TorrentStreamInfo(
-            streamUrl = "http://127.0.0.1:$resolvedPort/stream",
-            fileName = videoFileName,
-            fileSize = videoFileSize
-        )
+        return TorrentStreamInfo(streamUrl, videoFileName, videoFileSize)
     }
 
-    fun stopStream() = synchronized(torrentLock) {
-        isStreaming = false
-        
-        // Release active byte reader first so it aborts any pending loops and blocks
-        // JNI calls before we delete the handle.
-        activeReader?.release()
-        activeReader = null
-
+    fun stopStream() {
         activeServer?.stop()
         activeServer = null
-
-        // Bug #6 fix: remove handle and also remove all remaining handles to
-        // prevent stale announce URLs / peer lists from prior downloads leaking
-        // into the next magnet session.
-        torrentHandle?.let { handle ->
-            try {
-                sessionManager.remove(handle)
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to remove torrent handle: ${e.message}")
-            }
-        }
-        // Remove any other stale handles (e.g. from a crashed prior session)
-        try {
-            getTorrentHandles().forEach { h ->
-                if (h != torrentHandle) {
-                    try { sessionManager.remove(h) } catch (_: Exception) {}
-                }
-            }
-        } catch (_: Exception) {}
-
-        torrentHandle = null
-        videoFileIndex = -1
+        currentTorrent = null
+        currentListener?.let { torrentStream?.removeListener(it) }
+        currentListener = null
+        torrentStream?.stopStream()
+        isActive = false
+        streamUrl = ""
         videoFileName = ""
         videoFileSize = 0L
+        streamReadyLatch?.countDown()
+        streamReadyLatch = null
     }
 
-    fun getStatus(): TorrentStatus = synchronized(torrentLock) {
-        val handle = torrentHandle
-        if (handle == null || !handle.isValid) {
-            return TorrentStatus(0f, 0L, 0, false)
-        }
-        return try {
-            val status = handle.status()
-            val progress = status.progress() * 100f
-            val downloadRate = status.downloadRate().toLong() // bytes per second
-            val numPeers = status.numPeers()
-            TorrentStatus(progress, downloadRate, numPeers, isStreaming)
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to get handle status: ${e.message}")
-            TorrentStatus(0f, 0L, 0, isStreaming)
-        }
-    }
-
-    fun getByteReader(): TorrentByteReader = synchronized(torrentLock) {
-        val handle = torrentHandle ?: throw IllegalStateException("No active torrent handle")
-        return TorrentByteReader(handle, videoFileIndex, videoFileSize, torrentLock).also {
-            activeReader = it
-        }
-    }
-
-    private fun isVideoFile(path: String): Boolean {
-        return path.endsWith(".mp4") || path.endsWith(".mkv") || path.endsWith(".avi") ||
-               path.endsWith(".mov") || path.endsWith(".flv") || path.endsWith(".webm")
+    fun getStatus(): TorrentStatus {
+        return TorrentStatus(progress, downloadSpeed, peerCount, isActive)
     }
 
     companion object {
@@ -310,15 +213,5 @@ class TorrentStreamer private constructor(private val context: Context) {
     }
 }
 
-data class TorrentStreamInfo(
-    val streamUrl: String,
-    val fileName: String,
-    val fileSize: Long
-)
-
-data class TorrentStatus(
-    val progress: Float,
-    val downloadRate: Long,
-    val numPeers: Int,
-    val active: Boolean
-)
+data class TorrentStreamInfo(val streamUrl: String, val fileName: String, val fileSize: Long)
+data class TorrentStatus(val progress: Float, val downloadRate: Long, val numPeers: Int, val active: Boolean)

@@ -1,53 +1,56 @@
 package com.anonymous.zunornandroid.cloudstream
 
 import android.util.Log
+import com.github.se_bastiaan.torrentstream.Torrent
 import java.io.BufferedOutputStream
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.net.ServerSocket
 import java.net.Socket
+import java.util.Collections
 import java.util.Locale
 
-class LocalHttpServer(private val port: Int, private val streamer: TorrentStreamer) {
+class LocalHttpServer(private val torrent: Torrent, private val port: Int) {
     private var serverSocket: ServerSocket? = null
-    private var isRunning = false
-    private var serverThread: Thread? = null
+    @Volatile private var isRunning = false
+    private val handlerThreads = Collections.synchronizedList(mutableListOf<Thread>())
 
     fun start() {
-        serverSocket = ServerSocket(port) // throws synchronously if port is in use
+        serverSocket = ServerSocket(port)
         isRunning = true
-        serverThread = Thread {
+        Thread {
             try {
-                Log.i(TAG, "Local HTTP range server listening on port $port")
+                Log.i(TAG, "Local HTTP server listening on port $port")
                 while (isRunning) {
                     val clientSocket = serverSocket?.accept() ?: break
-                    Thread {
-                        handleClient(clientSocket)
-                    }.start()
+                    val handler = Thread { handleClient(clientSocket) }
+                    handlerThreads.add(handler)
+                    handler.start()
                 }
             } catch (e: Exception) {
                 if (isRunning) {
-                    Log.e(TAG, "Server error: ${e.message}")
+                    Log.e(TAG, "Server accept error: ${e.message}")
                 }
             }
-        }.apply { start() }
+        }.start()
     }
 
     fun stop() {
         isRunning = false
-        try {
-            serverSocket?.close()
-        } catch (_: Exception) {}
+        try { serverSocket?.close() } catch (_: Exception) {}
         serverSocket = null
-        serverThread?.interrupt()
-        serverThread = null
+        synchronized(handlerThreads) {
+            handlerThreads.forEach { it.interrupt() }
+            handlerThreads.clear()
+        }
     }
 
     private fun handleClient(socket: Socket) {
+        var inputStream: java.io.InputStream? = null
         try {
             val reader = BufferedReader(InputStreamReader(socket.getInputStream()))
             var line = reader.readLine() ?: return
-            
+
             val requestLine = line.split(" ")
             if (requestLine.size < 2 || requestLine[0] != "GET") {
                 socket.close()
@@ -63,8 +66,9 @@ class LocalHttpServer(private val port: Int, private val streamer: TorrentStream
                 }
             }
 
-            val byteReader = streamer.getByteReader()
-            val fileSize = byteReader.fileSize
+            val videoFile = torrent.videoFile
+            val fileSize = videoFile.length()
+            val fileName = videoFile.name
 
             var startByte = 0L
             var endByte = fileSize - 1
@@ -80,7 +84,7 @@ class LocalHttpServer(private val port: Int, private val streamer: TorrentStream
                 }
             }
 
-            val contentType = when (streamer.getFileName().substringAfterLast(".").lowercase(Locale.US)) {
+            val contentType = when (fileName.substringAfterLast(".").lowercase(Locale.US)) {
                 "mkv" -> "video/x-matroska"
                 "mp4" -> "video/mp4"
                 "webm" -> "video/webm"
@@ -92,7 +96,6 @@ class LocalHttpServer(private val port: Int, private val streamer: TorrentStream
             val contentLength = endByte - startByte + 1
             val out = BufferedOutputStream(socket.getOutputStream())
 
-            // Send HTTP headers
             val headers = StringBuilder()
             headers.append("HTTP/1.1 206 Partial Content\r\n")
             headers.append("Content-Type: $contentType\r\n")
@@ -105,43 +108,43 @@ class LocalHttpServer(private val port: Int, private val streamer: TorrentStream
             out.write(headers.toString().toByteArray())
             out.flush()
 
-            // Stream file contents
-            val buffer = ByteArray(64 * 1024) // 64kB chunks
-            var currentOffset = startByte
-            var consecutiveTimeouts = 0
-            val maxConsecutiveTimeouts = 120 // 120 × 1s sleep = up to 2 minutes patience
+            inputStream = torrent.getVideoStream()
+            var skipped = 0L
+            while (skipped < startByte) {
+                val s = inputStream.skip(startByte - skipped)
+                if (s <= 0) break
+                skipped += s
+            }
 
-            while (currentOffset <= endByte && isRunning) {
-                val toRead = Math.min(buffer.size.toLong(), endByte - currentOffset + 1).toInt()
-                val read = byteReader.readBytes(buffer, currentOffset, toRead)
-                when {
-                    read < 0 -> {
-                        // EOF — we've read past end of file, done
-                        Log.i(TAG, "EOF reached at offset $currentOffset. Stream complete.")
+            val buffer = ByteArray(64 * 1024)
+            var remaining = contentLength
+            var consecutiveTimeouts = 0
+            val maxConsecutiveTimeouts = 120
+
+            while (remaining > 0 && isRunning && !Thread.currentThread().isInterrupted) {
+                val toRead = Math.min(buffer.size.toLong(), remaining).toInt()
+                try {
+                    val read = inputStream.read(buffer, 0, toRead)
+                    if (read < 0) break
+                    out.write(buffer, 0, read)
+                    out.flush()
+                    remaining -= read
+                    consecutiveTimeouts = 0
+                } catch (e: java.io.IOException) {
+                    consecutiveTimeouts++
+                    if (consecutiveTimeouts > maxConsecutiveTimeouts) {
+                        Log.w(TAG, "Too many consecutive IO errors, closing")
                         break
                     }
-                    read == 0 -> {
-                        // Piece not yet downloaded — wait and retry instead of closing.
-                        // Closing here caused ExoPlayer to see a broken stream immediately.
-                        consecutiveTimeouts++
-                        if (consecutiveTimeouts > maxConsecutiveTimeouts) {
-                            Log.w(TAG, "Too many consecutive piece timeouts at offset $currentOffset. Closing.")
-                            break
-                        }
-                        Log.d(TAG, "Piece not ready at offset $currentOffset, waiting 1s (attempt $consecutiveTimeouts/$maxConsecutiveTimeouts)")
-                        Thread.sleep(1000)
-                    }
-                    else -> {
-                        consecutiveTimeouts = 0 // reset on successful read
-                        out.write(buffer, 0, read)
-                        out.flush()
-                        currentOffset += read
-                    }
+                    Thread.sleep(1000)
                 }
             }
         } catch (e: Exception) {
             Log.w(TAG, "Client handler exception: ${e.message}")
         } finally {
+            try {
+                inputStream?.close()
+            } catch (_: Exception) {}
             try { socket.close() } catch (_: Exception) {}
         }
     }

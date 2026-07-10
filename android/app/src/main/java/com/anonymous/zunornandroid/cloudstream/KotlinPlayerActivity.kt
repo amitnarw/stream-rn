@@ -58,6 +58,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.CancellationException
 import java.util.Locale
 import org.json.JSONArray
 import org.json.JSONObject
@@ -169,6 +170,7 @@ class KotlinPlayerActivity : AppCompatActivity() {
     private var currentSubtitleIndex = -1
     private var onlineSubtitleUrl = ""  // URL of an online/file subtitle override
     private var currentUrl = ""
+    private var isPreStartedTorrent = false
     private var currentHeadersJson = "{}"
     private lateinit var audioTrackBtn: View
 
@@ -194,9 +196,8 @@ class KotlinPlayerActivity : AppCompatActivity() {
     private lateinit var playerContainer: FrameLayout
     private var activeOverlay: View? = null
     private var torrentLoadingOverlay: FrameLayout? = null
+
     private var torrentJob: kotlinx.coroutines.Job? = null
-
-
     // File-picker for local subtitle files (.srt, .vtt, .ass, .ssa)
     private val subtitleFilePicker = registerForActivityResult(ActivityResultContracts.GetContent()) { uri: android.net.Uri? ->
         if (uri != null) {
@@ -406,6 +407,7 @@ class KotlinPlayerActivity : AppCompatActivity() {
 
         currentUrl = url ?: ""
         currentHeadersJson = headersJson
+        isPreStartedTorrent = intent.getBooleanExtra("isTorrentStream", false)
         if (subtitleUrl.isNotEmpty()) currentSubtitleIndex = 0
 
         allSources?.let { sources ->
@@ -3334,20 +3336,16 @@ class KotlinPlayerActivity : AppCompatActivity() {
                 }
                 accordionHeader.addView(accordionTitle, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
 
-                val chevronTv = TextView(this@KotlinPlayerActivity).apply {
-                    text = if (torrentExpanded) "▲" else "▼"
-                    setTextColor(Color.parseColor("#A0A0A5"))
-                    textSize = 13f
+                val chevronIv = ImageView(this@KotlinPlayerActivity).apply {
+                    setImageResource(if (torrentExpanded) R.drawable.ic_hero_chevron_up else R.drawable.ic_hero_chevron_down)
+                    setColorFilter(Color.parseColor("#A0A0A5"))
                 }
-                accordionHeader.addView(chevronTv, LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                ))
+                accordionHeader.addView(chevronIv, LinearLayout.LayoutParams(dp(16), dp(16)))
 
                 accordionHeader.setOnClickListener {
                     torrentExpanded = !torrentExpanded
                     torrentContainer.visibility = if (torrentExpanded) View.VISIBLE else View.GONE
-                    chevronTv.text = if (torrentExpanded) "▲" else "▼"
+                    chevronIv.setImageResource(if (torrentExpanded) R.drawable.ic_hero_chevron_up else R.drawable.ic_hero_chevron_down)
                     accordionHeader.background = GradientDrawable().apply {
                         setColor(if (torrentExpanded) Color.parseColor("#14FF4A7D") else Color.parseColor("#0AFF4A7D"))
                         cornerRadius = dp(16).toFloat()
@@ -3624,12 +3622,31 @@ class KotlinPlayerActivity : AppCompatActivity() {
                     torrentSeeders >= 10 -> Color.parseColor("#eab308")
                     else -> Color.parseColor("#a0a0a5")
                 }
-                val seedersBadge = createBadgeView(
-                    "👤 $torrentSeeders",
-                    seedText,
-                    seedBg,
-                    seedBorder
-                )
+                val seedersBadge = LinearLayout(this@KotlinPlayerActivity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(dp(6), dp(2), dp(6), dp(2))
+                    background = GradientDrawable().apply {
+                        setColor(seedBg)
+                        cornerRadius = dp(6).toFloat()
+                        setStroke(dp(1), seedBorder)
+                    }
+                }
+                val seedIcon = ImageView(this@KotlinPlayerActivity).apply {
+                    setImageResource(R.drawable.ic_download)
+                    setColorFilter(seedText)
+                    setPadding(0, 0, dp(2), 0)
+                }
+                seedersBadge.addView(seedIcon, LinearLayout.LayoutParams(dp(10), dp(10)).apply {
+                    rightMargin = dp(2)
+                })
+                val seedNumTv = TextView(this@KotlinPlayerActivity).apply {
+                    text = "$torrentSeeders"
+                    setTextColor(seedText)
+                    textSize = 10f
+                    typeface = android.graphics.Typeface.DEFAULT_BOLD
+                }
+                seedersBadge.addView(seedNumTv)
                 badgesLayout.addView(seedersBadge, badgeLp)
             }
 
@@ -3752,7 +3769,7 @@ class KotlinPlayerActivity : AppCompatActivity() {
             // Show online subtitle status if one is active
             if (currentSubtitleIndex == -2 && onlineSubtitleUrl.isNotEmpty()) {
                 val name = onlineSubtitleUrl.substringAfterLast("/").take(40)
-                val row = createOptionRow("🌐 $name", true) { /* already active */ }
+                val row = createOptionRow(name, true) { /* already active */ }
                 optionsContainer.addView(row)
             }
 
@@ -4113,10 +4130,27 @@ class KotlinPlayerActivity : AppCompatActivity() {
     }
 
     private fun checkAndPlay(url: String, headersJson: String, subtitleUrl: String) {
+        // Local torrent stream URL served by our own HTTP server. This happens when
+        // the JS side pre-buffered the torrent and started the server, OR when the
+        // user retries a playback error while the server is still alive. In both
+        // cases do NOT stopStream() (that kills the server) and do NOT re-resolve —
+        // just play the URL directly.
+        val isLocalStream = url.startsWith("http://127.0.0.1:") && url.contains("/stream")
+        val serverAlive =
+            isLocalStream && TorrentStreamer.getInstance(this).streamUrl == url
+        if (isLocalStream && (isPreStartedTorrent || serverAlive)) {
+            isPreStartedTorrent = false // one-shot: consumed
+            rebuildPlayer(url, headersJson, subtitleUrl)
+            return
+        }
+
         val isTorrent = url.startsWith("magnet:") || url.lowercase(Locale.US).contains("torrent")
         if (isTorrent) {
             startTorrentResolution(url, headersJson, subtitleUrl)
         } else {
+            torrentJob?.cancel()
+            torrentJob = null
+            try { TorrentStreamer.getInstance(this).stopStream() } catch (_: Exception) {}
             rebuildPlayer(url, headersJson, subtitleUrl)
         }
     }
@@ -4180,6 +4214,8 @@ class KotlinPlayerActivity : AppCompatActivity() {
                 rebuildPlayer(info.streamUrl, headersJson, subtitleUrl)
 
             } catch (e: Exception) {
+                if (isCancelled || e is CancellationException) return@launch
+                if (isFinishing || isDestroyed) return@launch
                 Log.e("KotlinPlayerActivity", "Torrent stream error", e)
                 hideTorrentLoadingOverlay()
                 showError("Torrent error: ${e.localizedMessage}", providerName, getCurrentMediaRef())
@@ -4191,9 +4227,10 @@ class KotlinPlayerActivity : AppCompatActivity() {
         hideTorrentLoadingOverlay()
 
         val overlay = FrameLayout(this).apply {
-            setBackgroundColor(Color.parseColor("#E6050505")) // 90% opaque pitch black background
+            setBackgroundColor(Color.parseColor("#80050505")) // 50% opaque dark glass — lets blurred backdrop show through
             isClickable = true
             isFocusable = true
+            alpha = 0f
         }
 
         val card = LinearLayout(this).apply {
@@ -4257,12 +4294,19 @@ class KotlinPlayerActivity : AppCompatActivity() {
 
         root.addView(overlay, matchParent())
         torrentLoadingOverlay = overlay
+        updateBackdropBlur(true)
+        overlay.animate().alpha(1f).setDuration(250)
+            .setInterpolator(android.view.animation.DecelerateInterpolator()).start()
     }
 
     private fun hideTorrentLoadingOverlay() {
         torrentLoadingOverlay?.let {
-            root.removeView(it)
             torrentLoadingOverlay = null
+            updateBackdropBlur(false)
+            it.animate().alpha(0f).setDuration(250)
+                .setInterpolator(android.view.animation.AccelerateInterpolator())
+                .withEndAction { root.removeView(it) }
+                .start()
         }
     }
 
@@ -5718,11 +5762,12 @@ class KotlinPlayerActivity : AppCompatActivity() {
                 if (group.isTorrent) {
                     val seeders = group.primarySource.optInt("seeders", -1)
                     if (seeders > 0) {
-                        val seedersBadge = TextView(this@KotlinPlayerActivity).apply {
-                            text = "👤 $seeders"
-                            setTextColor(Color.WHITE)
-                            textSize = 8.5f
-                            typeface = android.graphics.Typeface.DEFAULT_BOLD
+                        val seedColor = if (seeders >= 50) Color.parseColor("#22C55E")
+                        else if (seeders >= 10) Color.parseColor("#EAB308")
+                        else Color.parseColor("#a0a0a5")
+                        val seedersBadge = LinearLayout(this@KotlinPlayerActivity).apply {
+                            orientation = LinearLayout.HORIZONTAL
+                            gravity = Gravity.CENTER_VERTICAL
                             setPadding(dp(6), dp(2), dp(6), dp(2))
                             background = GradientDrawable().apply {
                                 setColor(
@@ -5733,6 +5778,21 @@ class KotlinPlayerActivity : AppCompatActivity() {
                                 cornerRadius = dp(5).toFloat()
                             }
                         }
+                        val seedIcon = ImageView(this@KotlinPlayerActivity).apply {
+                            setImageResource(R.drawable.ic_download)
+                            setColorFilter(seedColor)
+                            setPadding(0, 0, dp(2), 0)
+                        }
+                        seedersBadge.addView(seedIcon, LinearLayout.LayoutParams(dp(9), dp(9)).apply {
+                            rightMargin = dp(2)
+                        })
+                        val seedNumTv = TextView(this@KotlinPlayerActivity).apply {
+                            text = "$seeders"
+                            setTextColor(Color.WHITE)
+                            textSize = 8.5f
+                            typeface = android.graphics.Typeface.DEFAULT_BOLD
+                        }
+                        seedersBadge.addView(seedNumTv)
                         flowLayout.addView(seedersBadge)
                     }
                 }
@@ -5792,16 +5852,11 @@ class KotlinPlayerActivity : AppCompatActivity() {
                 }
                 accordionHeader.addView(accTitleTv, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
                 
-                val chevronTv = TextView(this@KotlinPlayerActivity).apply {
-                    text = "▼"
-                    setTextColor(Color.parseColor("#8E8D92"))
-                    textSize = 10f
-                    setPadding(0, 0, dp(4), 0)
+                val chevronIv = ImageView(this@KotlinPlayerActivity).apply {
+                    setImageResource(R.drawable.ic_hero_chevron_down)
+                    setColorFilter(Color.parseColor("#8E8D92"))
                 }
-                accordionHeader.addView(chevronTv, LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                ))
+                accordionHeader.addView(chevronIv, LinearLayout.LayoutParams(dp(14), dp(14)))
                 
                 listContainer.addView(accordionHeader, LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
@@ -5825,7 +5880,7 @@ class KotlinPlayerActivity : AppCompatActivity() {
                 
                 accordionHeader.setOnClickListener {
                     torrentExpanded = !torrentExpanded
-                    chevronTv.text = if (torrentExpanded) "▲" else "▼"
+                    chevronIv.setImageResource(if (torrentExpanded) R.drawable.ic_hero_chevron_up else R.drawable.ic_hero_chevron_down)
                     torrentContainer.visibility = if (torrentExpanded) View.VISIBLE else View.GONE
                 }
             }

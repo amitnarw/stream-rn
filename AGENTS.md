@@ -101,15 +101,24 @@ $env:Path = "$env:ANDROID_HOME\platform-tools;$env:Path"
 
 ### Build Commands
 ```powershell
-# From project root - full build + install + launch:
-npx expo run:android
-
-# Or from android/ directory - just compile Kotlin (fast check):
+# ---- FAST: Kotlin compilation check (17s, preferred for quick verify) ----
+# Run from android/ directory:
 .\gradlew.bat :app:compileDebugKotlin
 
-# Full APK build (no install):
+# ---- FAST: Android Lint (check for resource/XML/manifest issues) ----
+# Run from android/ directory:
+.\gradlew.bat :app:lintDebug
+
+# ---- SLOW: Full APK build (no install) ----
+# Run from android/ directory:
 .\gradlew.bat :app:assembleDebug -x lint -x test
+
+# ---- SLOWEST: Full build + install + launch ----
+# Run from project root:
+npx expo run:android
 ```
+
+> **IMPORTANT**: When doing code review / quick verification, **always** use `compileDebugKotlin` or `lintDebug` from the `android/` directory. Do NOT run `assembleDebug` or `npx expo run:android` for simple Kotlin/lint checks — those take 2-3 minutes and are unnecessary.
 
 ### Key Dependencies (build.gradle)
 - Kotlin: 2.3.21 (root build.gradle - for CloudStream compatibility)

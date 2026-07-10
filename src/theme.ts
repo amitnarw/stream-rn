@@ -30,6 +30,19 @@ export const theme = {
     rose: '#ff4a7d',
     roseBg: 'rgba(255, 74, 125, 0.08)',
     roseBorder: 'rgba(255, 74, 125, 0.25)',
+
+    // Light, heavy-blur glass surfaces (player popups/modals)
+    lightGlass: {
+      cardBg: 'rgba(255, 255, 255, 0.16)',
+      cardBorder: 'rgba(255, 255, 255, 0.22)',
+      backdropDim: 'rgba(8, 8, 12, 0.45)',
+      glowTop: ['rgba(255, 255, 255, 0.22)', 'rgba(255, 255, 255, 0.0)'],
+      text: '#ffffff',
+      textMuted: 'rgba(255, 255, 255, 0.78)',
+      rowInactive: 'rgba(255, 255, 255, 0.10)',
+      rowActive: 'rgba(255, 255, 255, 0.20)',
+      rowBorder: 'rgba(255, 255, 255, 0.10)',
+    },
   },
   
   // Shared layout dimensions
@@ -60,6 +73,15 @@ export const theme = {
       shadowOpacity: 0.15,
       shadowRadius: 4,
       elevation: 3,
+    },
+
+    // Light, heavy-blur glass card (shared by player popups/modals)
+    cardLight: {
+      backgroundColor: 'rgba(255, 255, 255, 0.16)',
+      borderWidth: 1,
+      borderColor: 'rgba(255, 255, 255, 0.22)',
+      borderRadius: 24,
+      overflow: 'hidden',
     },
   },
 };

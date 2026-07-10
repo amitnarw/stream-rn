@@ -12,10 +12,10 @@ import {
   ActivityIndicator,
   BackHandler,
   ScrollView,
-  Modal,
+  Pressable,
 } from "react-native";
 import { useVideoPlayer, VideoView } from "expo-video";
-import { BlurView } from "expo-blur";
+import { BlurView, BlurTargetView } from "expo-blur";
 import {
   PlayIcon,
   PauseIcon,
@@ -202,34 +202,32 @@ interface PlayerModalProps {
   title: string;
   children: React.ReactNode;
   hideCloseButton?: boolean;
+  blurTargetRef?: React.RefObject<any>;
 }
 
-const PlayerModal = ({ visible, onClose, title, children, hideCloseButton = false }: PlayerModalProps) => {
+const PlayerModal = ({ visible, onClose, title, children, hideCloseButton = false, blurTargetRef }: PlayerModalProps) => {
+  if (!visible) return null;
   return (
-    <Modal
-      visible={visible}
-      transparent={true}
-      animationType="fade"
-      supportedOrientations={["landscape"]}
-      onRequestClose={onClose}
-    >
-      <View style={styles.resumePromptOverlay}>
-        <TouchableOpacity
-          style={StyleSheet.absoluteFillObject}
-          onPress={onClose}
-          activeOpacity={1}
-        />
+    <Animated.View style={StyleSheet.absoluteFillObject} pointerEvents="auto">
+      {/* Heavy native blur of the video behind the card */}
+      <BlurView
+        intensity={100}
+        tint="light"
+        blurMethod="dimezisBlurView"
+        blurTarget={blurTargetRef ? ({ current: blurTargetRef.current }) : undefined}
+        style={StyleSheet.absoluteFillObject}
+      />
+      {/* Lighter dim scrim so the glass reads bright */}
+      <Pressable
+        style={[StyleSheet.absoluteFillObject, { backgroundColor: theme.colors.lightGlass.backdropDim }]}
+        onPress={hideCloseButton ? undefined : onClose}
+      />
+      <View style={styles.modalCentering}>
         <Animated.View
           entering={ZoomIn.duration(250)}
           exiting={ZoomOut.duration(200)}
           style={styles.playerModalContainer}
         >
-          <View
-            style={[
-              StyleSheet.absoluteFillObject,
-              { backgroundColor: "rgba(15, 15, 20, 0.95)" }
-            ]}
-          />
           <View style={styles.modalHeader}>
             <Text style={styles.resumePromptTitle}>{title}</Text>
             {!hideCloseButton && (
@@ -247,7 +245,7 @@ const PlayerModal = ({ visible, onClose, title, children, hideCloseButton = fals
           </ScrollView>
         </Animated.View>
       </View>
-    </Modal>
+    </Animated.View>
   );
 };
 
@@ -270,6 +268,8 @@ export default function CustomVideoPlayer({
   sources = [],
 }: CustomVideoPlayerProps) {
   if (!visible) return null;
+
+  const blurTargetRef = useRef<any>(null);
 
   // Playback Error and watchdog states
   const [playerError, setPlayerError] = useState<string | null>(null);
@@ -1130,7 +1130,7 @@ export default function CustomVideoPlayer({
   }
 
   return (
-    <View style={[StyleSheet.absoluteFillObject, { zIndex: 99999, backgroundColor: "#050505" }]}>
+    <BlurTargetView ref={blurTargetRef} style={[StyleSheet.absoluteFillObject, { zIndex: 99999, backgroundColor: "#050505" }]}>
       <StatusBar hidden />
       <View style={styles.container}>
         <VideoView
@@ -1148,8 +1148,14 @@ export default function CustomVideoPlayer({
             exiting={FadeOut.duration(300)}
             style={styles.dolbyWarningOverlay}
           >
+            <BlurView
+              intensity={100}
+              tint="light"
+              blurMethod="dimezisBlurView"
+              blurTarget={{ current: blurTargetRef.current }}
+              style={StyleSheet.absoluteFillObject}
+            />
             <View style={styles.dolbyWarningCard}>
-              <View style={[StyleSheet.absoluteFillObject, { backgroundColor: "rgba(15, 15, 20, 0.95)", borderRadius: 16 }]} />
               <View style={styles.dolbyWarningHeader}>
                 <View style={{ flexDirection: "row", alignItems: "center" }}>
                   <SpeakerWaveIcon size={20} color={theme.colors.rose} style={{ marginRight: 10 }} />
@@ -1520,6 +1526,7 @@ export default function CustomVideoPlayer({
         {/* Continue Watching Resume Prompt Overlay */}
         <PlayerModal
           visible={showResumePrompt}
+          blurTargetRef={blurTargetRef}
           onClose={() => {
             player.currentTime = 0;
             player.play();
@@ -1565,6 +1572,7 @@ export default function CustomVideoPlayer({
           visible={activeModal === "quality"}
           onClose={() => setActiveModal(null)}
           title="Select Source"
+          blurTargetRef={blurTargetRef}
         >
           {(() => {
             const directSources = sources.filter(
@@ -1684,6 +1692,17 @@ export default function CustomVideoPlayer({
                               },
                             ]}
                           >
+                            <ArrowDownTrayIcon
+                              size={10}
+                              color={
+                                torrentSeeders >= 50
+                                  ? "#22c55e"
+                                  : torrentSeeders >= 10
+                                    ? "#eab308"
+                                    : "#a0a0a5"
+                              }
+                              style={{ marginRight: 3 }}
+                            />
                             <Text
                               style={[
                                 styles.sheetBadgeText,
@@ -1698,7 +1717,7 @@ export default function CustomVideoPlayer({
                                 },
                               ]}
                             >
-                              {`👤 ${torrentSeeders}`}
+                              {`${torrentSeeders}`}
                             </Text>
                           </View>
                         )}
@@ -1868,6 +1887,7 @@ export default function CustomVideoPlayer({
           visible={activeModal === "subtitles"}
           onClose={() => setActiveModal(null)}
           title="Select Subtitles"
+          blurTargetRef={blurTargetRef}
         >
           <View style={styles.settingsModalBody}>
             {/* Select Subtitle Track */}
@@ -2001,6 +2021,7 @@ export default function CustomVideoPlayer({
           visible={activeModal === "speed"}
           onClose={() => setActiveModal(null)}
           title="Playback Settings"
+          blurTargetRef={blurTargetRef}
         >
           <View style={styles.settingsModalBody}>
             <Text style={styles.settingsLabel}>Playback Speed</Text>
@@ -2071,6 +2092,7 @@ export default function CustomVideoPlayer({
         {/* Playback Error Modal */}
         <CustomModal
           visible={playerError !== null}
+          variant="light"
           onClose={() => {
             setPlayerError(null);
             handleClose();
@@ -2083,7 +2105,7 @@ export default function CustomVideoPlayer({
           iconBgColor="rgba(255, 74, 125, 0.1)"
         >
           <View style={{ width: "100%", alignItems: "center" }}>
-            <Text style={{ color: "rgba(255,255,255,0.45)", fontSize: 11, textAlign: "center", paddingHorizontal: 24, lineHeight: 16, marginBottom: 12 }}>
+            <Text style={{ color: theme.colors.lightGlass.textMuted, fontSize: 11, textAlign: "center", paddingHorizontal: 24, lineHeight: 16, marginBottom: 12 }}>
               Tip: If the stream has no audio (e.g. Dolby AC3 codec) or fails to play, use the "Open in External Player" option at the top left to play with VLC or MX Player.
             </Text>
             <View style={{ flexDirection: "row", justifyContent: "center", width: "100%", gap: 12 }}>
@@ -2128,7 +2150,7 @@ export default function CustomVideoPlayer({
           </View>
         </CustomModal>
       </View>
-    </View>
+    </BlurTargetView>
   );
 }
 
@@ -2472,12 +2494,19 @@ const styles = StyleSheet.create({
     borderColor: "rgba(255,255,255,0.08)",
     overflow: "hidden",
   },
+  modalCentering: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: "center",
+    alignItems: "center",
+    zIndex: 999999,
+  },
   playerModalContainer: {
     width: 460,
     maxHeight: SCREEN_HEIGHT * 0.9,
     borderRadius: 24,
+    backgroundColor: theme.colors.lightGlass.cardBg,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
+    borderColor: theme.colors.lightGlass.cardBorder,
     overflow: "hidden",
     padding: 24,
     justifyContent: "flex-start",
@@ -2496,7 +2525,7 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   resumePromptSubtitle: {
-    color: "#A0A0A5",
+    color: theme.colors.lightGlass.textMuted,
     fontSize: 14,
     lineHeight: 20,
     textAlign: "center",
@@ -2526,9 +2555,9 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   startOverBtn: {
-    backgroundColor: "rgba(255,255,255,0.08)",
+    backgroundColor: theme.colors.lightGlass.rowInactive,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.12)",
+    borderColor: theme.colors.lightGlass.rowBorder,
     paddingVertical: 12,
     paddingHorizontal: 24,
     borderRadius: 16,
@@ -2562,7 +2591,9 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: "rgba(255,255,255,0.08)",
+    backgroundColor: theme.colors.lightGlass.rowInactive,
+    borderWidth: 1,
+    borderColor: theme.colors.lightGlass.rowBorder,
     justifyContent: "center",
     alignItems: "center",
   },
@@ -2607,7 +2638,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.06)",
+    backgroundColor: theme.colors.lightGlass.rowInactive,
+    borderWidth: 1,
+    borderColor: theme.colors.lightGlass.rowBorder,
     marginRight: 8,
     marginBottom: 8,
   },
@@ -2633,15 +2666,16 @@ const styles = StyleSheet.create({
     right: 0,
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: "rgba(0,0,0,0.5)",
+    backgroundColor: theme.colors.lightGlass.backdropDim,
     zIndex: 999999,
   },
   dolbyWarningCard: {
     width: 450,
     padding: 20,
     borderRadius: 16,
+    backgroundColor: theme.colors.lightGlass.cardBg,
     borderWidth: 1,
-    borderColor: "rgba(255, 74, 125, 0.25)",
+    borderColor: "rgba(255, 74, 125, 0.45)",
     overflow: "hidden",
     elevation: 5,
   },
@@ -2652,17 +2686,19 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   dolbyWarningTitle: {
-    color: "#fff",
+    color: theme.colors.lightGlass.text,
     fontSize: 15,
     fontWeight: "700",
   },
   dolbyWarningCloseBtn: {
     padding: 4,
     borderRadius: 12,
-    backgroundColor: "rgba(255,255,255,0.06)",
+    backgroundColor: theme.colors.lightGlass.rowInactive,
+    borderWidth: 1,
+    borderColor: theme.colors.lightGlass.rowBorder,
   },
   dolbyWarningMessage: {
-    color: "#E5E2E3",
+    color: theme.colors.lightGlass.textMuted,
     fontSize: 12,
     lineHeight: 18,
     marginBottom: 12,
@@ -2679,15 +2715,15 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     paddingHorizontal: 16,
     borderRadius: 16,
-    backgroundColor: "rgba(255,255,255,0.02)",
+    backgroundColor: theme.colors.lightGlass.rowInactive,
     marginBottom: 8,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.04)",
+    borderColor: theme.colors.lightGlass.rowBorder,
     width: "100%",
   },
   sheetRowActive: {
-    backgroundColor: "rgba(255,255,255,0.07)",
-    borderColor: "rgba(255,255,255,0.15)",
+    backgroundColor: theme.colors.lightGlass.rowActive,
+    borderColor: "rgba(255, 255, 255, 0.30)",
   },
   sheetRowInfo: {
     flex: 1,
@@ -2707,7 +2743,7 @@ const styles = StyleSheet.create({
     color: "#fff",
   },
   sheetBadge: {
-    backgroundColor: "rgba(255,255,255,0.08)",
+    backgroundColor: "rgba(255, 255, 255, 0.16)",
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 4,
