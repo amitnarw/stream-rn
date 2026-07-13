@@ -1,0 +1,236 @@
+--------- beginning of main
+07-13 16:35:10.138 18461 19970 I ZunoPlugin: === LIVE TV DIAGNOSTICS ===
+07-13 16:35:10.138 18461 19970 I ZunoPlugin: Diagnosing provider: CloudPlay
+07-13 16:35:10.138 18461 19970 I ZunoPlugin:  - mainUrl: https://host.cloudplay.me
+07-13 16:35:10.138 18461 19970 I ZunoPlugin:  - mainPage size: 1
+07-13 16:35:10.138 18461 19970 I ZunoPlugin:  - Calling getMainPage for page ''...
+07-13 16:35:10.530 18461 19970 E ZunoPlugin:    -> FAILED: java.io.IOException: DNS blocked and DoH also failed for host.cloudplay.me
+07-13 16:35:10.530 18461 19970 E ZunoPlugin: java.io.IOException: DNS blocked and DoH also failed for host.cloudplay.me
+07-13 16:35:10.530 18461 19970 E ZunoPlugin: 	at com.anonymous.zunornandroid.cloudstream.CloudStreamPluginHost$patchedClient$2.lookup(CloudStreamPluginHost.kt:213)
+07-13 16:35:10.530 18461 19970 E ZunoPlugin: 	at okhttp3.internal.connection.RouteSelector.resetNextInetSocketAddress(RouteSelector.kt:170)
+07-13 16:35:10.530 18461 19970 E ZunoPlugin: 	at okhttp3.internal.connection.RouteSelector.nextProxy(RouteSelector.kt:132)
+07-13 16:35:10.530 18461 19970 E ZunoPlugin: 	at okhttp3.internal.connection.RouteSelector.next(RouteSelector.kt:70)
+07-13 16:35:10.530 18461 19970 E ZunoPlugin: 	at okhttp3.internal.connection.RealRoutePlanner.planConnect$okhttp(RealRoutePlanner.kt:164)
+07-13 16:35:10.530 18461 19970 E ZunoPlugin: 	at okhttp3.internal.connection.RealRoutePlanner.plan(RealRoutePlanner.kt:75)
+07-13 16:35:10.530 18461 19970 E ZunoPlugin: 	at okhttp3.internal.connection.FastFallbackExchangeFinder.launchTcpConnect(FastFallbackExchangeFinder.kt:119)
+07-13 16:35:10.530 18461 19970 E ZunoPlugin: 	at okhttp3.internal.connection.FastFallbackExchangeFinder.find(FastFallbackExchangeFinder.kt:62)
+07-13 16:35:10.530 18461 19970 E ZunoPlugin: 	at okhttp3.internal.connection.RealCall.initExchange$okhttp(RealCall.kt:298)
+07-13 16:35:10.530 18461 19970 E ZunoPlugin: 	at okhttp3.internal.connection.ConnectInterceptor.intercept(ConnectInterceptor.kt:32)
+07-13 16:35:10.530 18461 19970 E ZunoPlugin: 	at okhttp3.internal.http.RealInterceptorChain.proceed(RealInterceptorChain.kt:126)
+07-13 16:35:10.530 18461 19970 E ZunoPlugin: 	at okhttp3.internal.cache.CacheInterceptor.intercept(CacheInterceptor.kt:101)
+07-13 16:35:10.530 18461 19970 E ZunoPlugin: 	at okhttp3.internal.http.RealInterceptorChain.proceed(RealInterceptorChain.kt:126)
+07-13 16:35:10.530 18461 19970 E ZunoPlugin: 	at okhttp3.internal.http.BridgeInterceptor.intercept(BridgeInterceptor.kt:85)
+07-13 16:35:10.530 18461 19970 E ZunoPlugin: 	at okhttp3.internal.http.RealInterceptorChain.proceed(RealInterceptorChain.kt:126)
+07-13 16:35:10.530 18461 19970 E ZunoPlugin: 	at okhttp3.internal.http.RetryAndFollowUpInterceptor.intercept(RetryAndFollowUpInterceptor.kt:74)
+07-13 16:35:10.530 18461 19970 E ZunoPlugin: 	at okhttp3.internal.http.RealInterceptorChain.proceed(RealInterceptorChain.kt:126)
+07-13 16:35:10.530 18461 19970 E ZunoPlugin: 	at com.anonymous.zunornandroid.cloudstream.CloudStreamPluginHost$special$$inlined$-addInterceptor$1.intercept(OkHttpClient.kt:1409)
+07-13 16:35:10.530 18461 19970 E ZunoPlugin: 	at okhttp3.internal.http.RealInterceptorChain.proceed(RealInterceptorChain.kt:126)
+07-13 16:35:10.530 18461 19970 E ZunoPlugin: 	at okhttp3.internal.connection.RealCall.getResponseWithInterceptorChain$okhttp(RealCall.kt:226)
+07-13 16:35:10.530 18461 19970 E ZunoPlugin: 	at okhttp3.internal.connection.RealCall$AsyncCall.run(RealCall.kt:574)
+07-13 16:35:10.530 18461 19970 E ZunoPlugin: 	at java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1100)
+07-13 16:35:10.530 18461 19970 E ZunoPlugin: 	at java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:624)
+07-13 16:35:10.530 18461 19970 E ZunoPlugin: 	at java.lang.Thread.run(Thread.java:1572)
+07-13 16:35:10.531 18461 19970 I ZunoPlugin: Diagnosing provider: IPTV Player
+07-13 16:35:10.531 18461 19970 I ZunoPlugin:  - mainUrl: https://raw.githubusercontent.com/phisher98/TVVVV/main/15APR2024.m3u
+07-13 16:35:10.531 18461 19970 I ZunoPlugin:  - mainPage size: 1
+07-13 16:35:10.531 18461 19970 I ZunoPlugin:  - Calling getMainPage for page ''...
+07-13 16:35:10.949 18461 19970 I ZunoPlugin:    -> success! items sections count: 33
+07-13 16:35:10.949 18461 19970 I ZunoPlugin:      * Section: 'FM' | items count: 2
+07-13 16:35:10.949 18461 19970 I ZunoPlugin:        first item: name='Non-Stop Hindi', url='{"url":"http://s5.voscast.com:8216/stream","title":"Non-Stop Hindi","poster":"https://static.mytuner.mobi/media/tvos_radios/Ekv3xnWJpp.png","nation":"FM","key":"null","keyid":"null"}'
+07-13 16:35:10.949 18461 19970 I ZunoPlugin:      * Section: 'Music' | items count: 30
+07-13 16:35:10.949 18461 19970 I ZunoPlugin:        first item: name='7S Music (576p) [Not 24/7]', url='{"url":"http://103.199.161.254/Content/7smusic/Live/Channel(7smusic)/index.m3u8","title":"7S Music (576p) [Not 24/7]","poster":"https://i.imgur.com/zDiIhdN.png","nation":"Music","key":"null","keyid":"null"}'
+07-13 16:35:10.949 18461 19970 I ZunoPlugin:      * Section: 'Movies' | items count: 10
+07-13 16:35:10.949 18461 19970 I ZunoPlugin:        first item: name='&TV (1080p)', url='{"url":"https://amg01117-amg01117c1-amgplt0165.playout.now3.amagi.tv/playlist.m3u8","title":"&TV (1080p)","poster":"https://i.imgur.com/32W50Y6.png","nation":"Movies","key":"null","keyid":"null"}'
+07-13 16:35:10.949 18461 19970 I ZunoPlugin:      * Section: 'News' | items count: 95
+07-13 16:35:10.949 18461 19970 I ZunoPlugin:        first item: name='A1 TV Rajasthan (720p)', url='{"url":"https://5b48d7e1b4bce.streamlock.net/myapp/a1live/playlist.m3u8","title":"A1 TV Rajasthan (720p)","poster":"https://i.imgur.com/XJA3bh1.png","nation":"News","key":"null","keyid":"null"}'
+07-13 16:35:10.949 18461 19970 I ZunoPlugin:      * Section: 'Religious' | items count: 36
+07-13 16:35:10.949 18461 19970 I ZunoPlugin:        first item: name='Aastha (480p)', url='{"url":"https://aasthaott.akamaized.net/110923/smil:aasthatv.smil/chunklist_b1328000.m3u8","title":"Aastha (480p)","poster":"https://i.imgur.com/IqgrV92.png","nation":"Religious","key":"null","keyid":"null"}'
+07-13 16:35:10.949 18461 19970 I ZunoPlugin:      * Section: 'Kids' | items count: 6
+07-13 16:35:10.949 18461 19970 I ZunoPlugin:        first item: name='Akaram Kidz (460p) [Not 24/7]', url='{"url":"http://akaram.zecast.net/akaram-live/akaramkidz/index.m3u8","title":"Akaram Kidz (460p) [Not 24/7]","poster":"https://i.imgur.com/ENImp3R.png","nation":"Kids","key":"null","keyid":"null"}'
+07-13 16:35:10.949 18461 19970 I ZunoPlugin:      * Section: 'Entertainment' | items count: 33
+07-13 16:35:10.949 18461 19970 I ZunoPlugin:        first item: name='Amrita TV (720p)', url='{"url":"https://dr1zhpsuem5f4.cloudfront.net/master.m3u8","title":"Amrita TV (720p)","poster":"https://i.imgur.com/WdSjlPl.png","nation":"Entertainment","key":"null","keyid":"null"}'
+07-13 16:35:10.949 18461 19970 I ZunoPlugin:      * Section: 'Animation' | items count: 1
+07-13 16:35:10.949 18461 19970 I ZunoPlugin:        first item: name='Animax [Geo-blocked]', url='{"url":"https://amg02159-kcglobal-amg02159c1-samsung-in-521.playouts.now.amagi.tv/playlist/amg02159-kcglobal-animax-samsungin/playlist.m3u8","title":"Animax [Geo-blocked]","poster":"https://upload.wikimedia.org/wikipedia/commons/6/65/Animaxlogo-20160701.png","nation":"Animation","key":"null","keyid":"null"}'
+07-13 16:35:10.949 18461 19970 I ZunoPlugin:      * Section: 'Lifestyle' | items count: 3
+07-13 16:35:10.949 18461 19970 I ZunoPlugin:        first item: name='Ayush TV (360p) [Not 24/7]', url='{"url":"https://95eryw39dwn4-hls-live.wmncdn.net/Ayushu/271ddf829afeece44d8732757fba1a66.sdp/index.m3u8","title":"Ayush TV (360p) [Not 24/7]","poster":"https://i.imgur.com/PWzvp0B.png","nation":"Lifestyle","key":"null","keyid":"null"}'
+07-13 16:35:10.949 18461 19970 I ZunoPlugin:      * Section: 'Business' | items count: 7
+07-13 16:35:10.949 18461 19970 I ZunoPlugin:        first item: name='Bloomberg TV Asia (720p)', url='{"url":"https://bloomberg.com/media-manifest/streams/asia.m3u8","title":"Bloomberg TV Asia (720p)","poster":"https://i.imgur.com/OuogLHx.png","nation":"Business","key":"null","keyid":"null"}'
+07-13 16:35:10.949 18461 19970 I ZunoPlugin:      * Section: 'Undefined' | items count: 55
+07-13 16:35:10.949 18461 19970 I ZunoPlugin:        first item: name='Calvary TV (720p)', url='{"url":"https://player.mslivestream.net/mslive/71e7f7cc7dc7c51206b7b3bbb51e3052.sdp/playlist.m3u8","title":"Calvary TV (720p)","poster":"https://i.imgur.com/BvQzwSp.png","nation":"Undefined","key":"null","keyid":"null"}'
+07-13 16:35:10.949 18461 19970 I ZunoPlugin:      * Section: 'General' | items count: 37
+07-13 16:35:10.949 18461 19970 I ZunoPlugin:        first item: name='CCV (480p)', url='{"url":"https://5a1178b42cc03.streamlock.net/8212/8212/playlist.m3u8","title":"CCV (480p)","poster":"https://i.imgur.com/4ss0KfA.png","nation":"General","key":"null","keyid":"null"}'
+07-13 16:35:10.949 18461 19970 I ZunoPlugin:      * Section: 'Culture' | items count: 3
+07-13 16:35:10.949 18461 19970 I ZunoPlugin:        first item: name='DD Punjabi', url='{"url":"https://d3eyhgoylams0m.cloudfront.net/v1/manifest/93ce20f0f52760bf38be911ff4c91ed02aa2fd92/ed7bd2c7-8d10-4051-b397-2f6b90f99acb/20c8ad14-a158-4a42-8889-e032d070856e/2.m3u8","title":"DD Punjabi","poster":"https://i.imgur.com/WVtl6n2.png","nation":"Culture","key":"null","keyid":"null"}'
+07-13 16:35:10.949 18461 19970 I ZunoPlugin:      * Section: 'Cooking;Lifestyle' | items count: 1
+07-13 16:35:10.949 18461 19970 I ZunoPlugin:        first item: name='Food Food (576p) [Not 24/7]', url='{"url":"http://14.199.164.20:4001/play/a0qx/index.m3u8","title":"Food Food (576p) [Not 24/7]","poster":"https://i.imgur.com/J930pA1.png","nation":"Cooking;Lifestyle","key":"null","keyid":"null"}'
+07-13 16:35:10.949 18461 19970 I ZunoPlugin:      * Section: 'Movies;News' | items count: 1
+07-13 16:35:10.949 18461 19970 I ZunoPlugin:        first item: name='Indywood TV (720p)', url='{"url":"https://43wrzjnpqoxe-hls-live.wmncdn.net/indywood/indywoodtv/index.m3u8","title":"Indywood TV (720p)","poster":"https://i.ibb.co/jT3NCPp/logo-tv.png","nation":"Movies;News","key":"null","keyid":"null"}'
+07-13 16:35:10.950 18461 19970 I ZunoPlugin:      * Section: 'Comedy' | items count: 1
+07-13 16:35:10.950 18461 19970 I ZunoPlugin:        first item: name='Kalaignar Sirippoli (576p)', url='{"url":"http://103.199.161.254/Content/kalaignarsirippoli/Live/Channel(Kalaignarsirippoli)/index.m3u8","title":"Kalaignar Sirippoli (576p)","poster":"https://i.imgur.com/nsplwFc.png","nation":"Comedy","key":"null","keyid":"null"}'
+07-13 16:35:10.950 18461 19970 I ZunoPlugin:      * Section: 'Education' | items count: 2
+07-13 16:35:10.950 18461 19970 I ZunoPlugin:        first item: name='KITE Victers (Kerala) (720p) [Not 24/7]', url='{"url":"https://932y4x26ljv8-hls-live.5centscdn.com/victers/tv.stream/playlist.m3u8","title":"KITE Victers (Kerala) (720p) [Not 24/7]","poster":"https://i.imgur.com/kj4OEsb.png","nation":"Education","key":"null","keyid":"null"}'
+07-13 16:35:10.950 18461 19970 I ZunoPlugin:      * Section: 'Legislative' | items count: 2
+07-13 16:35:10.950 18461 19970 I ZunoPlugin:        first item: name='Lok Sabha TV (1080p)', url='{"url":"https://playhls.media.nic.in/hls/live/lstv/lstv.m3u8","title":"Lok Sabha TV (1080p)","poster":"https://i.imgur.com/QavgfiK.png","nation":"Legislative","key":"null","keyid":"null"}'
+07-13 16:35:10.950 18461 19970 I ZunoPlugin:      * Section: 'Family' | items count: 2
+07-13 16:35:10.950 18461 19970 I ZunoPlugin:        first item: name='Nambikkai TV (576p)', url='{"url":"https://live.wmncdn.net/nambikkaitv/live.stream/index.m3u8","title":"Nambikkai TV (576p)","poster":"https://i.imgur.com/xnjkUOs.png","nation":"Family","key":"null","keyid":"null"}'
+07-13 16:35:10.950 18461 19970 I ZunoPlugin:      * Section: 'Culture;Religious' | items count: 1
+07-13 16:35:10.950 18461 19970 I ZunoPlugin:        first item: name='Sanskar TV (1080p)', url='{"url":"https://d26idhjf0y1p2g.cloudfront.net/out/v1/cd66dd25b9774cb29943bab54bbf3e2f/index.m3u8","title":"Sanskar TV (1080p)","poster":"https://i.imgur.com/SDkiMvR.png","nation":"Culture;Religious","key":"null","keyid":"null"}'
+07-13 16:35:10.950 18461 19970 I ZunoPlugin:      * Section: 'Sports' | items count: 19
+07-13 16:35:10.950 18461 19970 I ZunoPlugin:        first item: name='Sony Six HD (1080p)', url='{"url":"http://103.81.104.118/hls/stream10.m3u8","title":"Sony Six HD (1080p)","poster":"https://i.imgur.com/40BbQUd.png","nation":"Sports","key":"null","keyid":"null"}'
+07-13 16:35:10.950 18461 19970 I ZunoPlugin:      * Section: 'Travel' | items count: 1
+07-13 16:35:10.950 18461 19970 I ZunoPlugin:        first item: name='Travelxp (720p)', url='{"url":"https://27c980761ff9437d929e64647afe183a.mediatailor.us-east-1.amazonaws.com/v1/master/44f73ba4d03e9607dcd9bebdcb8494d86964f1d8/RakutenTV-eu_TravelXP/playlist.m3u8","title":"Travelxp (720p)","poster":"https://i.imgur.com/8KQirah.png","nation":"Travel","key":"null","keyid":"null"}'
+07-13 16:35:10.950 18461 19970 I ZunoPlugin:      * Section: 'Weather' | items count: 1
+07-13 16:35:10.950 18461 19970 I ZunoPlugin:        first item: name='Weatherspy', url='{"url":"https://jukin-weatherspy-2-in.samsung.wurl.tv/playlist.m3u8","title":"Weatherspy","poster":"https://i.imgur.com/KIEKOt1.png","nation":"Weather","key":"null","keyid":"null"}'
+07-13 16:35:10.950 18461 19970 I ZunoPlugin:      * Section: 'Classic;Movies' | items count: 1
+07-13 16:35:10.950 18461 19970 I ZunoPlugin:        first item: name='ZB Cinema (720p)', url='{"url":"https://server.zillarbarta.com/ZBCINEMA/index.m3u8","title":"ZB Cinema (720p)","poster":"https://i.imgur.com/kUg6WSk.jpeg","nation":"Classic;Movies","key":"null","keyid":"null"}'
+07-13 16:35:10.950 18461 19970 I ZunoPlugin:      * Section: 'Classic;News' | items count: 1
+07-13 16:35:10.950 18461 19970 I ZunoPlugin:        first item: name='ZillarBarta News (720p)', url='{"url":"https://live-stream.utkalbongo.com/utkalbongo/stream18/hls/zillarbartalive.m3u8","title":"ZillarBarta News (720p)","poster":"https://i.imgur.com/6uestzY.jpeg","nation":"Classic;News","key":"null","keyid":"null"}'
+07-13 16:35:10.950 18461 19970 I ZunoPlugin:      * Section: 'Uncategorized' | items count: 75
+07-13 16:35:10.950 18461 19970 I ZunoPlugin:        first item: name='IPL', url='{"url":"https://www.tbn24.com/api/video/4026_0.m3u8","title":"IPL","poster":"https://buddytv.netlify.app/img/no-logo.png","nation":"Uncategorized","key":"null","keyid":"null"}'
+07-13 16:35:10.950 18461 19970 I ZunoPlugin:      * Section: 'Bangla' | items count: 26
+07-13 16:35:10.950 18461 19970 I ZunoPlugin:        first item: name='ATN Bangla', url='{"url":"https://tempx.jagobd.com:441/c5V6mmMyX7RpbEU9Mi8xNy8yMDEOGIDU6RgzQ6NTAgdEoaeFzbF92YWxIZTO0U0ezN1IzMyfvcGVMZEJCTEFWeVN3PT0mdFsaWRtaW51aiPhnPTI/atnbd-8-org.stream/chunks.m3u8","title":"ATN Bangla","poster":"https://dl.dropbox.com/s/a17x59hbhvzf9it/atn_bangla.png","nation":"Bangla","key":"null","keyid":"null"}'
+07-13 16:35:10.950 18461 19970 I ZunoPlugin:      * Section: 'Pakistani' | items count: 8
+07-13 16:35:10.950 18461 19970 I ZunoPlugin:        first item: name='ARY URDU', url='{"url":"http://208.86.19.13:81/603.stream/index.m3u8","title":"ARY URDU","poster":"https://buddytv.netlify.app/img/no-logo.png","nation":"Pakistani","key":"null","keyid":"null"}'
+07-13 16:35:10.950 18461 19970 I ZunoPlugin:      * Section: 'Indian' | items count: 14
+07-13 16:35:10.950 18461 19970 I ZunoPlugin:        first item: name='Rongen TV', url='{"url":"http://rtmp.smartstream.video:1935/rongeentv/rongeentv/chunklist_w473543205.m3u8","title":"Rongen TV","poster":"https://buddytv.netlify.app/img/no-logo.png","nation":"Indian","key":"null","keyid":"null"}'
+07-13 16:35:10.950 18461 19970 I ZunoPlugin:      * Section: 'SPORTS' | items count: 1
+07-13 16:35:10.950 18461 19970 I ZunoPlugin:        first item: name='FIGHT', url='{"url":"https://shls-fight-sports-ak.akamaized.net/out/v1/ee7e6475b12e484bbfa5c31461ad4306/index.m3u8","title":"FIGHT","poster":"https://www.digitaltveurope.com/files/2014/08/Fight-Sports.png","nation":"SPORTS","key":"null","keyid":"null"}'
+07-13 16:35:10.950 18461 19970 I ZunoPlugin:      * Section: '' | items count: 21
+07-13 16:35:10.950 18461 19970 I ZunoPlugin:        first item: name='SONY SET HD', url='{"url":"https://dai.google.com/ssai/event/HgaB-u6rSpGx3mo4Xu3sLw/master.m3u8","title":"SONY SET HD","poster":"https://res.cloudinary.com/Sony-liv/image/fetch/c_fill","nation":"null","key":"null","keyid":"null"}'
+07-13 16:35:10.950 18461 19970 I ZunoPlugin:      * Section: 'SonyLiv' | items count: 14
+07-13 16:35:10.950 18461 19970 I ZunoPlugin:        first item: name='Sony Kal', url='{"url":"https://spt-sonykal-1-us.lg.wurl.tv/playlist.m3u8","title":"Sony Kal","poster":"https://c.evidon.com/pub_logos/2796-2021122219404475.png","nation":"SonyLiv","key":"null","keyid":"null"}'
+07-13 16:35:10.950 18461 19970 I ZunoPlugin:      * Section: 'TS-JioTV' | items count: 1027
+07-13 16:35:10.950 18461 19970 I ZunoPlugin:        first item: name='CNBC Tv18 Prime HD', url='{"url":"http://103.168.18.83:80/zan/app/ts_live_143.m3u8","title":"CNBC Tv18 Prime HD","poster":"https://jiotv.catchup.cdn.jio.com/dare_images/images/CNBC_Tv18_Prime_HD.png","nation":"TS-JioTV","key":"null","keyid":"null"}'
+07-13 16:35:10.950 18461 19970 I ZunoPlugin: Diagnosing provider: PublicSportsIPTV
+07-13 16:35:10.950 18461 19970 I ZunoPlugin:  - mainUrl: https://raw.githubusercontent.com/Jitendra-unatti/fancode/refs/heads/main/data/fancode.json
+07-13 16:35:10.950 18461 19970 I ZunoPlugin:  - mainPage size: 1
+07-13 16:35:10.950 18461 19970 I ZunoPlugin:  - Calling getMainPage for page ''...
+07-13 16:35:11.025 18461 19965 I ZunoPlugin: Patched fancode.json: replaced 'team' with 'teams'
+07-13 16:35:11.176 18461 19970 I ZunoPlugin:    -> success! items sections count: 2
+07-13 16:35:11.176 18461 19970 I ZunoPlugin:      * Section: 'Live Now' | items count: 1
+07-13 16:35:11.176 18461 19970 I ZunoPlugin:        first item: name='Namibia Vs Uganda', url='{"Primary_Playback_URL":"https://in-mc-flive.fancode.com/mumbai/141449_english_hls_2b45087d4a92556_1ta-di_h264/index.m3u8","fancode_cdn":"https://in-mc-flive.fancode.com/mumbai/141449_english_hls_2b45087d4a92556_1ta-di_h264/index.m3u8","dai_google_cdn":"Unavailable","cloudfront_cdn":"Unavailable","title":"Namibia Vs Uganda","tournament":"Uganda tour of Namibia, 2026","poster":"https://www.fancode.com/skillup-uploads/cms-media/Uganda-tour-of-Namibia-2026_Web_1080_x_810.jpg"}'
+07-13 16:35:11.176 18461 19970 I ZunoPlugin:      * Section: 'Upcoming' | items count: 37
+07-13 16:35:11.176 18461 19970 I ZunoPlugin:        first item: name='West Indies Women Vs Australia Women', url='{"Primary_Playback_URL":null,"fancode_cdn":null,"dai_google_cdn":null,"cloudfront_cdn":null,"title":"West Indies Women Vs Australia Women","tournament":"Australia Women's tour of West Indies 2026","poster":"https://www.fancode.com/skillup-uploads/cms-media/West-Indies-vs-Australia_T-20_fc-web.jpg"}'
+07-13 16:35:11.176 18461 19970 I ZunoPlugin: Diagnosing provider: Sports IPTV
+07-13 16:35:11.176 18461 19970 I ZunoPlugin:  - mainUrl: https://raw.githubusercontent.com/dtankdempse/streamed-su-sports/refs/heads/main/vlc_playlist.m3u8
+07-13 16:35:11.176 18461 19970 I ZunoPlugin:  - mainPage size: 1
+07-13 16:35:11.176 18461 19970 I ZunoPlugin:  - Calling getMainPage for page ''...
+07-13 16:35:11.178 18461 19965 I ZunoPlugin: Redirecting streamed-su-sports request to public sports.m3u
+07-13 16:35:12.049 18461 19970 I ZunoPlugin:    -> success! items sections count: 13
+07-13 16:35:12.049 18461 19970 I ZunoPlugin:      * Section: 'Sports' | items count: 383
+07-13 16:35:12.049 18461 19970 I ZunoPlugin:        first item: name='30A Golf Kingdom (720p)', url='{"url":"https://30a-tv.com/feeds/vidaa/golf.m3u8","title":"30A Golf Kingdom (720p)","poster":"https://i.imgur.com/Lv53nh4.png","nation":"Sports","key":"null","keyid":"null"}'
+07-13 16:35:12.049 18461 19970 I ZunoPlugin:      * Section: '' | items count: 73
+07-13 16:35:12.049 18461 19970 I ZunoPlugin:        first item: name='ACL Cornhole TV (1080p)', url='{"url":"https://d35j504z0x2vu2.cloudfront.net/v1/master/0bc8e8376bd8417a1b6761138aa41c26c7309312/acl-cornhole-tv/aclco.m3u8?ads.vf=Sl3XhzpgcOy","title":"ACL Cornhole TV (1080p)","poster":"https://i.imgur.com/lBIq2ZD.png","nation":"null","key":"null","keyid":"null"}'
+07-13 16:35:12.049 18461 19970 I ZunoPlugin:      * Section: 'Kids;Sports' | items count: 1
+07-13 16:35:12.049 18461 19970 I ZunoPlugin:        first item: name='ADO TV (720p)', url='{"url":"https://strhls.streamakaci.tv/ortb/ortb2-multi/playlist.m3u8","title":"ADO TV (720p)","poster":"https://i.imgur.com/pxFamLr.png","nation":"Kids;Sports","key":"null","keyid":"null"}'
+07-13 16:35:12.049 18461 19970 I ZunoPlugin:      * Section: 'News;Sports' | items count: 3
+07-13 16:35:12.049 18461 19970 I ZunoPlugin:        first item: name='Africa 24 Sport (1080p)', url='{"url":"https://africa24.vedge.infomaniak.com/livecast/ik:africa24sport/manifest.m3u8","title":"Africa 24 Sport (1080p)","poster":"null","nation":"News;Sports","key":"null","keyid":"null"}'
+07-13 16:35:12.049 18461 19970 I ZunoPlugin:      * Section: 'Entertainment;Sports' | items count: 2
+07-13 16:35:12.049 18461 19970 I ZunoPlugin:        first item: name='Đồng Nai 2 (480p) [Not 24/7]', url='{"url":"http://118.107.85.4:1935/live/smil:DNTV2.smil/chunklist.m3u8","title":"Đồng Nai 2 (480p) [Not 24/7]","poster":"https://i.imgur.com/tNKPSkO.png","nation":"Entertainment;Sports","key":"null","keyid":"null"}'
+07-13 16:35:12.049 18461 19970 I ZunoPlugin:      * Section: 'Public;Sports' | items count: 2
+07-13 16:35:12.049 18461 19970 I ZunoPlugin:        first item: name='Esport3 (1080p) [Not 24/7]', url='{"url":"https://directes-tv-int.3catdirectes.cat/live-content/esport3-hls/master.m3u8","title":"Esport3 (1080p) [Not 24/7]","poster":"https://upload.wikimedia.org/wikipedia/commons/thumb/9/9a/Esport3.svg/960px-Esport3.svg.png","nation":"Public;Sports","key":"null","keyid":"null"}'
+07-13 16:35:12.049 18461 19970 I ZunoPlugin:      * Section: 'Auto;Outdoor;Sports' | items count: 1
+07-13 16:35:12.049 18461 19970 I ZunoPlugin:        first item: name='INTROUBLE (1080p)', url='{"url":"https://amg00861-amg00861c6-stirr-us-8229.playouts.now.amagi.tv/playlist.m3u8","title":"INTROUBLE (1080p)","poster":"https://i.imgur.com/a40chFI.png","nation":"Auto;Outdoor;Sports","key":"null","keyid":"null"}'
+07-13 16:35:12.049 18461 19970 I ZunoPlugin:      * Section: 'Culture;Sports' | items count: 1
+07-13 16:35:12.049 18461 19970 I ZunoPlugin:        first item: name='LRT Plius (1080p) [Geo-blocked]', url='{"url":"https://stream-live.lrt.lt/plius/master.m3u8","title":"LRT Plius (1080p) [Geo-blocked]","poster":"https://upload.wikimedia.org/wikipedia/commons/thumb/6/61/LRT_Plius_Logo_2022.svg/960px-LRT_Plius_Logo_2022.svg.png","nation":"Culture;Sports","key":"null","keyid":"null"}'
+07-13 16:35:12.049 18461 19970 I ZunoPlugin:      * Section: 'Outdoor;Sports' | items count: 10
+07-13 16:35:12.049 18461 19970 I ZunoPlugin:        first item: name='Monster Jam (720p)', url='{"url":"https://jmp2.uk/plu-65bcc9c8d77d450008b34c6b.m3u8","title":"Monster Jam (720p)","poster":"https://provider-static.plex.tv/epg/cms/production/23824964-562b-4498-9eaa-d6262cb7e0c3/Monster_Jam_Logo_on_Transparent_1500x1000_Casey_Murawski.png","nation":"Outdoor;Sports","key":"null","keyid":"null"}'
+07-13 16:35:12.049 18461 19970 I ZunoPlugin:      * Section: 'Auto;Outdoor;Series;Sports' | items count: 1
+07-13 16:35:12.049 18461 19970 I ZunoPlugin:        first item: name='REV'N Action (720p)', url='{"url":"https://lukentvlive.vgcdn.net/v1/master/cef183924f24adfa3d5d7601c3a17769082c0c2b/Revn/index.m3u8","title":"REV'N Action (720p)","poster":"https://i.imgur.com/xsm8mMd.png","nation":"Auto;Outdoor;Series;Sports","key":"null","keyid":"null"}'
+07-13 16:35:12.049 18461 19970 I ZunoPlugin:      * Section: 'Music;Sports' | items count: 1
+07-13 16:35:12.049 18461 19970 I ZunoPlugin:        first item: name='RTI La 3 (1080p) [Not 24/7]', url='{"url":"http://69.64.57.208/la3/index.m3u8","title":"RTI La 3 (1080p) [Not 24/7]","poster":"https://i.imgur.com/HdNshgF.png","nation":"Music;Sports","key":"null","keyid":"null"}'
+07-13 16:35:12.049 18461 19970 I ZunoPlugin:      * Section: 'General;Sports' | items count: 1
+07-13 16:35:12.049 18461 19970 I ZunoPlugin:        first item: name='TVR Sport', url='{"url":"https://tvr-sport.lg.mncdn.com/tvrsport/smil:tvrsport.smil/playlist.m3u8","title":"TVR Sport","poster":"https://upload.wikimedia.org/wikipedia/commons/thumb/9/93/TVR_Sport_Logo_2023.svg/960px-TVR_Sport_Logo_2023.svg.png","nation":"General;Sports","key":"null","keyid":"null"}'
+07-13 16:35:12.049 18461 19970 I ZunoPlugin:      * Section: 'Comedy;Movies;Series;Sports' | items count: 2
+07-13 16:35:12.049 18461 19970 I ZunoPlugin:        first item: name='USA Network (1080p)', url='{"url":"http://40.160.24.55/USA_NETWORK/index.m3u8","title":"USA Network (1080p)","poster":"https://upload.wikimedia.org/wikipedia/commons/thumb/d/d7/USA_Network_logo_%282016%29.svg/960px-USA_Network_logo_%282016%29.svg.png","nation":"Comedy;Movies;Series;Sports","key":"null","keyid":"null"}'
+07-13 16:35:12.049 18461 19970 I ZunoPlugin: Diagnosing provider: Pirate IPTV
+07-13 16:35:12.049 18461 19970 I ZunoPlugin:  - mainUrl: https://raw.githubusercontent.com/FunctionError/PiratesTvPlus/refs/heads/main/PiratesPlus.m3u
+07-13 16:35:12.049 18461 19970 I ZunoPlugin:  - mainPage size: 1
+07-13 16:35:12.049 18461 19970 I ZunoPlugin:  - Calling getMainPage for page ''...
+07-13 16:35:12.050 18461 19965 I ZunoPlugin: Redirecting PiratesTvPlus request to public movies.m3u
+07-13 16:35:12.372 18461 19970 I ZunoPlugin:    -> success! items sections count: 20
+07-13 16:35:12.372 18461 19970 I ZunoPlugin:      * Section: 'Movies' | items count: 540
+07-13 16:35:12.372 18461 19970 I ZunoPlugin:        first item: name='00s Replay', url='{"url":"https://jmp2.uk/plu-62ba60f059624e000781c436.m3u8","title":"00s Replay","poster":"https://images.pluto.tv/channels/62ba60f059624e000781c436/colorLogoPNG.png","nation":"Movies","key":"null","keyid":"null"}'
+07-13 16:35:12.372 18461 19970 I ZunoPlugin:      * Section: '' | items count: 67
+07-13 16:35:12.372 18461 19970 I ZunoPlugin:        first item: name='24 Hour Free Movies (720p)', url='{"url":"https://d1b5mlajbmvkjv.cloudfront.net/v1/master/9d062541f2ff39b5c0f48b743c6411d25f62fc25/UDU-DistroTV/145.m3u8?ads.vf=7FhdsxqVxOi","title":"24 Hour Free Movies (720p)","poster":"https://i.imgur.com/iSVnzR1.png","nation":"null","key":"null","keyid":"null"}'
+07-13 16:35:12.372 18461 19970 I ZunoPlugin:      * Section: 'Movies;Series' | items count: 80
+07-13 16:35:12.372 18461 19970 I ZunoPlugin:        first item: name='50 Cent Action (720p)', url='{"url":"https://jmp2.uk/plu-68487fb3f212bedacf5a53e3.m3u8","title":"50 Cent Action (720p)","poster":"https://provider-static.plex.tv/epg/cms/production/bcfb9977-809f-49ae-acc7-430f2c6ffb26/50CentAction_Logo_1500x1000_DarkBG_-_Chris_Connors.png","nation":"Movies;Series","key":"null","keyid":"null"}'
+07-13 16:35:12.372 18461 19970 I ZunoPlugin:      * Section: 'Movies;Religious' | items count: 1
+07-13 16:35:12.372 18461 19970 I ZunoPlugin:        first item: name='ABN Bible Movies (720p)', url='{"url":"https://mediaserver.abnvideos.com/streams/abnbiblemovies.m3u8","title":"ABN Bible Movies (720p)","poster":"https://i.imgur.com/NCqZdaL.png","nation":"Movies;Religious","key":"null","keyid":"null"}'
+07-13 16:35:12.372 18461 19970 I ZunoPlugin:      * Section: 'Comedy;Family;Movies' | items count: 1
+07-13 16:35:12.372 18461 19970 I ZunoPlugin:        first item: name='alpha Cinema (1080p)', url='{"url":"https://live.15plusmg.ru/memfs/b389173a-df4e-4171-8904-e249893e71eb.m3u8","title":"alpha Cinema (1080p)","poster":"https://i.imgur.com/146OgfU.png","nation":"Comedy;Family;Movies","key":"null","keyid":"null"}'
+07-13 16:35:12.372 18461 19970 I ZunoPlugin:      * Section: 'Comedy;Movies' | items count: 10
+07-13 16:35:12.372 18461 19970 I ZunoPlugin:        first item: name='alpha Moretime (1080p)', url='{"url":"https://live.15plusmg.ru/memfs/3546fc09-2eba-459d-9a1f-9a2fc39e50bd.m3u8","title":"alpha Moretime (1080p)","poster":"https://i.imgur.com/ibQfUr7.png","nation":"Comedy;Movies","key":"null","keyid":"null"}'
+07-13 16:35:12.372 18461 19970 I ZunoPlugin:      * Section: 'Culture;Documentary;Entertainment;General;Movies;Music' | items count: 1
+07-13 16:35:12.372 18461 19970 I ZunoPlugin:        first item: name='Alterna TV (720p) [Not 24/7]', url='{"url":"https://tv.alterna.ar/stream/hls/live.m3u8","title":"Alterna TV (720p) [Not 24/7]","poster":"https://tv.alterna.ar/alternatv.png","nation":"Culture;Documentary;Entertainment;General;Movies;Music","key":"null","keyid":"null"}'
+07-13 16:35:12.372 18461 19970 I ZunoPlugin:      * Section: 'Classic;Movies' | items count: 8
+07-13 16:35:12.372 18461 19970 I ZunoPlugin:        first item: name='Artflix Movie Classics (720p)', url='{"url":"https://amogonetworx-artflix-1-nl.samsung.wurl.tv/playlist.m3u8","title":"Artflix Movie Classics (720p)","poster":"https://i.imgur.com/5pOZQB4.png","nation":"Classic;Movies","key":"null","keyid":"null"}'
+07-13 16:35:12.372 18461 19970 I ZunoPlugin:      * Section: 'Movies;News' | items count: 2
+07-13 16:35:12.372 18461 19970 I ZunoPlugin:        first item: name='Cosmos Tv', url='{"url":"https://canaletaplus.com:3922/live/cosmoslive.m3u8","title":"Cosmos Tv","poster":"https://i0.wp.com/fmcosmos.com/wp-content/uploads/2021/11/COSMOS-TV.png","nation":"Movies;News","key":"null","keyid":"null"}'
+07-13 16:35:12.372 18461 19970 I ZunoPlugin:      * Section: 'Animation;Movies' | items count: 1
+07-13 16:35:12.372 18461 19970 I ZunoPlugin:        first item: name='FAN (1080p)', url='{"url":"http://31.148.48.15/Fan/index.m3u8","title":"FAN (1080p)","poster":"https://i.imgur.com/mDeTbaF.png","nation":"Animation;Movies","key":"null","keyid":"null"}'
+07-13 16:35:12.372 18461 19970 I ZunoPlugin:      * Section: 'Entertainment;Movies;Series' | items count: 1
+07-13 16:35:12.372 18461 19970 I ZunoPlugin:        first item: name='Fillka TV (720p)', url='{"url":"https://live-evg5.tv360.bitel.com.pe/bitel/fillka/playlist.m3u8","title":"Fillka TV (720p)","poster":"https://img-evg3.tv360.bitel.com.pe/peru-image/2026/05/26/23/177981261781/1666ae69c89b_480_270.png","nation":"Entertainment;Movies;Series","key":"null","keyid":"null"}'
+07-13 16:35:12.372 18461 19970 I ZunoPlugin:      * Section: 'Lifestyle;Movies' | items count: 1
+07-13 16:35:12.372 18461 19970 I ZunoPlugin:        first item: name='Great American Faith & Living (1080p)', url='{"url":"http://206.212.244.63/82/index.m3u8","title":"Great American Faith & Living (1080p)","poster":"https://i.imgur.com/ccBJuRA.png","nation":"Lifestyle;Movies","key":"null","keyid":"null"}'
+07-13 16:35:12.372 18461 19970 I ZunoPlugin:      * Section: 'Family;Movies' | items count: 8
+07-13 16:35:12.372 18461 19970 I ZunoPlugin:        first item: name='Great American Family (1080p)', url='{"url":"http://40.160.24.58/GAC_FAMILY/index.m3u8","title":"Great American Family (1080p)","poster":"https://i.imgur.com/TzvnHDn.png","nation":"Family;Movies","key":"null","keyid":"null"}'
+07-13 16:35:12.372 18461 19970 I ZunoPlugin:      * Section: 'Entertainment;Movies' | items count: 1
+07-13 16:35:12.372 18461 19970 I ZunoPlugin:        first item: name='KCM (1080p) [Geo-blocked]', url='{"url":"https://amg02159-amg02159c7-samsung-in-4001.playouts.now.amagi.tv/playlist/amg02159-kcglobal-kcm-samsungin/playlist.m3u8","title":"KCM (1080p) [Geo-blocked]","poster":"https://jiotvimages.cdn.jio.com/dare_images/images/KCM.png","nation":"Entertainment;Movies","key":"null","keyid":"null"}'
+07-13 16:35:12.372 18461 19970 I ZunoPlugin:      * Section: 'Kids;Movies' | items count: 2
+07-13 16:35:12.372 18461 19970 I ZunoPlugin:        first item: name='Kids Movie Club', url='{"url":"https://jmp2.uk/plu-5db0ad56edc89300090d2ebb.m3u8","title":"Kids Movie Club","poster":"https://i.imgur.com/avFk0Tt.png","nation":"Kids;Movies","key":"null","keyid":"null"}'
+07-13 16:35:12.372 18461 19970 I ZunoPlugin:      * Section: 'Movies;Shop' | items count: 1
+07-13 16:35:12.372 18461 19970 I ZunoPlugin:        first item: name='Magnificent Movies Network', url='{"url":"https://mmn1-301f.kxcdn.com/hls/MMN-HLS.m3u8","title":"Magnificent Movies Network","poster":"https://i.imgur.com/CXjo8kn.png","nation":"Movies;Shop","key":"null","keyid":"null"}'
+07-13 16:35:12.372 18461 19970 I ZunoPlugin:      * Section: 'Family;General;Movies' | items count: 1
+07-13 16:35:12.372 18461 19970 I ZunoPlugin:        first item: name='MCI Televisión (1080p)', url='{"url":"https://video.ejeserver.com/live/mcitelevision.m3u8","title":"MCI Televisión (1080p)","poster":"https://pbs.twimg.com/profile_images/1836009952420274177/FfYonU6r_400x400.jpg","nation":"Family;General;Movies","key":"null","keyid":"null"}'
+07-13 16:35:12.372 18461 19970 I ZunoPlugin:      * Section: 'Movies;Music' | items count: 3
+07-13 16:35:12.372 18461 19970 I ZunoPlugin:        first item: name='Next HD (480p)', url='{"url":"https://live.enhdtv.com:19360/nexthd/nexthd.m3u8","title":"Next HD (480p)","poster":"https://i.imgur.com/c2rF3SS.png","nation":"Movies;Music","key":"null","keyid":"null"}'
+07-13 16:35:12.372 18461 19970 I ZunoPlugin:      * Section: 'Animation;Classic;Entertainment;Family;Movies' | items count: 1
+07-13 16:35:12.372 18461 19970 I ZunoPlugin:        first item: name='Pro100TV (576p)', url='{"url":"https://sirius.greenhosting.ru/Pro100tvRu/video.m3u8","title":"Pro100TV (576p)","poster":"https://i.imgur.com/YfQEflM.png","nation":"Animation;Classic;Entertainment;Family;Movies","key":"null","keyid":"null"}'
+07-13 16:35:12.372 18461 19970 I ZunoPlugin:      * Section: 'Comedy;Movies;Series;Sports' | items count: 2
+07-13 16:35:12.372 18461 19970 I ZunoPlugin:        first item: name='USA Network (1080p)', url='{"url":"http://40.160.24.55/USA_NETWORK/index.m3u8","title":"USA Network (1080p)","poster":"https://upload.wikimedia.org/wikipedia/commons/thumb/d/d7/USA_Network_logo_%282016%29.svg/960px-USA_Network_logo_%282016%29.svg.png","nation":"Comedy;Movies;Series;Sports","key":"null","keyid":"null"}'
+07-13 16:35:12.372 18461 19970 I ZunoPlugin: Diagnosing provider: Sony IPTV
+07-13 16:35:12.372 18461 19970 I ZunoPlugin:  - mainUrl: https://raw.githubusercontent.com/SonyIPTV/Sony-IPTV-Live/refs/heads/main/Sony%20IPTV%20Live.m3u
+07-13 16:35:12.372 18461 19970 I ZunoPlugin:  - mainPage size: 1
+07-13 16:35:12.372 18461 19970 I ZunoPlugin:  - Calling getMainPage for page ''...
+07-13 16:35:12.457 18461 19965 I ZunoPlugin: Stripped leading comments from Sony IPTV playlist, starting at #EXTM3U
+07-13 16:35:12.475 18461 19970 E ZunoPlugin:    -> FAILED: java.lang.IndexOutOfBoundsException: Index 46 out of bounds for length 46
+07-13 16:35:12.475 18461 19970 E ZunoPlugin: java.lang.IndexOutOfBoundsException: Index 46 out of bounds for length 46
+07-13 16:35:12.475 18461 19970 E ZunoPlugin: 	at jdk.internal.util.Preconditions.outOfBounds(Preconditions.java:100)
+07-13 16:35:12.475 18461 19970 E ZunoPlugin: 	at jdk.internal.util.Preconditions.outOfBoundsCheckIndex(Preconditions.java:106)
+07-13 16:35:12.475 18461 19970 E ZunoPlugin: 	at jdk.internal.util.Preconditions.checkIndex(Preconditions.java:302)
+07-13 16:35:12.475 18461 19970 E ZunoPlugin: 	at java.util.Objects.checkIndex(Objects.java:371)
+07-13 16:35:12.475 18461 19970 E ZunoPlugin: 	at java.util.ArrayList.get(ArrayList.java:435)
+07-13 16:35:12.475 18461 19970 E ZunoPlugin: 	at com.phisher98.IptvPlaylistParser.parseM3U(QuickIPTV.kt:206)
+07-13 16:35:12.475 18461 19970 E ZunoPlugin: 	at com.phisher98.IptvPlaylistParser.parseM3U(QuickIPTV.kt:167)
+07-13 16:35:12.475 18461 19970 E ZunoPlugin: 	at com.phisher98.SportsIPTV.getMainPage$suspendImpl(QuickIPTV.kt:29)
+07-13 16:35:12.475 18461 19970 E ZunoPlugin: 	at com.phisher98.SportsIPTV$getMainPage$1.invokeSuspend(QuickIPTV.kt:16)
+07-13 16:35:12.475 18461 19970 E ZunoPlugin: 	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+07-13 16:35:12.475 18461 19970 E ZunoPlugin: 	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:100)
+07-13 16:35:12.475 18461 19970 E ZunoPlugin: 	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+07-13 16:35:12.475 18461 19970 E ZunoPlugin: 	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:94)
+07-13 16:35:12.475 18461 19970 E ZunoPlugin: 	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:70)
+07-13 16:35:12.475 18461 19970 E ZunoPlugin: 	at kotlinx.coroutines.BuildersKt.runBlocking(dex-id-dfa84723ff9e41d58093de8b90afcd898163cce0:1)
+07-13 16:35:12.475 18461 19970 E ZunoPlugin: 	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:48)
+07-13 16:35:12.475 18461 19970 E ZunoPlugin: 	at kotlinx.coroutines.BuildersKt.runBlocking$default(dex-id-dfa84723ff9e41d58093de8b90afcd898163cce0:1)
+07-13 16:35:12.475 18461 19970 E ZunoPlugin: 	at com.anonymous.zunornandroid.cloudstream.CloudStreamPluginHost.loadPluginsFromAssets$lambda$1(CloudStreamPluginHost.kt:427)
+07-13 16:35:12.475 18461 19970 E ZunoPlugin: 	at com.anonymous.zunornandroid.cloudstream.CloudStreamPluginHost.$r8$lambda$XdGHvdgpsegZqhRLCOZsvgX1p5o(CloudStreamPluginHost.kt:0)
+07-13 16:35:12.475 18461 19970 E ZunoPlugin: 	at com.anonymous.zunornandroid.cloudstream.CloudStreamPluginHost$$ExternalSyntheticLambda0.run(D8$$SyntheticClass:0)
+07-13 16:35:12.475 18461 19970 E ZunoPlugin: 	at java.lang.Thread.run(Thread.java:1572)
+07-13 16:35:12.475 18461 19970 I ZunoPlugin: Diagnosing provider: Japan IPTV
+07-13 16:35:12.475 18461 19970 I ZunoPlugin:  - mainUrl: https://raw.githubusercontent.com/luongz/iptv-jp/refs/heads/main/jp.m3u
+07-13 16:35:12.475 18461 19970 I ZunoPlugin:  - mainPage size: 1
+07-13 16:35:12.475 18461 19970 I ZunoPlugin:  - Calling getMainPage for page ''...
+07-13 16:35:12.476 18461 19965 I ZunoPlugin: Redirecting iptv-jp request to public jp.m3u
+07-13 16:35:12.765 18461 19970 I ZunoPlugin:    -> success! items sections count: 5
+07-13 16:35:12.765 18461 19970 I ZunoPlugin:      * Section: 'Religious' | items count: 1
+07-13 16:35:12.765 18461 19970 I ZunoPlugin:        first item: name='CGNTV Japan (1080p)', url='{"url":"https://d2p4mrcwl6ly4.cloudfront.net/out/v1/8d50f69fdbbf411a8d302743e4263716/CGNWebLiveJP.m3u8","title":"CGNTV Japan (1080p)","poster":"https://i.imgur.com/5LNZeVq.png","nation":"Religious","key":"null","keyid":"null"}'
+07-13 16:35:12.765 18461 19970 I ZunoPlugin:      * Section: 'Shop' | items count: 3
+07-13 16:35:12.765 18461 19970 I ZunoPlugin:        first item: name='GSTV (720p)', url='{"url":"https://japaneast.av.mk.io/mediakindcdn-mediakind/ca01a143-f823-4432-b670-c22ff9643ce4/index.qfm/manifest(format=m3u8-cmaf)","title":"GSTV (720p)","poster":"https://i.imgur.com/ECnVG5I.png","nation":"Shop","key":"null","keyid":"null"}'
+07-13 16:35:12.765 18461 19970 I ZunoPlugin:      * Section: 'General' | items count: 4
+07-13 16:35:12.765 18461 19970 I ZunoPlugin:        first item: name='JOAX-DTV', url='{"url":"https://ntv5.mov3.co/hls/ntv.m3u8","title":"JOAX-DTV","poster":"https://i.imgur.com/IxD8V5X.png","nation":"General","key":"null","keyid":"null"}'
+07-13 16:35:12.765 18461 19970 I ZunoPlugin:      * Section: '' | items count: 1
+07-13 16:35:12.765 18461 19970 I ZunoPlugin:        first item: name='MNB World (1080p)', url='{"url":"https://cdn4.skygo.mn/live/disk1/MNB_World/DASH-FTA/MNB_World.mpd","title":"MNB World (1080p)","poster":"https://i.imgur.com/PHlj84Q.png","nation":"null","key":"null","keyid":"null"}'
+07-13 16:35:12.765 18461 19970 I ZunoPlugin:      * Section: 'Weather' | items count: 1
+07-13 16:35:12.765 18461 19970 I ZunoPlugin:        first item: name='Weathernews (720p)', url='{"url":"https://rch01e-alive-hls.akamaized.net/38fb45b25cdb05a1/out/v1/4e907bfabc684a1dae10df8431a84d21/index.m3u8","title":"Weathernews (720p)","poster":"https://i.imgur.com/A8uRSTS.png","nation":"Weather","key":"null","keyid":"null"}'
+07-13 16:35:12.765 18461 19970 I ZunoPlugin: ==============================

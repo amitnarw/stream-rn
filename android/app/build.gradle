@@ -190,10 +190,12 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("com.github.TorrentStream:TorrentStream-Android:3.0.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
 
     // ExoPlayer via Media3
     implementation("androidx.media3:media3-exoplayer:1.5.1")
     implementation("androidx.media3:media3-exoplayer-hls:1.5.1")
+    implementation("androidx.media3:media3-datasource-okhttp:1.5.1")
     implementation("androidx.media3:media3-ui:1.5.1")
     implementation("com.caverock:androidsvg-aar:1.4")
 }

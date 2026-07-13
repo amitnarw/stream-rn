@@ -18,8 +18,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import OnboardingScreen from './src/screens/OnboardingScreen';
 import * as Font from 'expo-font';
 import { BlurView } from 'expo-blur';
-import { HomeIcon, MagnifyingGlassIcon, HeartIcon, Cog6ToothIcon } from 'react-native-heroicons/solid';
-import { HomeIcon as HomeIconOutline, MagnifyingGlassIcon as MagnifyingGlassIconOutline, HeartIcon as HeartIconOutline, Cog6ToothIcon as Cog6ToothIconOutline } from 'react-native-heroicons/outline';
+import { Home, Search, Heart, Settings } from 'lucide-react-native';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -33,13 +32,14 @@ const RootStack = createNativeStackNavigator();
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
 
-function TabIcon({ IconSolid, IconOutline, focused, badgeCount }) {
-  const Icon = focused ? IconSolid : IconOutline;
+function TabIcon({ Icon, focused, badgeCount }) {
   return (
     <View style={tabStyles.iconWrap}>
       <Icon
         size={focused ? 20 : 22}
         color={focused ? '#ffffff' : 'rgba(255, 255, 255, 0.4)'}
+        fill={focused && (Icon === Heart || Icon === Home) ? '#ffffff' : 'transparent'}
+        strokeWidth={focused ? 2.5 : 2}
       />
       {badgeCount !== undefined && badgeCount > 0 && (
         <View style={tabStyles.badge}>
@@ -163,16 +163,16 @@ function TabNavigator({ navigation }) {
         {/* Tab Items */}
         <View style={tabStyles.tabBarInner}>
           <TouchableOpacity style={tabStyles.tabButton} onPress={() => handleTabPress(0)} activeOpacity={0.7}>
-            <TabIcon IconSolid={HomeIcon} IconOutline={HomeIconOutline} focused={activeTab === 0} />
+            <TabIcon Icon={Home} focused={activeTab === 0} />
           </TouchableOpacity>
           <TouchableOpacity style={tabStyles.tabButton} onPress={() => handleTabPress(1)} activeOpacity={0.7}>
-            <TabIcon IconSolid={MagnifyingGlassIcon} IconOutline={MagnifyingGlassIconOutline} focused={activeTab === 1} />
+            <TabIcon Icon={Search} focused={activeTab === 1} />
           </TouchableOpacity>
           <TouchableOpacity style={tabStyles.tabButton} onPress={() => handleTabPress(2)} activeOpacity={0.7}>
-            <TabIcon IconSolid={HeartIcon} IconOutline={HeartIconOutline} focused={activeTab === 2} badgeCount={favCount} />
+            <TabIcon Icon={Heart} focused={activeTab === 2} badgeCount={favCount} />
           </TouchableOpacity>
           <TouchableOpacity style={tabStyles.tabButton} onPress={() => handleTabPress(3)} activeOpacity={0.7}>
-            <TabIcon IconSolid={Cog6ToothIcon} IconOutline={Cog6ToothIconOutline} focused={activeTab === 3} />
+            <TabIcon Icon={Settings} focused={activeTab === 3} />
           </TouchableOpacity>
         </View>
       </View>

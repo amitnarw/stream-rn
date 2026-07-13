@@ -9,7 +9,7 @@ import {
   Dimensions,
   TouchableOpacity,
 } from "react-native";
-import { XMarkIcon } from "react-native-heroicons/solid";
+import { X } from "lucide-react-native";
 import type { MediaItem } from "../types/plugin";
 import type { CardLayout } from "../context/TransitionContext";
 import { theme } from "../theme";
@@ -107,7 +107,7 @@ export const ContinueCard = React.memo(function ContinueCard({
                 }}
                 activeOpacity={0.7}
               >
-                <XMarkIcon size={13} color="#ffffff" />
+                <X size={13} color="#ffffff" strokeWidth={2.5} />
               </TouchableOpacity>
             )}
 

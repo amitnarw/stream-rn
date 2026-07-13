@@ -244,7 +244,13 @@ function mapItem(item: any): MediaItem {
 export async function loadPlugins(): Promise<PluginProvider[]> {
   await ensureOnline();
   const json = await CloudStreamModule.loadPlugins();
-  return parseJson<PluginProvider[]>(json);
+  const providers = parseJson<PluginProvider[]>(json);
+  const uniqueNames = new Set<string>();
+  return providers.filter((p) => {
+    if (uniqueNames.has(p.name)) return false;
+    uniqueNames.add(p.name);
+    return true;
+  });
 }
 
 export async function getProviders(): Promise<PluginProvider[]> {
@@ -270,12 +276,14 @@ export async function getMainPage(
   forceRefresh: boolean = false,
   category: string = 'Trending'
 ): Promise<HomeSection[]> {
-  const cacheKey = `@zuno_cache_main_cinemeta_cat_${category}_page_${page}`;
+  const cacheKey = category === 'LiveTV'
+    ? `@zuno_cache_main_cinemeta_cat_${category}_prov_${providerName || 'CloudPlay'}_page_${page}`
+    : `@zuno_cache_main_cinemeta_cat_${category}_page_${page}`;
 
   if (!forceRefresh) {
     const settings = await getSettings();
     const cachedData = await getCache<HomeSection[]>(cacheKey, settings.mainPageTtl);
-    if (cachedData) {
+    if (cachedData && cachedData.length > 0) {
       return cachedData;
     }
   }
@@ -284,10 +292,49 @@ export async function getMainPage(
     await ensureOnline();
   } catch (err) {
     const expiredCached = await getCache<HomeSection[]>(cacheKey, Infinity);
-    if (expiredCached) {
+    if (expiredCached && expiredCached.length > 0) {
       return expiredCached;
     }
     throw err;
+  }
+
+  if (category === 'LiveTV') {
+    try {
+      const targetProvider = providerName || 'CloudPlay';
+      const json = await CloudStreamModule.getMainPage(targetProvider, page);
+      const obj = parseJson<{ provider: string; sections: any[] }>(json);
+      
+      const resultSections = (obj.sections ?? []).map((sec: any) => ({
+        name: sec.name,
+        items: (sec.items ?? []).map((item: any) => ({
+          provider: targetProvider,
+          url: item.url ?? '',
+          title: item.title ?? '',
+          posterUrl: item.posterUrl ?? item.poster ?? null,
+          type: 'live'
+        }))
+      }));
+
+      // Log the list of loaded channels to the console
+      console.log(`[LiveTV Debug] Loaded ${resultSections.length} sections from plugin "${targetProvider}":`);
+      resultSections.forEach((sec, idx) => {
+        console.log(`  Section [${idx}]: "${sec.name}" (${sec.items?.length ?? 0} channels)`);
+        sec.items?.forEach((item: any, itemIdx: number) => {
+          if (itemIdx < 5) {
+            console.log(`    - Channel [${itemIdx}]: "${item.title}" | URL: ${item.url}`);
+          }
+        });
+        if (sec.items && sec.items.length > 5) {
+          console.log(`    - ... and ${sec.items.length - 5} more channels`);
+        }
+      });
+
+      await setCache(cacheKey, resultSections);
+      return resultSections;
+    } catch (err) {
+      console.warn(`Failed to load LiveTV sections for ${providerName}:`, err);
+      return [];
+    }
   }
 
   let urls: { name: string; url: string }[] = [];
@@ -465,7 +512,10 @@ export async function loadDetail(
   const type = parts.length > 1 ? parts[0] : 'movie';
   const id = parts.length > 1 ? parts[1] : url;
 
-  const cacheKey = `@zuno_cache_detail_cinemeta_${type}_${id}`;
+  const isCinemeta = providerName === 'Cinemeta';
+  const cacheKey = isCinemeta
+    ? `@zuno_cache_detail_cinemeta_${type}_${id}`
+    : `@zuno_cache_detail_${providerName}_${url.replace(/[^a-zA-Z0-9]/g, '_')}`;
 
   if (!forceRefresh) {
     const settings = await getSettings();
@@ -483,6 +533,66 @@ export async function loadDetail(
       return expiredCached;
     }
     throw err;
+  }
+
+  if (!isCinemeta) {
+    const json = await CloudStreamModule.loadDetail(providerName, url);
+    const obj = parseJson<any>(json);
+    if (!obj || (!obj.title && !obj.name)) {
+      throw new Error(`Failed to load details from provider ${providerName}`);
+    }
+
+    const episodesList: EpisodeItem[] = [];
+    if (obj.episodes && obj.episodes.length > 0) {
+      obj.episodes.forEach((e: any, idx: number) => {
+        episodesList.push({
+          episode: e.episode ?? (idx + 1),
+          label: e.name || e.title || `Episode ${e.episode ?? (idx + 1)}`,
+          mediaRef: e.mediaRef ?? e.url ?? url,
+          image: e.image || obj.posterUrl || obj.poster || null,
+          season: e.season ?? 1,
+          overview: e.description ?? '',
+        });
+      });
+    } else {
+      episodesList.push({
+        episode: 1,
+        label: obj.title || obj.name,
+        mediaRef: url,
+        image: obj.posterUrl || obj.poster || null,
+        season: 1,
+        overview: obj.description ?? '',
+      });
+    }
+
+    const data: DetailResult = {
+      provider: providerName,
+      url: url,
+      title: obj.title || obj.name || '',
+      description: obj.description ?? null,
+      posterUrl: obj.posterUrl || obj.poster || null,
+      banner: obj.banner ?? obj.posterUrl ?? obj.poster ?? null,
+      year: obj.year ? (Number(obj.year) || null) : null,
+      isSerial: obj.isSerial === true,
+      episodes: episodesList,
+      score: obj.score ?? null,
+      tags: obj.tags ?? [],
+      duration: obj.duration ?? null,
+      comingSoon: obj.comingSoon === true,
+      contentRating: obj.contentRating ?? null,
+      logoUrl: obj.logoUrl ?? null,
+      imdbId: obj.imdbId || id || null,
+      cast: (obj.cast ?? []).map((c: any) => ({
+        name: c.name ?? '',
+        image: c.image ?? null,
+        role: c.role ?? null,
+      })),
+      recommendations: [],
+      trailers: [],
+    };
+
+    await setCache(cacheKey, data);
+    return data;
   }
 
   const metaUrl = `https://v3-cinemeta.strem.io/meta/${type}/${id}.json`;
@@ -896,12 +1006,19 @@ async function fetchStremioAddonStreams(
         if (emojiMatch) {
           seeders = parseInt(emojiMatch[1], 10);
         } else {
-          const textMatch = titleText.match(/(?:seeders|seeds|seed):\s*(\d+)/i);
-          if (textMatch) {
-            seeders = parseInt(textMatch[1], 10);
+          const numberBeforeMatch = titleText.match(/(\d+)\s*(?:seeders|seeds|seed)\b/i);
+          if (numberBeforeMatch) {
+            seeders = parseInt(numberBeforeMatch[1], 10);
           } else {
-            const sMatch = titleText.match(/\bS:\s*(\d+)/i);
-            if (sMatch) seeders = parseInt(sMatch[1], 10);
+            const labelBeforeMatch = titleText.match(/(?:seeders|seeds|seed|s):\s*(\d+)/i);
+            if (labelBeforeMatch) {
+              seeders = parseInt(labelBeforeMatch[1], 10);
+            } else {
+              const sMatch = titleText.match(/\bS\s*:\s*(\d+)/i);
+              if (sMatch) {
+                seeders = parseInt(sMatch[1], 10);
+              }
+            }
           }
         }
 
@@ -916,7 +1033,13 @@ async function fetchStremioAddonStreams(
       const quality = qualityMatch ? qualityMatch[0] : '720p';
       
       const parts = titleText.split('\n') || [];
-      const fileName = parts[0] || stream.name || 'Direct Link';
+      const behaviorFilename = stream.behaviorHints?.filename || '';
+      let fileName = '';
+      if (behaviorFilename && behaviorFilename.trim()) {
+        fileName = behaviorFilename.trim();
+      } else {
+        fileName = parts[0]?.trim() || stream.name || 'Direct Link';
+      }
       const stats = parts[1] || '';
 
       return {
@@ -1584,4 +1707,37 @@ export async function getAnimeImdbIds(): Promise<Set<string>> {
     });
   } catch (_) {}
   return cachedAnimeIds;
+}
+
+export async function getSavedChannels(): Promise<MediaItem[]> {
+  try {
+    const raw = await AsyncStorage.getItem('@zuno_saved_channels');
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function saveChannel(item: MediaItem): Promise<MediaItem[]> {
+  try {
+    const list = await getSavedChannels();
+    if (!list.some(x => x.url === item.url)) {
+      list.push(item);
+      await AsyncStorage.setItem('@zuno_saved_channels', JSON.stringify(list));
+    }
+    return list;
+  } catch {
+    return [];
+  }
+}
+
+export async function removeSavedChannel(url: string): Promise<MediaItem[]> {
+  try {
+    const list = await getSavedChannels();
+    const filtered = list.filter(x => x.url !== url);
+    await AsyncStorage.setItem('@zuno_saved_channels', JSON.stringify(filtered));
+    return filtered;
+  } catch {
+    return [];
+  }
 }

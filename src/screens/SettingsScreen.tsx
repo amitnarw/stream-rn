@@ -16,13 +16,13 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { BlurView, BlurTargetView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import {
-  ArrowLeftIcon,
-  ArrowPathIcon,
-  CheckCircleIcon,
-  XCircleIcon,
-  LinkIcon,
-  TrashIcon
-} from 'react-native-heroicons/solid';
+  ArrowLeft,
+  RotateCw,
+  CheckCircle,
+  XCircle,
+  Link,
+  Trash2
+} from 'lucide-react-native';
 import * as bridge from '../api/cloudStreamBridge';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { theme } from '../theme';
@@ -216,9 +216,6 @@ export default function SettingsScreen({ navigation }: Props) {
   const [clearing, setClearing] = useState(false);
   const [clearingLinks, setClearingLinks] = useState(false);
 
-  const [torrentioUrlInput, setTorrentioUrlInput] = useState('');
-  const [cometUrlInput, setCometUrlInput] = useState('');
-
   const [blurTarget, setBlurTarget] = useState<any>(null);
   const blurTargetRef = useRef<any>(null);
   const setBlurTargetRef = useCallback((val: any) => {
@@ -236,7 +233,7 @@ export default function SettingsScreen({ navigation }: Props) {
   const [confirmBtnText, setConfirmBtnText] = useState('');
   const [confirmAction, setConfirmAction] = useState<() => void>(() => {});
   const [confirmGlowColors, setConfirmGlowColors] = useState<readonly [string, string, ...string[]]>(['transparent', 'transparent']);
-  const [confirmIcon, setConfirmIcon] = useState<React.ComponentType<any>>(() => TrashIcon);
+  const [confirmIcon, setConfirmIcon] = useState<React.ComponentType<any>>(() => Trash2);
   const [confirmIconColor, setConfirmIconColor] = useState<string>('#ffffff');
   const [confirmIconBg, setConfirmIconBg] = useState<string>('rgba(255,255,255,0.1)');
 
@@ -244,7 +241,7 @@ export default function SettingsScreen({ navigation }: Props) {
   const [successTitle, setSuccessTitle] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
   const [successGlowColors, setSuccessGlowColors] = useState<readonly [string, string, ...string[]]>(['transparent', 'transparent']);
-  const [successIcon, setSuccessIcon] = useState<React.ComponentType<any>>(() => CheckCircleIcon);
+  const [successIcon, setSuccessIcon] = useState<React.ComponentType<any>>(() => CheckCircle);
   const [successIconColor, setSuccessIconColor] = useState<string>('#2ecc71');
   const [successIconBg, setSuccessIconBg] = useState<string>('rgba(46, 204, 113, 0.1)');
 
@@ -271,11 +268,6 @@ export default function SettingsScreen({ navigation }: Props) {
       } else {
         setPlayerMode('inbuilt');
       }
-
-      const savedTorrentio = await AsyncStorage.getItem('@torrentio_url');
-      setTorrentioUrlInput(savedTorrentio || '');
-      const savedComet = await AsyncStorage.getItem('@comet_url');
-      setCometUrlInput(savedComet || '');
     } catch (e) {
       console.warn('Failed to load settings:', e);
     } finally {
@@ -349,12 +341,12 @@ export default function SettingsScreen({ navigation }: Props) {
     setSuccessMessage(message);
     if (isError) {
       setSuccessGlowColors(['rgba(255, 74, 125, 0.15)', 'transparent']);
-      setSuccessIcon(() => XCircleIcon);
+      setSuccessIcon(() => XCircle);
       setSuccessIconColor(theme.colors.rose);
       setSuccessIconBg('rgba(255, 74, 125, 0.1)');
     } else {
       setSuccessGlowColors(['rgba(46, 204, 113, 0.15)', 'transparent']);
-      setSuccessIcon(() => CheckCircleIcon);
+      setSuccessIcon(() => CheckCircle);
       setSuccessIconColor('#2ecc71');
       setSuccessIconBg('rgba(46, 204, 113, 0.1)');
     }
@@ -367,7 +359,7 @@ export default function SettingsScreen({ navigation }: Props) {
       'Are you sure you want to refresh all cached movie lists and posters? This will reload all names and images fresh from the internet next time you browse, without deleting your favorites.',
       'Refresh Info',
       ['rgba(255, 74, 125, 0.15)', 'transparent'], // Rose glow
-      ArrowPathIcon,
+      RotateCw,
       theme.colors.rose,
       'rgba(255, 74, 125, 0.1)',
       async () => {
@@ -390,7 +382,7 @@ export default function SettingsScreen({ navigation }: Props) {
       'Are you sure you want to refresh all video stream links? This will force the app to search for new working links next time you play a video, resolving any broken player screens.',
       'Refresh Links',
       ['rgba(255, 255, 255, 0.12)', 'transparent'], // Faint white glow
-      LinkIcon,
+      Link,
       '#ffffff',
       'rgba(255, 255, 255, 0.1)',
       async () => {
@@ -405,26 +397,6 @@ export default function SettingsScreen({ navigation }: Props) {
         }
       }
     );
-  }
-
-  async function handleSaveAddonUrls() {
-    try {
-      if (torrentioUrlInput.trim()) {
-        await AsyncStorage.setItem('@torrentio_url', torrentioUrlInput.trim());
-      } else {
-        await AsyncStorage.removeItem('@torrentio_url');
-      }
-
-      if (cometUrlInput.trim()) {
-        await AsyncStorage.setItem('@comet_url', cometUrlInput.trim());
-      } else {
-        await AsyncStorage.removeItem('@comet_url');
-      }
-      
-      triggerSuccessModal('Success', 'Stremio addon configuration URLs updated successfully.');
-    } catch (e) {
-      triggerSuccessModal('Error', 'Failed to save addon configurations.', true);
-    }
   }
 
   if (loading) {
@@ -528,7 +500,7 @@ export default function SettingsScreen({ navigation }: Props) {
                 activeOpacity={0.8}
               >
                 {playerMode === 'inbuilt' ? (
-                  <CheckCircleIcon size={18} color={theme.colors.accentLight} style={{ marginRight: 8 }} />
+                  <CheckCircle size={18} color={theme.colors.accentLight} style={{ marginRight: 8 }} />
                 ) : (
                   <View style={{ width: 18, height: 18, borderRadius: 9, borderWidth: 2, borderColor: 'rgba(255,255,255,0.3)', marginRight: 8 }} />
                 )}
@@ -546,7 +518,7 @@ export default function SettingsScreen({ navigation }: Props) {
                 activeOpacity={0.8}
               >
                 {playerMode === 'external' ? (
-                  <CheckCircleIcon size={18} color={theme.colors.accentLight} style={{ marginRight: 8 }} />
+                  <CheckCircle size={18} color={theme.colors.accentLight} style={{ marginRight: 8 }} />
                 ) : (
                   <View style={{ width: 18, height: 18, borderRadius: 9, borderWidth: 2, borderColor: 'rgba(255,255,255,0.3)', marginRight: 8 }} />
                 )}
@@ -557,51 +529,7 @@ export default function SettingsScreen({ navigation }: Props) {
             </View>
            </View>
 
-          {/* Stremio Addons Setup Card */}
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>Stremio Addons Setup</Text>
-            <Text style={styles.cardDescription}>
-              Configure custom URLs for Torrentio and Comet. You can paste the manifest links generated from Torrentio or Comet configuration pages (including your Real-Debrid API keys) to fetch premium [RD+] direct streams.
-            </Text>
-
-            <View style={{ gap: 16, marginTop: 12 }}>
-              <View>
-                <Text style={{ color: '#E5E2E3', fontSize: 13, marginBottom: 6, fontWeight: '500' }}>Custom Torrentio URL</Text>
-                <TextInput
-                  style={styles.textInput}
-                  value={torrentioUrlInput}
-                  onChangeText={setTorrentioUrlInput}
-                  placeholder="https://torrentio.strem.fun"
-                  placeholderTextColor="rgba(255,255,255,0.3)"
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                />
-              </View>
-
-              <View>
-                <Text style={{ color: '#E5E2E3', fontSize: 13, marginBottom: 6, fontWeight: '500' }}>Custom Comet URL</Text>
-                <TextInput
-                  style={styles.textInput}
-                  value={cometUrlInput}
-                  onChangeText={setCometUrlInput}
-                  placeholder="https://comet.feels.legal"
-                  placeholderTextColor="rgba(255,255,255,0.3)"
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                />
-              </View>
-
-              <TouchableOpacity
-                style={[styles.clearBtn, { backgroundColor: theme.colors.accent, borderColor: theme.colors.accentLight, borderWidth: 1 }]}
-                onPress={handleSaveAddonUrls}
-                activeOpacity={0.8}
-              >
-                <Text style={[styles.clearBtnText, { color: '#ffffff' }]}>Save Custom URLs</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-
-          {/* Storage Management Card */}
+           {/* Storage Management Card */}
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Storage & Cleanup</Text>
             <Text style={styles.cardDescription}>
@@ -681,7 +609,7 @@ export default function SettingsScreen({ navigation }: Props) {
               tint="dark" 
               style={styles.navButtonBlur}
             >
-              <ArrowLeftIcon 
+              <ArrowLeft 
                 size={20} 
                 color={theme.colors.textPrimary} 
               />

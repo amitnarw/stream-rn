@@ -17,29 +17,29 @@ import {
 import { useVideoPlayer, VideoView } from "expo-video";
 import { BlurView, BlurTargetView } from "expo-blur";
 import {
-  PlayIcon,
-  PauseIcon,
-  XMarkIcon,
-  LockClosedIcon,
-  LockOpenIcon,
-  ArrowsPointingOutIcon,
-  FingerPrintIcon,
-  SpeakerWaveIcon,
-  SunIcon,
-  LanguageIcon,
-  BoltIcon,
-  Square3Stack3DIcon,
-  BackwardIcon,
-  ForwardIcon,
-  ClockIcon,
-  ArrowUpRightIcon,
-  CheckIcon,
-  ExclamationCircleIcon,
-  ArrowPathIcon,
-  ArrowDownTrayIcon,
-  ChevronUpIcon,
-  ChevronDownIcon
-} from "react-native-heroicons/solid";
+  Play,
+  Pause,
+  X,
+  Lock,
+  Unlock,
+  Maximize2,
+  Fingerprint,
+  Volume2,
+  Sun,
+  Languages,
+  Settings,
+  Layers,
+  SkipBack,
+  SkipForward,
+  Clock,
+  ArrowUpRight,
+  Check,
+  AlertCircle,
+  RotateCw,
+  Download,
+  ChevronUp,
+  ChevronDown
+} from "lucide-react-native";
 import * as bridge from "../api/cloudStreamBridge";
 import { CustomModal } from "./CustomModal";
 import { LinearGradient } from "expo-linear-gradient";
@@ -232,7 +232,7 @@ const PlayerModal = ({ visible, onClose, title, children, hideCloseButton = fals
             <Text style={styles.resumePromptTitle}>{title}</Text>
             {!hideCloseButton && (
               <TouchableOpacity onPress={onClose} style={styles.modalCloseIconBtn}>
-                <XMarkIcon size={20} color="#fff" />
+                <X size={20} color="#fff" strokeWidth={2} />
               </TouchableOpacity>
             )}
           </View>
@@ -1120,7 +1120,7 @@ export default function CustomVideoPlayer({
           <View style={styles.lockOverlay} pointerEvents="box-none">
             <TouchableOpacity onPress={() => setIsLocked(false)} activeOpacity={0.8} style={styles.lockBtn}>
               <View style={styles.blurCover}>
-                <LockOpenIcon size={24} color={theme.colors.accentLight} />
+                <Unlock size={24} color={theme.colors.accentLight} strokeWidth={2} />
               </View>
             </TouchableOpacity>
           </View>
@@ -1158,7 +1158,7 @@ export default function CustomVideoPlayer({
             <View style={styles.dolbyWarningCard}>
               <View style={styles.dolbyWarningHeader}>
                 <View style={{ flexDirection: "row", alignItems: "center" }}>
-                  <SpeakerWaveIcon size={20} color={theme.colors.rose} style={{ marginRight: 10 }} />
+                  <Volume2 size={20} color={theme.colors.rose} strokeWidth={2} style={{ marginRight: 10 }} />
                   <Text style={styles.dolbyWarningTitle}>Dolby Audio Detected</Text>
                 </View>
                 <TouchableOpacity
@@ -1169,7 +1169,7 @@ export default function CustomVideoPlayer({
                   style={styles.dolbyWarningCloseBtn}
                   activeOpacity={0.8}
                 >
-                  <XMarkIcon size={18} color="#fff" />
+                  <X size={18} color="#fff" strokeWidth={2} />
                 </TouchableOpacity>
               </View>
               <Text style={styles.dolbyWarningMessage}>
@@ -1230,9 +1230,9 @@ export default function CustomVideoPlayer({
         <Animated.View style={[styles.hudContainer, hudStyle]} pointerEvents="none">
           <View style={styles.hudBlur}>
             {hudType === "brightness" ? (
-              <SunIcon size={28} color="#fff" />
+              <Sun size={28} color="#fff" strokeWidth={2} />
             ) : (
-              <SpeakerWaveIcon size={28} color="#fff" />
+              <Volume2 size={28} color="#fff" strokeWidth={2} />
             )}
             <View style={styles.hudBarOuter}>
               <Animated.View
@@ -1276,13 +1276,13 @@ export default function CustomVideoPlayer({
             <Animated.View style={[styles.topPanelLeft, otherUIStyle]} pointerEvents={activeSlider === null ? "box-none" : "none"}>
               <TouchableOpacity onPress={handleClose} activeOpacity={0.8} style={styles.circleBlurBtn}>
                 <View style={[styles.blurCover, { borderRadius: 25 }]}>
-                  <XMarkIcon size={26} color="#fff" />
+                  <X size={26} color="#fff" strokeWidth={2} />
                 </View>
               </TouchableOpacity>
 
               <TouchableOpacity onPress={handlePlayExternal} activeOpacity={0.8} style={styles.circleBlurBtn}>
                 <View style={[styles.blurCover, { borderRadius: 25 }]}>
-                  <ArrowUpRightIcon size={20} color="#fff" />
+                  <ArrowUpRight size={20} color="#fff" strokeWidth={2} />
                 </View>
               </TouchableOpacity>
 
@@ -1296,7 +1296,7 @@ export default function CustomVideoPlayer({
                   activeOpacity={0.8}
                   style={styles.capsuleIconBtn}
                 >
-                  <LockClosedIcon size={20} color="#fff" />
+                  <Lock size={20} color="#fff" strokeWidth={2} />
                 </TouchableOpacity>
 
                 <TouchableOpacity
@@ -1307,7 +1307,7 @@ export default function CustomVideoPlayer({
                   activeOpacity={0.8}
                   style={styles.capsuleIconBtn}
                 >
-                  <ArrowsPointingOutIcon size={20} color="#fff" />
+                  <Maximize2 size={20} color="#fff" strokeWidth={2} />
                 </TouchableOpacity>
 
                 <TouchableOpacity
@@ -1318,9 +1318,10 @@ export default function CustomVideoPlayer({
                   activeOpacity={0.8}
                   style={styles.capsuleIconBtn}
                 >
-                  <FingerPrintIcon
+                  <Fingerprint
                     size={20}
                     color={gesturesEnabled ? "#fff" : "rgba(255,255,255,0.4)"}
+                    strokeWidth={2}
                   />
                 </TouchableOpacity>
               </View>
@@ -1343,9 +1344,10 @@ export default function CustomVideoPlayer({
                     </View>
                   </Animated.View>
                   <TouchableOpacity onPress={handleMuteToggle} activeOpacity={0.8}>
-                    <SpeakerWaveIcon
+                    <Volume2
                       size={20}
                       color={isMuted ? theme.colors.rose : "#fff"}
+                      strokeWidth={2}
                     />
                   </TouchableOpacity>
                 </View>
@@ -1365,7 +1367,7 @@ export default function CustomVideoPlayer({
                       <Animated.View style={[styles.sliderFill, brightnessFillStyle]} />
                     </View>
                   </Animated.View>
-                  <SunIcon size={20} color="#fff" />
+                  <Sun size={20} color="#fff" strokeWidth={2} />
                 </View>
               </Animated.View>
             </View>
@@ -1381,7 +1383,7 @@ export default function CustomVideoPlayer({
                 style={[styles.centerEpBtn, { marginRight: 16 }]}
               >
                 <View style={[styles.blurCover, { borderRadius: 21 }]}>
-                  <BackwardIcon size={20} color="#fff" />
+                  <SkipBack size={20} color="#fff" strokeWidth={2} />
                 </View>
               </TouchableOpacity>
             )}
@@ -1389,7 +1391,7 @@ export default function CustomVideoPlayer({
             {/* Seek Back Button with ArrowPathIcon flipped + "10" inside */}
             <TouchableOpacity onPress={handleSeekBack} activeOpacity={0.8} style={styles.centerNavBtn}>
               <View style={[styles.blurCover, { borderRadius: 27 }]}>
-                <ArrowPathIcon size={28} color="#fff" style={{ transform: [{ scaleX: -1 }] }} />
+                <RotateCw size={28} color="#fff" strokeWidth={2} style={{ transform: [{ scaleX: -1 }] }} />
                 <Text style={styles.seekIconText}>10</Text>
               </View>
             </TouchableOpacity>
@@ -1404,9 +1406,9 @@ export default function CustomVideoPlayer({
                 {(status === "loading" || status === "idle") ? (
                   <ActivityIndicator size="large" color="#fff" />
                 ) : isPlaying ? (
-                  <PauseIcon size={44} color="#fff" />
+                  <Pause size={44} color="#fff" strokeWidth={2} />
                 ) : (
-                  <PlayIcon size={44} color="#fff" style={{ marginLeft: 6 }} />
+                  <Play size={44} color="#fff" fill="#fff" style={{ marginLeft: 6 }} />
                 )}
               </View>
             </TouchableOpacity>
@@ -1414,7 +1416,7 @@ export default function CustomVideoPlayer({
             {/* Seek Forward Button with ArrowPathIcon + "10" inside */}
             <TouchableOpacity onPress={handleSeekForward} activeOpacity={0.8} style={styles.centerNavBtn}>
               <View style={[styles.blurCover, { borderRadius: 27 }]}>
-                <ArrowPathIcon size={28} color="#fff" />
+                <RotateCw size={28} color="#fff" strokeWidth={2} />
                 <Text style={styles.seekIconText}>10</Text>
               </View>
             </TouchableOpacity>
@@ -1427,7 +1429,7 @@ export default function CustomVideoPlayer({
                 style={[styles.centerEpBtn, { marginLeft: 16 }]}
               >
                 <View style={[styles.blurCover, { borderRadius: 21 }]}>
-                  <ForwardIcon size={20} color="#fff" />
+                  <SkipForward size={20} color="#fff" strokeWidth={2} />
                 </View>
               </TouchableOpacity>
             )}
@@ -1463,7 +1465,7 @@ export default function CustomVideoPlayer({
                   activeOpacity={0.8}
                   style={styles.capsuleIconBtn}
                 >
-                  <LanguageIcon size={20} color="#fff" />
+                  <Languages size={20} color="#fff" strokeWidth={2} />
                 </TouchableOpacity>
 
                 <TouchableOpacity
@@ -1471,7 +1473,7 @@ export default function CustomVideoPlayer({
                   activeOpacity={0.8}
                   style={styles.capsuleIconBtn}
                 >
-                  <BoltIcon size={20} color="#fff" />
+                  <Settings size={20} color="#fff" strokeWidth={2} />
                 </TouchableOpacity>
               </View>
             </Animated.View>
@@ -1506,7 +1508,7 @@ export default function CustomVideoPlayer({
               {savedProgress > 5 && duration > 0 && savedProgress < duration - 15 && (
                 <View style={styles.pillCover}>
                   <TouchableOpacity onPress={handleContinueWatching} style={styles.pillBtn}>
-                    <ClockIcon size={14} color="#fff" style={{ marginRight: 6 }} />
+                    <Clock size={14} color="#fff" strokeWidth={2} style={{ marginRight: 6 }} />
                     <Text style={styles.pillText}>Continue Watching ({formatTime(savedProgress)})</Text>
                   </TouchableOpacity>
                 </View>
@@ -1515,7 +1517,7 @@ export default function CustomVideoPlayer({
               {/* Keep only this Sources button below the progress bar! */}
               <View style={styles.pillCover}>
                 <TouchableOpacity onPress={() => setActiveModal("quality")} style={styles.pillBtn}>
-                  <Square3Stack3DIcon size={14} color="#fff" style={{ marginRight: 6 }} />
+                  <Layers size={14} color="#fff" strokeWidth={2} style={{ marginRight: 6 }} />
                   <Text style={styles.pillText}>Sources</Text>
                 </TouchableOpacity>
               </View>
@@ -1536,7 +1538,7 @@ export default function CustomVideoPlayer({
           hideCloseButton={true}
         >
           <View style={{ alignItems: "center", width: "100%" }}>
-            <ClockIcon size={42} color={theme.colors.accentLight} style={{ marginBottom: 12 }} />
+            <Clock size={42} color={theme.colors.accentLight} strokeWidth={2} style={{ marginBottom: 12 }} />
             <Text style={styles.resumePromptSubtitle}>
               You watched up to {formatTime(savedProgress)}. Would you like to continue from where you left?
             </Text>
@@ -1692,7 +1694,7 @@ export default function CustomVideoPlayer({
                               },
                             ]}
                           >
-                            <ArrowDownTrayIcon
+                            <Download
                               size={10}
                               color={
                                 torrentSeeders >= 50
@@ -1701,6 +1703,7 @@ export default function CustomVideoPlayer({
                                     ? "#eab308"
                                     : "#a0a0a5"
                               }
+                              strokeWidth={2}
                               style={{ marginRight: 3 }}
                             />
                             <Text
@@ -1814,7 +1817,7 @@ export default function CustomVideoPlayer({
                     </View>
                   </View>
                   {isSelected && (
-                    <CheckIcon size={16} color={theme.colors.accentLight} />
+                    <Check size={16} color={theme.colors.accentLight} strokeWidth={2} />
                   )}
                 </TouchableOpacity>
               );
@@ -1841,18 +1844,19 @@ export default function CustomVideoPlayer({
                       ]}
                       activeOpacity={0.8}
                     >
-                      <ArrowDownTrayIcon
+                      <Download
                         size={18}
                         color={theme.colors.rose}
+                        strokeWidth={2}
                         style={{ marginRight: 10 }}
                       />
                       <Text style={styles.accordionTitle}>
                         Torrent & Magnet Links ({torrentSources.length} found)
                       </Text>
                       {torrentExpanded ? (
-                        <ChevronUpIcon size={18} color="#a0a0a5" />
+                        <ChevronUp size={18} color="#a0a0a5" strokeWidth={2} />
                       ) : (
-                        <ChevronDownIcon size={18} color="#a0a0a5" />
+                        <ChevronDown size={18} color="#a0a0a5" strokeWidth={2} />
                       )}
                     </TouchableOpacity>
 
@@ -2100,7 +2104,7 @@ export default function CustomVideoPlayer({
           title="Playback Failed"
           message={playerError || ""}
           glowColors={["rgba(255, 74, 125, 0.15)", "transparent"]}
-          Icon={ExclamationCircleIcon}
+          Icon={AlertCircle}
           iconColor="#ff4a7d"
           iconBgColor="rgba(255, 74, 125, 0.1)"
         >

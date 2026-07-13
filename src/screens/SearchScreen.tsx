@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BlurView, BlurTargetView } from 'expo-blur';
-import { ArrowLeftIcon, MagnifyingGlassIcon, SignalIcon } from 'react-native-heroicons/solid';
+import { ArrowLeft, Search, WifiOff } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import type { MediaItem } from '../types/plugin';
 import * as bridge from '../api/cloudStreamBridge';
@@ -120,9 +120,9 @@ export default function SearchScreen({ route, navigation }: Props) {
           <View style={styles.errorContainer}>
             <BlurView intensity={20} tint="dark" style={styles.errorCard}>
               {error.includes('No results') ? (
-              <MagnifyingGlassIcon size={40} color="rgba(255,255,255,0.4)" style={{ marginBottom: 12 }} />
+              <Search size={40} color="rgba(255,255,255,0.4)" strokeWidth={1.5} style={{ marginBottom: 12 }} />
             ) : (
-              <SignalIcon size={40} color={theme.colors.rose} style={{ marginBottom: 12 }} />
+              <WifiOff size={40} color={theme.colors.rose} strokeWidth={1.5} style={{ marginBottom: 12 }} />
             )}
             <Text style={styles.errorTitle}>
               {error.includes('No results') ? "No Results Found" : "Search Error"}
@@ -199,7 +199,7 @@ export default function SearchScreen({ route, navigation }: Props) {
         {navigation.canGoBack() ? (
           <TouchableOpacity style={styles.navButton} onPress={() => navigation.goBack()}>
             <BlurView intensity={35} tint="dark" style={styles.navButtonBlur}>
-              <ArrowLeftIcon size={20} color="#fff" />
+              <ArrowLeft size={20} color="#fff" strokeWidth={2} />
             </BlurView>
           </TouchableOpacity>
         ) : (

@@ -1,0 +1,226 @@
+--------- beginning of main
+07-13 16:05:43.581  1919 10068 I ZunoPlugin: === LIVE TV DIAGNOSTICS ===
+07-13 16:05:43.581  1919 10068 I ZunoPlugin: Diagnosing provider: CloudPlay
+07-13 16:05:43.581  1919 10068 I ZunoPlugin:  - mainUrl: https://host.cloudplay.me
+07-13 16:05:43.581  1919 10068 I ZunoPlugin:  - mainPage size: 1
+07-13 16:05:43.581  1919 10068 I ZunoPlugin:  - Calling getMainPage for page ''...
+07-13 16:05:53.641  1919 10068 E ZunoPlugin:    -> FAILED: java.net.SocketTimeoutException: failed to connect to host.cloudplay.me/49.44.79.236 (port 443) from /192.168.0.244 (port 48792) after 10000ms
+07-13 16:05:53.641  1919 10068 E ZunoPlugin: java.net.SocketTimeoutException: failed to connect to host.cloudplay.me/49.44.79.236 (port 443) from /192.168.0.244 (port 48792) after 10000ms
+07-13 16:05:53.641  1919 10068 E ZunoPlugin: 	at libcore.io.IoBridge.connectErrno(IoBridge.java:235)
+07-13 16:05:53.641  1919 10068 E ZunoPlugin: 	at libcore.io.IoBridge.connect(IoBridge.java:179)
+07-13 16:05:53.641  1919 10068 E ZunoPlugin: 	at java.net.PlainSocketImpl.socketConnect(PlainSocketImpl.java:142)
+07-13 16:05:53.641  1919 10068 E ZunoPlugin: 	at java.net.AbstractPlainSocketImpl.doConnect(AbstractPlainSocketImpl.java:390)
+07-13 16:05:53.641  1919 10068 E ZunoPlugin: 	at java.net.AbstractPlainSocketImpl.connectToAddress(AbstractPlainSocketImpl.java:230)
+07-13 16:05:53.641  1919 10068 E ZunoPlugin: 	at java.net.AbstractPlainSocketImpl.connect(AbstractPlainSocketImpl.java:212)
+07-13 16:05:53.641  1919 10068 E ZunoPlugin: 	at java.net.SocksSocketImpl.connect(SocksSocketImpl.java:436)
+07-13 16:05:53.641  1919 10068 E ZunoPlugin: 	at java.net.Socket.connect(Socket.java:646)
+07-13 16:05:53.641  1919 10068 E ZunoPlugin: 	at okhttp3.internal.platform.Platform.connectSocket(Platform.kt:148)
+07-13 16:05:53.641  1919 10068 E ZunoPlugin: 	at okhttp3.internal.connection.ConnectPlan.connectSocket(ConnectPlan.kt:276)
+07-13 16:05:53.641  1919 10068 E ZunoPlugin: 	at okhttp3.internal.connection.ConnectPlan.connectTcp(ConnectPlan.kt:135)
+07-13 16:05:53.641  1919 10068 E ZunoPlugin: 	at okhttp3.internal.connection.FastFallbackExchangeFinder$launchTcpConnect$1.runOnce(FastFallbackExchangeFinder.kt:141)
+07-13 16:05:53.641  1919 10068 E ZunoPlugin: 	at okhttp3.internal.concurrent.TaskRunner$runnable$1.run(TaskRunner.kt:81)
+07-13 16:05:53.641  1919 10068 E ZunoPlugin: 	at java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1100)
+07-13 16:05:53.641  1919 10068 E ZunoPlugin: 	at java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:624)
+07-13 16:05:53.641  1919 10068 E ZunoPlugin: 	at java.lang.Thread.run(Thread.java:1572)
+07-13 16:05:53.642  1919 10068 I ZunoPlugin: Diagnosing provider: IPTV Player
+07-13 16:05:53.642  1919 10068 I ZunoPlugin:  - mainUrl: https://raw.githubusercontent.com/phisher98/TVVVV/main/15APR2024.m3u
+07-13 16:05:53.642  1919 10068 I ZunoPlugin:  - mainPage size: 1
+07-13 16:05:53.642  1919 10068 I ZunoPlugin:  - Calling getMainPage for page ''...
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:    -> success! items sections count: 33
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:      * Section: 'FM' | items count: 2
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:        first item: name='Non-Stop Hindi', url='{"url":"http://s5.voscast.com:8216/stream","title":"Non-Stop Hindi","poster":"https://static.mytuner.mobi/media/tvos_radios/Ekv3xnWJpp.png","nation":"FM","key":"null","keyid":"null"}'
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:      * Section: 'Music' | items count: 30
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:        first item: name='7S Music (576p) [Not 24/7]', url='{"url":"http://103.199.161.254/Content/7smusic/Live/Channel(7smusic)/index.m3u8","title":"7S Music (576p) [Not 24/7]","poster":"https://i.imgur.com/zDiIhdN.png","nation":"Music","key":"null","keyid":"null"}'
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:      * Section: 'Movies' | items count: 10
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:        first item: name='&TV (1080p)', url='{"url":"https://amg01117-amg01117c1-amgplt0165.playout.now3.amagi.tv/playlist.m3u8","title":"&TV (1080p)","poster":"https://i.imgur.com/32W50Y6.png","nation":"Movies","key":"null","keyid":"null"}'
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:      * Section: 'News' | items count: 95
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:        first item: name='A1 TV Rajasthan (720p)', url='{"url":"https://5b48d7e1b4bce.streamlock.net/myapp/a1live/playlist.m3u8","title":"A1 TV Rajasthan (720p)","poster":"https://i.imgur.com/XJA3bh1.png","nation":"News","key":"null","keyid":"null"}'
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:      * Section: 'Religious' | items count: 36
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:        first item: name='Aastha (480p)', url='{"url":"https://aasthaott.akamaized.net/110923/smil:aasthatv.smil/chunklist_b1328000.m3u8","title":"Aastha (480p)","poster":"https://i.imgur.com/IqgrV92.png","nation":"Religious","key":"null","keyid":"null"}'
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:      * Section: 'Kids' | items count: 6
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:        first item: name='Akaram Kidz (460p) [Not 24/7]', url='{"url":"http://akaram.zecast.net/akaram-live/akaramkidz/index.m3u8","title":"Akaram Kidz (460p) [Not 24/7]","poster":"https://i.imgur.com/ENImp3R.png","nation":"Kids","key":"null","keyid":"null"}'
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:      * Section: 'Entertainment' | items count: 33
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:        first item: name='Amrita TV (720p)', url='{"url":"https://dr1zhpsuem5f4.cloudfront.net/master.m3u8","title":"Amrita TV (720p)","poster":"https://i.imgur.com/WdSjlPl.png","nation":"Entertainment","key":"null","keyid":"null"}'
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:      * Section: 'Animation' | items count: 1
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:        first item: name='Animax [Geo-blocked]', url='{"url":"https://amg02159-kcglobal-amg02159c1-samsung-in-521.playouts.now.amagi.tv/playlist/amg02159-kcglobal-animax-samsungin/playlist.m3u8","title":"Animax [Geo-blocked]","poster":"https://upload.wikimedia.org/wikipedia/commons/6/65/Animaxlogo-20160701.png","nation":"Animation","key":"null","keyid":"null"}'
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:      * Section: 'Lifestyle' | items count: 3
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:        first item: name='Ayush TV (360p) [Not 24/7]', url='{"url":"https://95eryw39dwn4-hls-live.wmncdn.net/Ayushu/271ddf829afeece44d8732757fba1a66.sdp/index.m3u8","title":"Ayush TV (360p) [Not 24/7]","poster":"https://i.imgur.com/PWzvp0B.png","nation":"Lifestyle","key":"null","keyid":"null"}'
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:      * Section: 'Business' | items count: 7
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:        first item: name='Bloomberg TV Asia (720p)', url='{"url":"https://bloomberg.com/media-manifest/streams/asia.m3u8","title":"Bloomberg TV Asia (720p)","poster":"https://i.imgur.com/OuogLHx.png","nation":"Business","key":"null","keyid":"null"}'
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:      * Section: 'Undefined' | items count: 55
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:        first item: name='Calvary TV (720p)', url='{"url":"https://player.mslivestream.net/mslive/71e7f7cc7dc7c51206b7b3bbb51e3052.sdp/playlist.m3u8","title":"Calvary TV (720p)","poster":"https://i.imgur.com/BvQzwSp.png","nation":"Undefined","key":"null","keyid":"null"}'
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:      * Section: 'General' | items count: 37
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:        first item: name='CCV (480p)', url='{"url":"https://5a1178b42cc03.streamlock.net/8212/8212/playlist.m3u8","title":"CCV (480p)","poster":"https://i.imgur.com/4ss0KfA.png","nation":"General","key":"null","keyid":"null"}'
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:      * Section: 'Culture' | items count: 3
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:        first item: name='DD Punjabi', url='{"url":"https://d3eyhgoylams0m.cloudfront.net/v1/manifest/93ce20f0f52760bf38be911ff4c91ed02aa2fd92/ed7bd2c7-8d10-4051-b397-2f6b90f99acb/20c8ad14-a158-4a42-8889-e032d070856e/2.m3u8","title":"DD Punjabi","poster":"https://i.imgur.com/WVtl6n2.png","nation":"Culture","key":"null","keyid":"null"}'
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:      * Section: 'Cooking;Lifestyle' | items count: 1
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:        first item: name='Food Food (576p) [Not 24/7]', url='{"url":"http://14.199.164.20:4001/play/a0qx/index.m3u8","title":"Food Food (576p) [Not 24/7]","poster":"https://i.imgur.com/J930pA1.png","nation":"Cooking;Lifestyle","key":"null","keyid":"null"}'
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:      * Section: 'Movies;News' | items count: 1
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:        first item: name='Indywood TV (720p)', url='{"url":"https://43wrzjnpqoxe-hls-live.wmncdn.net/indywood/indywoodtv/index.m3u8","title":"Indywood TV (720p)","poster":"https://i.ibb.co/jT3NCPp/logo-tv.png","nation":"Movies;News","key":"null","keyid":"null"}'
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:      * Section: 'Comedy' | items count: 1
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:        first item: name='Kalaignar Sirippoli (576p)', url='{"url":"http://103.199.161.254/Content/kalaignarsirippoli/Live/Channel(Kalaignarsirippoli)/index.m3u8","title":"Kalaignar Sirippoli (576p)","poster":"https://i.imgur.com/nsplwFc.png","nation":"Comedy","key":"null","keyid":"null"}'
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:      * Section: 'Education' | items count: 2
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:        first item: name='KITE Victers (Kerala) (720p) [Not 24/7]', url='{"url":"https://932y4x26ljv8-hls-live.5centscdn.com/victers/tv.stream/playlist.m3u8","title":"KITE Victers (Kerala) (720p) [Not 24/7]","poster":"https://i.imgur.com/kj4OEsb.png","nation":"Education","key":"null","keyid":"null"}'
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:      * Section: 'Legislative' | items count: 2
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:        first item: name='Lok Sabha TV (1080p)', url='{"url":"https://playhls.media.nic.in/hls/live/lstv/lstv.m3u8","title":"Lok Sabha TV (1080p)","poster":"https://i.imgur.com/QavgfiK.png","nation":"Legislative","key":"null","keyid":"null"}'
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:      * Section: 'Family' | items count: 2
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:        first item: name='Nambikkai TV (576p)', url='{"url":"https://live.wmncdn.net/nambikkaitv/live.stream/index.m3u8","title":"Nambikkai TV (576p)","poster":"https://i.imgur.com/xnjkUOs.png","nation":"Family","key":"null","keyid":"null"}'
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:      * Section: 'Culture;Religious' | items count: 1
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:        first item: name='Sanskar TV (1080p)', url='{"url":"https://d26idhjf0y1p2g.cloudfront.net/out/v1/cd66dd25b9774cb29943bab54bbf3e2f/index.m3u8","title":"Sanskar TV (1080p)","poster":"https://i.imgur.com/SDkiMvR.png","nation":"Culture;Religious","key":"null","keyid":"null"}'
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:      * Section: 'Sports' | items count: 19
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:        first item: name='Sony Six HD (1080p)', url='{"url":"http://103.81.104.118/hls/stream10.m3u8","title":"Sony Six HD (1080p)","poster":"https://i.imgur.com/40BbQUd.png","nation":"Sports","key":"null","keyid":"null"}'
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:      * Section: 'Travel' | items count: 1
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:        first item: name='Travelxp (720p)', url='{"url":"https://27c980761ff9437d929e64647afe183a.mediatailor.us-east-1.amazonaws.com/v1/master/44f73ba4d03e9607dcd9bebdcb8494d86964f1d8/RakutenTV-eu_TravelXP/playlist.m3u8","title":"Travelxp (720p)","poster":"https://i.imgur.com/8KQirah.png","nation":"Travel","key":"null","keyid":"null"}'
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:      * Section: 'Weather' | items count: 1
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:        first item: name='Weatherspy', url='{"url":"https://jukin-weatherspy-2-in.samsung.wurl.tv/playlist.m3u8","title":"Weatherspy","poster":"https://i.imgur.com/KIEKOt1.png","nation":"Weather","key":"null","keyid":"null"}'
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:      * Section: 'Classic;Movies' | items count: 1
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:        first item: name='ZB Cinema (720p)', url='{"url":"https://server.zillarbarta.com/ZBCINEMA/index.m3u8","title":"ZB Cinema (720p)","poster":"https://i.imgur.com/kUg6WSk.jpeg","nation":"Classic;Movies","key":"null","keyid":"null"}'
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:      * Section: 'Classic;News' | items count: 1
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:        first item: name='ZillarBarta News (720p)', url='{"url":"https://live-stream.utkalbongo.com/utkalbongo/stream18/hls/zillarbartalive.m3u8","title":"ZillarBarta News (720p)","poster":"https://i.imgur.com/6uestzY.jpeg","nation":"Classic;News","key":"null","keyid":"null"}'
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:      * Section: 'Uncategorized' | items count: 75
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:        first item: name='IPL', url='{"url":"https://www.tbn24.com/api/video/4026_0.m3u8","title":"IPL","poster":"https://buddytv.netlify.app/img/no-logo.png","nation":"Uncategorized","key":"null","keyid":"null"}'
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:      * Section: 'Bangla' | items count: 26
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:        first item: name='ATN Bangla', url='{"url":"https://tempx.jagobd.com:441/c5V6mmMyX7RpbEU9Mi8xNy8yMDEOGIDU6RgzQ6NTAgdEoaeFzbF92YWxIZTO0U0ezN1IzMyfvcGVMZEJCTEFWeVN3PT0mdFsaWRtaW51aiPhnPTI/atnbd-8-org.stream/chunks.m3u8","title":"ATN Bangla","poster":"https://dl.dropbox.com/s/a17x59hbhvzf9it/atn_bangla.png","nation":"Bangla","key":"null","keyid":"null"}'
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:      * Section: 'Pakistani' | items count: 8
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:        first item: name='ARY URDU', url='{"url":"http://208.86.19.13:81/603.stream/index.m3u8","title":"ARY URDU","poster":"https://buddytv.netlify.app/img/no-logo.png","nation":"Pakistani","key":"null","keyid":"null"}'
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:      * Section: 'Indian' | items count: 14
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:        first item: name='Rongen TV', url='{"url":"http://rtmp.smartstream.video:1935/rongeentv/rongeentv/chunklist_w473543205.m3u8","title":"Rongen TV","poster":"https://buddytv.netlify.app/img/no-logo.png","nation":"Indian","key":"null","keyid":"null"}'
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:      * Section: 'SPORTS' | items count: 1
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:        first item: name='FIGHT', url='{"url":"https://shls-fight-sports-ak.akamaized.net/out/v1/ee7e6475b12e484bbfa5c31461ad4306/index.m3u8","title":"FIGHT","poster":"https://www.digitaltveurope.com/files/2014/08/Fight-Sports.png","nation":"SPORTS","key":"null","keyid":"null"}'
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:      * Section: '' | items count: 21
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:        first item: name='SONY SET HD', url='{"url":"https://dai.google.com/ssai/event/HgaB-u6rSpGx3mo4Xu3sLw/master.m3u8","title":"SONY SET HD","poster":"https://res.cloudinary.com/Sony-liv/image/fetch/c_fill","nation":"null","key":"null","keyid":"null"}'
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:      * Section: 'SonyLiv' | items count: 14
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:        first item: name='Sony Kal', url='{"url":"https://spt-sonykal-1-us.lg.wurl.tv/playlist.m3u8","title":"Sony Kal","poster":"https://c.evidon.com/pub_logos/2796-2021122219404475.png","nation":"SonyLiv","key":"null","keyid":"null"}'
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:      * Section: 'TS-JioTV' | items count: 1027
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:        first item: name='CNBC Tv18 Prime HD', url='{"url":"http://103.168.18.83:80/zan/app/ts_live_143.m3u8","title":"CNBC Tv18 Prime HD","poster":"https://jiotv.catchup.cdn.jio.com/dare_images/images/CNBC_Tv18_Prime_HD.png","nation":"TS-JioTV","key":"null","keyid":"null"}'
+07-13 16:05:54.051  1919 10068 I ZunoPlugin: Diagnosing provider: PublicSportsIPTV
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:  - mainUrl: https://raw.githubusercontent.com/Jitendra-unatti/fancode/refs/heads/main/data/fancode.json
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:  - mainPage size: 1
+07-13 16:05:54.051  1919 10068 I ZunoPlugin:  - Calling getMainPage for page ''...
+07-13 16:05:54.190  1919 10068 E ZunoPlugin:    -> FAILED: com.fasterxml.jackson.module.kotlin.MissingKotlinParameterException: Instantiation of [simple type, class com.PublicSportsIPTV.Match] value failed for JSON property teams due to missing (therefore NULL) value for creator parameter teams which is a non-nullable type
+07-13 16:05:54.190  1919 10068 E ZunoPlugin:  at [Source: (StringReader); line: 109, column: 5] (through reference chain: com.PublicSportsIPTV.Root["matches"]->java.util.ArrayList[0]->com.PublicSportsIPTV.Match["teams"])
+07-13 16:05:54.190  1919 10068 E ZunoPlugin: com.fasterxml.jackson.module.kotlin.MissingKotlinParameterException: Instantiation of [simple type, class com.PublicSportsIPTV.Match] value failed for JSON property teams due to missing (therefore NULL) value for creator parameter teams which is a non-nullable type
+07-13 16:05:54.190  1919 10068 E ZunoPlugin:  at [Source: (StringReader); line: 109, column: 5] (through reference chain: com.PublicSportsIPTV.Root["matches"]->java.util.ArrayList[0]->com.PublicSportsIPTV.Match["teams"])
+07-13 16:05:54.190  1919 10068 E ZunoPlugin: 	at com.fasterxml.jackson.module.kotlin.KotlinValueInstantiator.createFromObjectWith(KotlinValueInstantiator.kt:121)
+07-13 16:05:54.190  1919 10068 E ZunoPlugin: 	at com.fasterxml.jackson.databind.deser.impl.PropertyBasedCreator.build(PropertyBasedCreator.java:202)
+07-13 16:05:54.190  1919 10068 E ZunoPlugin: 	at com.fasterxml.jackson.databind.deser.BeanDeserializer._deserializeUsingPropertyBased(BeanDeserializer.java:518)
+07-13 16:05:54.190  1919 10068 E ZunoPlugin: 	at com.fasterxml.jackson.databind.deser.BeanDeserializerBase.deserializeFromObjectUsingNonDefault(BeanDeserializerBase.java:1405)
+07-13 16:05:54.190  1919 10068 E ZunoPlugin: 	at com.fasterxml.jackson.databind.deser.BeanDeserializer.deserializeFromObject(BeanDeserializer.java:351)
+07-13 16:05:54.190  1919 10068 E ZunoPlugin: 	at com.fasterxml.jackson.databind.deser.BeanDeserializer.deserialize(BeanDeserializer.java:184)
+07-13 16:05:54.190  1919 10068 E ZunoPlugin: 	at com.fasterxml.jackson.databind.deser.std.CollectionDeserializer._deserializeFromArray(CollectionDeserializer.java:355)
+07-13 16:05:54.190  1919 10068 E ZunoPlugin: 	at com.fasterxml.jackson.databind.deser.std.CollectionDeserializer.deserialize(CollectionDeserializer.java:244)
+07-13 16:05:54.190  1919 10068 E ZunoPlugin: 	at com.fasterxml.jackson.databind.deser.std.CollectionDeserializer.deserialize(CollectionDeserializer.java:28)
+07-13 16:05:54.190  1919 10068 E ZunoPlugin: 	at com.fasterxml.jackson.databind.deser.SettableBeanProperty.deserialize(SettableBeanProperty.java:542)
+07-13 16:05:54.190  1919 10068 E ZunoPlugin: 	at com.fasterxml.jackson.databind.deser.BeanDeserializer._deserializeWithErrorWrapping(BeanDeserializer.java:563)
+07-13 16:05:54.190  1919 10068 E ZunoPlugin: 	at com.fasterxml.jackson.databind.deser.BeanDeserializer._deserializeUsingPropertyBased(BeanDeserializer.java:438)
+07-13 16:05:54.190  1919 10068 E ZunoPlugin: 	at com.fasterxml.jackson.databind.deser.BeanDeserializerBase.deserializeFromObjectUsingNonDefault(BeanDeserializerBase.java:1405)
+07-13 16:05:54.190  1919 10068 E ZunoPlugin: 	at com.fasterxml.jackson.databind.deser.BeanDeserializer.deserializeFromObject(BeanDeserializer.java:351)
+07-13 16:05:54.190  1919 10068 E ZunoPlugin: 	at com.fasterxml.jackson.databind.deser.BeanDeserializer.deserialize(BeanDeserializer.java:184)
+07-13 16:05:54.190  1919 10068 E ZunoPlugin: 	at com.fasterxml.jackson.databind.deser.DefaultDeserializationContext.readRootValue(DefaultDeserializationContext.java:322)
+07-13 16:05:54.190  1919 10068 E ZunoPlugin: 	at com.fasterxml.jackson.databind.ObjectMapper._readMapAndClose(ObjectMapper.java:4674)
+07-13 16:05:54.190  1919 10068 E ZunoPlugin: 	at com.fasterxml.jackson.databind.ObjectMapper.readValue(ObjectMapper.java:3629)
+07-13 16:05:54.190  1919 10068 E ZunoPlugin: 	at com.fasterxml.jackson.databind.ObjectMapper.readValue(ObjectMapper.java:3597)
+07-13 16:05:54.190  1919 10068 E ZunoPlugin: 	at com.lagradost.cloudstream3.MainActivityKt$app$1.parse(MainActivity.kt:19)
+07-13 16:05:54.190  1919 10068 E ZunoPlugin: 	at com.PublicSportsIPTV.PublicSportsIPTV.getMainPage(PublicSportsIPTV.kt:103)
+07-13 16:05:54.190  1919 10068 E ZunoPlugin: 	at com.PublicSportsIPTV.PublicSportsIPTV$getMainPage$1.invokeSuspend(PublicSportsIPTV.kt:16)
+07-13 16:05:54.190  1919 10068 E ZunoPlugin: 	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+07-13 16:05:54.190  1919 10068 E ZunoPlugin: 	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:100)
+07-13 16:05:54.190  1919 10068 E ZunoPlugin: 	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+07-13 16:05:54.190  1919 10068 E ZunoPlugin: 	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:94)
+07-13 16:05:54.190  1919 10068 E ZunoPlugin: 	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:70)
+07-13 16:05:54.190  1919 10068 E ZunoPlugin: 	at kotlinx.coroutines.BuildersKt.runBlocking(dex-id-dfa84723ff9e41d58093de8b90afcd898163cce0:1)
+07-13 16:05:54.190  1919 10068 E ZunoPlugin: 	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:48)
+07-13 16:05:54.190  1919 10068 E ZunoPlugin: 	at kotlinx.coroutines.BuildersKt.runBlocking$default(dex-id-dfa84723ff9e41d58093de8b90afcd898163cce0:1)
+07-13 16:05:54.190  1919 10068 E ZunoPlugin: 	at com.anonymous.zunornandroid.cloudstream.CloudStreamPluginHost.loadPluginsFromAssets$lambda$1(CloudStreamPluginHost.kt:319)
+07-13 16:05:54.190  1919 10068 E ZunoPlugin: 	at com.anonymous.zunornandroid.cloudstream.CloudStreamPluginHost.$r8$lambda$XdGHvdgpsegZqhRLCOZsvgX1p5o(CloudStreamPluginHost.kt:0)
+07-13 16:05:54.190  1919 10068 E ZunoPlugin: 	at com.anonymous.zunornandroid.cloudstream.CloudStreamPluginHost$$ExternalSyntheticLambda0.run(D8$$SyntheticClass:0)
+07-13 16:05:54.190  1919 10068 E ZunoPlugin: 	at java.lang.Thread.run(Thread.java:1572)
+07-13 16:05:54.190  1919 10068 I ZunoPlugin: Diagnosing provider: Sports IPTV
+07-13 16:05:54.190  1919 10068 I ZunoPlugin:  - mainUrl: https://raw.githubusercontent.com/dtankdempse/streamed-su-sports/refs/heads/main/vlc_playlist.m3u8
+07-13 16:05:54.190  1919 10068 I ZunoPlugin:  - mainPage size: 1
+07-13 16:05:54.190  1919 10068 I ZunoPlugin:  - Calling getMainPage for page ''...
+07-13 16:05:54.311  1919 10068 E ZunoPlugin:    -> FAILED: com.phisher98.PlaylistParserException$InvalidHeader: Invalid file header. Header doesn't start with #EXTM3U
+07-13 16:05:54.311  1919 10068 E ZunoPlugin: com.phisher98.PlaylistParserException$InvalidHeader: Invalid file header. Header doesn't start with #EXTM3U
+07-13 16:05:54.311  1919 10068 E ZunoPlugin: 	at com.phisher98.IptvPlaylistParser.parseM3U(QuickIPTV.kt:181)
+07-13 16:05:54.311  1919 10068 E ZunoPlugin: 	at com.phisher98.IptvPlaylistParser.parseM3U(QuickIPTV.kt:167)
+07-13 16:05:54.311  1919 10068 E ZunoPlugin: 	at com.phisher98.SportsIPTV.getMainPage$suspendImpl(QuickIPTV.kt:29)
+07-13 16:05:54.311  1919 10068 E ZunoPlugin: 	at com.phisher98.SportsIPTV$getMainPage$1.invokeSuspend(QuickIPTV.kt:16)
+07-13 16:05:54.311  1919 10068 E ZunoPlugin: 	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+07-13 16:05:54.311  1919 10068 E ZunoPlugin: 	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:100)
+07-13 16:05:54.311  1919 10068 E ZunoPlugin: 	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+07-13 16:05:54.311  1919 10068 E ZunoPlugin: 	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:94)
+07-13 16:05:54.311  1919 10068 E ZunoPlugin: 	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:70)
+07-13 16:05:54.311  1919 10068 E ZunoPlugin: 	at kotlinx.coroutines.BuildersKt.runBlocking(dex-id-dfa84723ff9e41d58093de8b90afcd898163cce0:1)
+07-13 16:05:54.311  1919 10068 E ZunoPlugin: 	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:48)
+07-13 16:05:54.311  1919 10068 E ZunoPlugin: 	at kotlinx.coroutines.BuildersKt.runBlocking$default(dex-id-dfa84723ff9e41d58093de8b90afcd898163cce0:1)
+07-13 16:05:54.311  1919 10068 E ZunoPlugin: 	at com.anonymous.zunornandroid.cloudstream.CloudStreamPluginHost.loadPluginsFromAssets$lambda$1(CloudStreamPluginHost.kt:319)
+07-13 16:05:54.311  1919 10068 E ZunoPlugin: 	at com.anonymous.zunornandroid.cloudstream.CloudStreamPluginHost.$r8$lambda$XdGHvdgpsegZqhRLCOZsvgX1p5o(CloudStreamPluginHost.kt:0)
+07-13 16:05:54.311  1919 10068 E ZunoPlugin: 	at com.anonymous.zunornandroid.cloudstream.CloudStreamPluginHost$$ExternalSyntheticLambda0.run(D8$$SyntheticClass:0)
+07-13 16:05:54.311  1919 10068 E ZunoPlugin: 	at java.lang.Thread.run(Thread.java:1572)
+07-13 16:05:54.311  1919 10068 I ZunoPlugin: Diagnosing provider: Pirate IPTV
+07-13 16:05:54.311  1919 10068 I ZunoPlugin:  - mainUrl: https://raw.githubusercontent.com/FunctionError/PiratesTvPlus/refs/heads/main/PiratesPlus.m3u
+07-13 16:05:54.311  1919 10068 I ZunoPlugin:  - mainPage size: 1
+07-13 16:05:54.311  1919 10068 I ZunoPlugin:  - Calling getMainPage for page ''...
+07-13 16:05:54.365  1919 10068 E ZunoPlugin:    -> FAILED: com.phisher98.PlaylistParserException$InvalidHeader: Invalid file header. Header doesn't start with #EXTM3U
+07-13 16:05:54.365  1919 10068 E ZunoPlugin: com.phisher98.PlaylistParserException$InvalidHeader: Invalid file header. Header doesn't start with #EXTM3U
+07-13 16:05:54.365  1919 10068 E ZunoPlugin: 	at com.phisher98.IptvPlaylistParser.parseM3U(QuickIPTV.kt:181)
+07-13 16:05:54.365  1919 10068 E ZunoPlugin: 	at com.phisher98.IptvPlaylistParser.parseM3U(QuickIPTV.kt:167)
+07-13 16:05:54.365  1919 10068 E ZunoPlugin: 	at com.phisher98.SportsIPTV.getMainPage$suspendImpl(QuickIPTV.kt:29)
+07-13 16:05:54.365  1919 10068 E ZunoPlugin: 	at com.phisher98.SportsIPTV$getMainPage$1.invokeSuspend(QuickIPTV.kt:16)
+07-13 16:05:54.365  1919 10068 E ZunoPlugin: 	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+07-13 16:05:54.365  1919 10068 E ZunoPlugin: 	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:100)
+07-13 16:05:54.365  1919 10068 E ZunoPlugin: 	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+07-13 16:05:54.365  1919 10068 E ZunoPlugin: 	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:94)
+07-13 16:05:54.365  1919 10068 E ZunoPlugin: 	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:70)
+07-13 16:05:54.365  1919 10068 E ZunoPlugin: 	at kotlinx.coroutines.BuildersKt.runBlocking(dex-id-dfa84723ff9e41d58093de8b90afcd898163cce0:1)
+07-13 16:05:54.365  1919 10068 E ZunoPlugin: 	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:48)
+07-13 16:05:54.365  1919 10068 E ZunoPlugin: 	at kotlinx.coroutines.BuildersKt.runBlocking$default(dex-id-dfa84723ff9e41d58093de8b90afcd898163cce0:1)
+07-13 16:05:54.365  1919 10068 E ZunoPlugin: 	at com.anonymous.zunornandroid.cloudstream.CloudStreamPluginHost.loadPluginsFromAssets$lambda$1(CloudStreamPluginHost.kt:319)
+07-13 16:05:54.365  1919 10068 E ZunoPlugin: 	at com.anonymous.zunornandroid.cloudstream.CloudStreamPluginHost.$r8$lambda$XdGHvdgpsegZqhRLCOZsvgX1p5o(CloudStreamPluginHost.kt:0)
+07-13 16:05:54.365  1919 10068 E ZunoPlugin: 	at com.anonymous.zunornandroid.cloudstream.CloudStreamPluginHost$$ExternalSyntheticLambda0.run(D8$$SyntheticClass:0)
+07-13 16:05:54.365  1919 10068 E ZunoPlugin: 	at java.lang.Thread.run(Thread.java:1572)
+07-13 16:05:54.365  1919 10068 I ZunoPlugin: Diagnosing provider: Sony IPTV
+07-13 16:05:54.366  1919 10068 I ZunoPlugin:  - mainUrl: https://raw.githubusercontent.com/SonyIPTV/Sony-IPTV-Live/refs/heads/main/Sony%20IPTV%20Live.m3u
+07-13 16:05:54.366  1919 10068 I ZunoPlugin:  - mainPage size: 1
+07-13 16:05:54.366  1919 10068 I ZunoPlugin:  - Calling getMainPage for page ''...
+07-13 16:05:54.451  1919 10068 E ZunoPlugin:    -> FAILED: com.phisher98.PlaylistParserException$InvalidHeader: Invalid file header. Header doesn't start with #EXTM3U
+07-13 16:05:54.451  1919 10068 E ZunoPlugin: com.phisher98.PlaylistParserException$InvalidHeader: Invalid file header. Header doesn't start with #EXTM3U
+07-13 16:05:54.451  1919 10068 E ZunoPlugin: 	at com.phisher98.IptvPlaylistParser.parseM3U(QuickIPTV.kt:181)
+07-13 16:05:54.451  1919 10068 E ZunoPlugin: 	at com.phisher98.IptvPlaylistParser.parseM3U(QuickIPTV.kt:167)
+07-13 16:05:54.451  1919 10068 E ZunoPlugin: 	at com.phisher98.SportsIPTV.getMainPage$suspendImpl(QuickIPTV.kt:29)
+07-13 16:05:54.451  1919 10068 E ZunoPlugin: 	at com.phisher98.SportsIPTV$getMainPage$1.invokeSuspend(QuickIPTV.kt:16)
+07-13 16:05:54.451  1919 10068 E ZunoPlugin: 	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+07-13 16:05:54.451  1919 10068 E ZunoPlugin: 	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:100)
+07-13 16:05:54.451  1919 10068 E ZunoPlugin: 	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+07-13 16:05:54.451  1919 10068 E ZunoPlugin: 	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:94)
+07-13 16:05:54.451  1919 10068 E ZunoPlugin: 	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:70)
+07-13 16:05:54.451  1919 10068 E ZunoPlugin: 	at kotlinx.coroutines.BuildersKt.runBlocking(dex-id-dfa84723ff9e41d58093de8b90afcd898163cce0:1)
+07-13 16:05:54.451  1919 10068 E ZunoPlugin: 	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:48)
+07-13 16:05:54.451  1919 10068 E ZunoPlugin: 	at kotlinx.coroutines.BuildersKt.runBlocking$default(dex-id-dfa84723ff9e41d58093de8b90afcd898163cce0:1)
+07-13 16:05:54.451  1919 10068 E ZunoPlugin: 	at com.anonymous.zunornandroid.cloudstream.CloudStreamPluginHost.loadPluginsFromAssets$lambda$1(CloudStreamPluginHost.kt:319)
+07-13 16:05:54.451  1919 10068 E ZunoPlugin: 	at com.anonymous.zunornandroid.cloudstream.CloudStreamPluginHost.$r8$lambda$XdGHvdgpsegZqhRLCOZsvgX1p5o(CloudStreamPluginHost.kt:0)
+07-13 16:05:54.451  1919 10068 E ZunoPlugin: 	at com.anonymous.zunornandroid.cloudstream.CloudStreamPluginHost$$ExternalSyntheticLambda0.run(D8$$SyntheticClass:0)
+07-13 16:05:54.451  1919 10068 E ZunoPlugin: 	at java.lang.Thread.run(Thread.java:1572)
+07-13 16:05:54.451  1919 10068 I ZunoPlugin: Diagnosing provider: Japan IPTV
+07-13 16:05:54.451  1919 10068 I ZunoPlugin:  - mainUrl: https://raw.githubusercontent.com/luongz/iptv-jp/refs/heads/main/jp.m3u
+07-13 16:05:54.452  1919 10068 I ZunoPlugin:  - mainPage size: 1
+07-13 16:05:54.452  1919 10068 I ZunoPlugin:  - Calling getMainPage for page ''...
+07-13 16:05:54.531  1919 10068 E ZunoPlugin:    -> FAILED: com.phisher98.PlaylistParserException$InvalidHeader: Invalid file header. Header doesn't start with #EXTM3U
+07-13 16:05:54.531  1919 10068 E ZunoPlugin: com.phisher98.PlaylistParserException$InvalidHeader: Invalid file header. Header doesn't start with #EXTM3U
+07-13 16:05:54.531  1919 10068 E ZunoPlugin: 	at com.phisher98.IptvPlaylistParser.parseM3U(QuickIPTV.kt:181)
+07-13 16:05:54.531  1919 10068 E ZunoPlugin: 	at com.phisher98.IptvPlaylistParser.parseM3U(QuickIPTV.kt:167)
+07-13 16:05:54.531  1919 10068 E ZunoPlugin: 	at com.phisher98.SportsIPTV.getMainPage$suspendImpl(QuickIPTV.kt:29)
+07-13 16:05:54.531  1919 10068 E ZunoPlugin: 	at com.phisher98.SportsIPTV$getMainPage$1.invokeSuspend(QuickIPTV.kt:16)
+07-13 16:05:54.531  1919 10068 E ZunoPlugin: 	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+07-13 16:05:54.531  1919 10068 E ZunoPlugin: 	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:100)
+07-13 16:05:54.531  1919 10068 E ZunoPlugin: 	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+07-13 16:05:54.531  1919 10068 E ZunoPlugin: 	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:94)
+07-13 16:05:54.531  1919 10068 E ZunoPlugin: 	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:70)
+07-13 16:05:54.531  1919 10068 E ZunoPlugin: 	at kotlinx.coroutines.BuildersKt.runBlocking(dex-id-dfa84723ff9e41d58093de8b90afcd898163cce0:1)
+07-13 16:05:54.531  1919 10068 E ZunoPlugin: 	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:48)
+07-13 16:05:54.531  1919 10068 E ZunoPlugin: 	at kotlinx.coroutines.BuildersKt.runBlocking$default(dex-id-dfa84723ff9e41d58093de8b90afcd898163cce0:1)
+07-13 16:05:54.531  1919 10068 E ZunoPlugin: 	at com.anonymous.zunornandroid.cloudstream.CloudStreamPluginHost.loadPluginsFromAssets$lambda$1(CloudStreamPluginHost.kt:319)
+07-13 16:05:54.531  1919 10068 E ZunoPlugin: 	at com.anonymous.zunornandroid.cloudstream.CloudStreamPluginHost.$r8$lambda$XdGHvdgpsegZqhRLCOZsvgX1p5o(CloudStreamPluginHost.kt:0)
+07-13 16:05:54.531  1919 10068 E ZunoPlugin: 	at com.anonymous.zunornandroid.cloudstream.CloudStreamPluginHost$$ExternalSyntheticLambda0.run(D8$$SyntheticClass:0)
+07-13 16:05:54.531  1919 10068 E ZunoPlugin: 	at java.lang.Thread.run(Thread.java:1572)
+07-13 16:05:54.531  1919 10068 I ZunoPlugin: ==============================

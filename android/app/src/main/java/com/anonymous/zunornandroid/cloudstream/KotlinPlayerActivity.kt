@@ -85,6 +85,7 @@ class KotlinPlayerActivity : AppCompatActivity() {
     private lateinit var subtitleBtn: View
     private lateinit var qualityBtn: View
     private lateinit var sourcesPillBtn: View
+    private lateinit var aspectBtn: ImageView
     private lateinit var prevEpBtn: ImageView
     private lateinit var nextEpBtn: ImageView
     private lateinit var sleepTimerBtn: ImageView
@@ -172,6 +173,7 @@ class KotlinPlayerActivity : AppCompatActivity() {
     private var currentUrl = ""
     private var isPreStartedTorrent = false
     private var currentHeadersJson = "{}"
+    private var originalTorrentMagnetUrl = ""
     private lateinit var audioTrackBtn: View
 
     private var episodesArray: JSONArray? = null
@@ -641,6 +643,18 @@ class KotlinPlayerActivity : AppCompatActivity() {
         }
     }
 
+    private fun getOriginalUrlToPlay(): String {
+        if (originalTorrentMagnetUrl.isNotEmpty()) return originalTorrentMagnetUrl
+        allSources?.let { sources ->
+            if (currentSourceIndex >= 0 && currentSourceIndex < sources.length()) {
+                val s = sources.optJSONObject(currentSourceIndex)
+                val u = s?.optString("url", "") ?: ""
+                if (u.isNotEmpty()) return u
+            }
+        }
+        return currentUrl
+    }
+
     private fun resolveAndPlay(providerName: String, mediaRef: String) {
         isErrorShowing = false
         errorOverlay.visibility = View.GONE
@@ -925,17 +939,83 @@ class KotlinPlayerActivity : AppCompatActivity() {
     private fun setupExoPlayer(url: String, headersJson: String, subtitleUrl: String) {
         isDolbyWarningShown = false
         val headers = try { JSONObject(headersJson) } catch (_: Exception) { JSONObject() }
+        val optMagnet = headers.optString("__originalMagnetUrl", "")
+        if (optMagnet.isNotEmpty()) {
+            originalTorrentMagnetUrl = optMagnet
+        }
 
-        val dataSourceFactory = DefaultHttpDataSource.Factory()
+        val trustAllCerts = arrayOf<javax.net.ssl.TrustManager>(
+            object : javax.net.ssl.X509TrustManager {
+                override fun checkClientTrusted(chain: Array<java.security.cert.X509Certificate>, authType: String) {}
+                override fun checkServerTrusted(chain: Array<java.security.cert.X509Certificate>, authType: String) {}
+                override fun getAcceptedIssuers(): Array<java.security.cert.X509Certificate> = arrayOf()
+            }
+        )
+        val sslContext = javax.net.ssl.SSLContext.getInstance("SSL")
+        sslContext.init(null, trustAllCerts, java.security.SecureRandom())
+        val sslSocketFactory = sslContext.socketFactory
+
+        val bootstrapClient = okhttp3.OkHttpClient.Builder()
+            .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+            .writeTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+            .followRedirects(true)
+            .followSslRedirects(true)
+            .sslSocketFactory(sslSocketFactory, trustAllCerts[0] as javax.net.ssl.X509TrustManager)
+            .hostnameVerifier { _, _ -> true }
+            .dns(object : okhttp3.Dns {
+                private val dohClient = okhttp3.OkHttpClient.Builder()
+                    .connectTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
+                    .readTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
+                    .build()
+
+                private fun resolveViaDoH(hostname: String): List<java.net.InetAddress>? {
+                    return try {
+                        val request = okhttp3.Request.Builder()
+                            .url("https://1.1.1.1/dns-query?name=${hostname}&type=A")
+                            .header("Accept", "application/dns-json")
+                            .build()
+                        val response = dohClient.newCall(request).execute()
+                        if (!response.isSuccessful) return null
+                        val body = response.body?.string() ?: return null
+                        val json = org.json.JSONObject(body)
+                        val answers = json.optJSONArray("Answer") ?: return null
+                        val addresses = mutableListOf<java.net.InetAddress>()
+                        for (i in 0 until answers.length()) {
+                            val answer = answers.getJSONObject(i)
+                            val type = answer.optInt("type", 0)
+                            val data = answer.optString("data", "")
+                            if ((type == 1 || type == 28) && data.isNotBlank()) {
+                                try {
+                                    addresses.add(java.net.InetAddress.getByName(data))
+                                } catch (_: java.lang.Exception) {}
+                            }
+                        }
+                        if (addresses.isEmpty()) null else addresses
+                    } catch (e: Exception) {
+                        null
+                    }
+                }
+
+                override fun lookup(hostname: String): List<java.net.InetAddress> {
+                    if (hostname == "localhost" || hostname == "127.0.0.1" || hostname.endsWith(".local")) {
+                        return okhttp3.Dns.SYSTEM.lookup(hostname)
+                    }
+                    resolveViaDoH(hostname)?.let { return it }
+                    return okhttp3.Dns.SYSTEM.lookup(hostname)
+                }
+            })
+            .build()
+
+        val dataSourceFactory = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(bootstrapClient)
             .setUserAgent("Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36")
-            .setAllowCrossProtocolRedirects(true)
-            .setConnectTimeoutMs(30000)
-            .setReadTimeoutMs(30000)
 
         if (headers.length() > 0) {
             val props = mutableMapOf<String, String>()
             for (key in headers.keys()) {
-                props[key] = headers.getString(key)
+                if (key != "__originalMagnetUrl") {
+                    props[key] = headers.getString(key)
+                }
             }
             dataSourceFactory.setDefaultRequestProperties(props)
         }
@@ -1058,7 +1138,11 @@ class KotlinPlayerActivity : AppCompatActivity() {
                     // Resume prompt (if savedProgressMs found)
                     if (savedProgressMs > 10000L && !hasShownResumePrompt) {
                         checkAndShowResumePrompt(savedProgressMs)
+                    } else if (savedProgressMs > 0L) {
+                        player?.seekTo(savedProgressMs)
+                        savedProgressMs = 0L
                     }
+                    hasShownResumePrompt = true
 
                     // Update continue watching pill with real duration
                     val dur = player?.duration ?: 0L
@@ -1067,6 +1151,7 @@ class KotlinPlayerActivity : AppCompatActivity() {
                     updateEpisodeLabel()
                 }
                 if (playbackState == Player.STATE_ENDED) {
+                    savePlaybackPosition()
                     if (sleepTimerEndOfEpisode) {
                         finish()
                         return
@@ -1540,19 +1625,13 @@ class KotlinPlayerActivity : AppCompatActivity() {
         }
         container.addView(gradient, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, dp(120)))
 
-        val bar = FrameLayout(this).apply { setPadding(dp(40), dp(40), dp(40), dp(18)) }
+        val bar = FrameLayout(this).apply { setPadding(dp(40), dp(12), dp(40), dp(18)) }
         container.addView(bar, FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT
         ).apply { gravity = Gravity.TOP })
 
-        // ── Left side: [X close] [↗ external] [capsule: Lock | AspectRatio | Gestures] stacked vertically ──
+        // ── Left side: [X close] [↗ external] [capsule: Lock | AspectRatio | Gestures] in same horizontal row ──
         val leftPanel = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.LEFT
-        }
-
-        // Row 1 (top): Close & External buttons horizontally
-        val row1 = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
@@ -1572,7 +1651,7 @@ class KotlinPlayerActivity : AppCompatActivity() {
             setPadding(dp(11), dp(11), dp(11), dp(11))
         }
         closeBtn.addView(closeIcon, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
-        row1.addView(closeBtn, LinearLayout.LayoutParams(dp(44), dp(44)).apply { rightMargin = dp(8) })
+        leftPanel.addView(closeBtn, LinearLayout.LayoutParams(dp(44), dp(44)).apply { rightMargin = dp(8) })
 
         // ↗ External Player — 44x44 glass circle
         val extBtn = FrameLayout(this).apply {
@@ -1584,16 +1663,14 @@ class KotlinPlayerActivity : AppCompatActivity() {
         }
         addPremiumTouchAnimation(extBtn)
         val extIcon = ImageView(this).apply {
-            setImageResource(R.drawable.ic_hero_arrow_top_right_on_square)
+            setImageResource(R.drawable.ic_lucide_square_arrow_out)
             setColorFilter(Color.WHITE)
             setPadding(dp(11), dp(11), dp(11), dp(11))
         }
         extBtn.addView(extIcon, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
-        row1.addView(extBtn, LinearLayout.LayoutParams(dp(44), dp(44)))
+        leftPanel.addView(extBtn, LinearLayout.LayoutParams(dp(44), dp(44)).apply { rightMargin = dp(12) })
 
-        leftPanel.addView(row1, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(44)))
-
-        // Row 2 (bottom): Capsule [Lock | Aspect | Gestures | Help]
+        // Capsule [Lock | Aspect | Gestures | Help]
         val capsule = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -1619,8 +1696,14 @@ class KotlinPlayerActivity : AppCompatActivity() {
         capsule.addView(lockBtn, LinearLayout.LayoutParams(dp(44), dp(44)))
 
         // Aspect ratio cycle button
-        val aspectBtn = ImageView(this).apply {
-            setImageResource(R.drawable.ic_hero_arrows_pointing_out)
+        aspectBtn = ImageView(this).apply {
+            val iconRes = when (playerView.resizeMode) {
+                AspectRatioFrameLayout.RESIZE_MODE_FIT -> R.drawable.ic_lucide_maximize
+                AspectRatioFrameLayout.RESIZE_MODE_ZOOM -> R.drawable.ic_lucide_fullscreen
+                AspectRatioFrameLayout.RESIZE_MODE_FILL -> R.drawable.ic_lucide_maximize_2
+                else -> R.drawable.ic_lucide_maximize
+            }
+            setImageResource(iconRes)
             setColorFilter(Color.WHITE)
             setPadding(dp(12), dp(12), dp(12), dp(12))
             setOnClickListener {
@@ -1633,7 +1716,7 @@ class KotlinPlayerActivity : AppCompatActivity() {
 
         // Gestures toggle button
         gesturesBtn = ImageView(this).apply {
-            setImageResource(R.drawable.ic_hero_fingerprint)
+            setImageResource(R.drawable.ic_lucide_fingerprint)
             setColorFilter(if (gesturesEnabled) Color.WHITE else Color.parseColor("#66FFFFFF"))
             setPadding(dp(12), dp(12), dp(12), dp(12))
             setOnClickListener {
@@ -1648,7 +1731,7 @@ class KotlinPlayerActivity : AppCompatActivity() {
 
         // Help button
         val helpBtn = ImageView(this).apply {
-            setImageResource(R.drawable.ic_hero_question_mark_circle)
+            setImageResource(R.drawable.ic_lucide_life_buoy)
             setColorFilter(Color.WHITE)
             setPadding(dp(12), dp(12), dp(12), dp(12))
             setOnClickListener {
@@ -1659,9 +1742,7 @@ class KotlinPlayerActivity : AppCompatActivity() {
         addPremiumTouchAnimation(helpBtn)
         capsule.addView(helpBtn, LinearLayout.LayoutParams(dp(44), dp(44)))
 
-        leftPanel.addView(capsule, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(44)).apply {
-            topMargin = dp(8)
-        })
+        leftPanel.addView(capsule, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(44)))
 
         bar.addView(leftPanel, FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT
@@ -1950,7 +2031,7 @@ class KotlinPlayerActivity : AppCompatActivity() {
             setPadding(dp(20), dp(10), dp(20), dp(10))
         }
         val srcIcon = ImageView(this).apply {
-            setImageResource(R.drawable.ic_hero_square_3_stack_3d)
+            setImageResource(R.drawable.ic_lucide_list_video)
             setColorFilter(Color.WHITE)
             setPadding(0, 0, dp(6), 0)
         }
@@ -2019,13 +2100,13 @@ class KotlinPlayerActivity : AppCompatActivity() {
         subtitleBtn = addGlassCapsuleIconBtn(settingsCapsule, R.drawable.ic_hero_language) { showSettingsDialog("Subtitles") }
 
         // Quality icon button
-        qualityBtn = addGlassCapsuleIconBtn(settingsCapsule, R.drawable.ic_hero_square_3_stack_3d) { showSettingsDialog("Video Quality") }
+        qualityBtn = addGlassCapsuleIconBtn(settingsCapsule, R.drawable.ic_lucide_hd) { showSettingsDialog("Video Quality") }
 
         // Audio Track icon button
-        audioTrackBtn = addGlassCapsuleIconBtn(settingsCapsule, R.drawable.ic_hero_speaker_wave) { showSettingsDialog("Audio Track") }
+        audioTrackBtn = addGlassCapsuleIconBtn(settingsCapsule, R.drawable.ic_lucide_audio_lines) { showSettingsDialog("Audio Track") }
 
         // Speed / Settings (BoltIcon)
-        sourcesBtn = addGlassCapsuleIconBtn(settingsCapsule, R.drawable.ic_hero_bolt) { showSettingsDialog("Playback Speed") }
+        sourcesBtn = addGlassCapsuleIconBtn(settingsCapsule, R.drawable.ic_lucide_gauge) { showSettingsDialog("Playback Speed") }
 
         bottomActionsRow.addView(settingsCapsule, FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.WRAP_CONTENT, dp(46)
@@ -2173,9 +2254,20 @@ class KotlinPlayerActivity : AppCompatActivity() {
             )
             val current = pv.resizeMode
             val nextIdx = (modes.indexOf(current) + 1) % modes.size
-            pv.resizeMode = modes[nextIdx]
+            val nextMode = modes[nextIdx]
+            pv.resizeMode = nextMode
             
-            val modeText = when (modes[nextIdx]) {
+            val iconRes = when (nextMode) {
+                AspectRatioFrameLayout.RESIZE_MODE_FIT -> R.drawable.ic_lucide_maximize
+                AspectRatioFrameLayout.RESIZE_MODE_ZOOM -> R.drawable.ic_lucide_fullscreen
+                AspectRatioFrameLayout.RESIZE_MODE_FILL -> R.drawable.ic_lucide_maximize_2
+                else -> R.drawable.ic_lucide_maximize
+            }
+            if (::aspectBtn.isInitialized) {
+                aspectBtn.setImageResource(iconRes)
+            }
+
+            val modeText = when (nextMode) {
                 AspectRatioFrameLayout.RESIZE_MODE_FIT -> "Fit to Screen"
                 AspectRatioFrameLayout.RESIZE_MODE_ZOOM -> "Zoomed / Crop"
                 AspectRatioFrameLayout.RESIZE_MODE_FILL -> "Stretch / Fill"
@@ -4930,8 +5022,8 @@ class KotlinPlayerActivity : AppCompatActivity() {
         val episode = getCurrentEpisodeNumber()
         val episodeTitle = getCurrentEpisodeLabel()
 
-        // If watched more than 95%, we'll consider it finished and not show it in continue watching anymore
-        val isFinished = dur > 0 && pos > (dur * 0.95)
+        // If watched more than 90% or finished, we'll consider it finished and not show it in continue watching anymore
+        val isFinished = (dur > 0 && pos > (dur * 0.90)) || (exo.playbackState == Player.STATE_ENDED)
 
         val prefs = getSharedPreferences("sozo_playback_history", MODE_PRIVATE)
         val historyStr = prefs.getString("history", "[]") ?: "[]"
@@ -5088,6 +5180,17 @@ class KotlinPlayerActivity : AppCompatActivity() {
         super.onResume()
         immersiveMode()
         mediaSession?.isActive = true
+
+        if (player == null && currentUrl.isNotEmpty()) {
+            placeholderImageView?.alpha = 0.45f
+            placeholderImageView?.visibility = View.VISIBLE
+            loadingGroup.visibility = View.VISIBLE
+            if (::logoContainer.isInitialized) {
+                startLogoPulseAnimation()
+            }
+            val playUrl = getOriginalUrlToPlay()
+            checkAndPlay(playUrl, currentHeadersJson, getCurrentSubtitleUrl())
+        }
     }
 
     private fun getGroupBase(source: JSONObject): String {

@@ -45,24 +45,23 @@ import Animated, {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BlurView, BlurTargetView } from "expo-blur";
 import {
-  PlayIcon,
-  ArrowLeftIcon,
-  HeartIcon as HeartIconSolid,
-  ExclamationCircleIcon,
-  ArrowPathIcon,
-  XMarkIcon,
-  ArrowDownTrayIcon,
-  ArrowUpTrayIcon,
-  ChevronUpIcon,
-  ChevronDownIcon,
-  BoltIcon,
-  ServerIcon,
-  WifiIcon,
-  LanguageIcon,
-  SpeakerWaveIcon,
-  CheckIcon,
-} from "react-native-heroicons/solid";
-import { HeartIcon as HeartIconOutline } from "react-native-heroicons/outline";
+  Play,
+  ArrowLeft,
+  Heart,
+  AlertCircle,
+  RotateCw,
+  X,
+  Download,
+  Users,
+  ChevronUp,
+  ChevronDown,
+  Settings,
+  Server,
+  Wifi,
+  Languages,
+  Volume2,
+  Check,
+} from "lucide-react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as favoritesApi from "../api/favorites";
 import { LinearGradient } from "expo-linear-gradient";
@@ -540,7 +539,7 @@ const HeroEpisodeRow = React.memo(
                 tint="dark"
                 style={styles.playIconGlassBlur}
               >
-                <PlayIcon size={20} color="white" />
+                <Play size={20} color="white" fill="white" />
               </BlurView>
             )}
           </View>
@@ -663,16 +662,34 @@ function extractResolutionTag(s: VideoSource) {
 function TorrentAccordion({
   torrentSources,
   renderRow,
+  alwaysExpanded = false,
 }: {
   torrentSources: any[];
   renderRow: (source: any, idx: number) => React.ReactNode;
+  alwaysExpanded?: boolean;
 }) {
   const [accordionHeight, setAccordionHeight] = useState(0);
-  const [torrentExpanded, setTorrentExpanded] = useState(false);
+  const [torrentExpanded, setTorrentExpanded] = useState(alwaysExpanded);
   const accordionExpandShared = useSharedValue(0);
 
   const [selectedAudio, setSelectedAudio] = useState("All Audios");
-  const [showAudioDropdown, setShowAudioDropdown] = useState(false);
+  const [selectedSort, setSelectedSort] = useState("Highest Seeders");
+  const [showSortDropdown, setShowSortDropdown] = useState(false);
+  const [renderLimit, setRenderLimit] = useState(15);
+
+  useEffect(() => {
+    setRenderLimit(15);
+    const timer = setTimeout(() => {
+      setRenderLimit(100);
+    }, 120);
+    return () => clearTimeout(timer);
+  }, [torrentSources, selectedAudio, selectedSort]);
+
+  useEffect(() => {
+    if (alwaysExpanded) {
+      setTorrentExpanded(true);
+    }
+  }, [alwaysExpanded]);
 
   useEffect(() => {
     accordionExpandShared.value = withTiming(torrentExpanded ? 1 : 0, {
@@ -700,17 +717,160 @@ function TorrentAccordion({
     return ["All Audios", ...Array.from(set).sort()];
   }, [torrentSources]);
 
+  const parseSizeInMB = (host: string): number => {
+    const sizeMatch = host.match(/💾\s*([\d.]+)\s*([MGB]+)/i);
+    if (!sizeMatch) return 0;
+    const val = parseFloat(sizeMatch[1]);
+    const unit = sizeMatch[2].toUpperCase();
+    if (unit.includes("G")) return val * 1024;
+    return val;
+  };
+
   const visibleSources = useMemo(() => {
-    if (selectedAudio === "All Audios") return torrentSources;
-    return torrentSources.filter((s: any) =>
-      parseAudioLanguages(s.host || "")
-        .split(",")
-        .map((x: string) => x.trim())
-        .includes(selectedAudio),
-    );
-  }, [torrentSources, selectedAudio]);
+    // 1. Filter by audio language
+    let filtered = torrentSources;
+    if (selectedAudio !== "All Audios") {
+      filtered = torrentSources.filter((s: any) =>
+        parseAudioLanguages(s.host || "")
+          .split(",")
+          .map((x: string) => x.trim())
+          .includes(selectedAudio),
+      );
+    }
+
+    // 2. Sort the filtered sources
+    const sorted = [...filtered];
+    if (selectedSort === "Highest Seeders") {
+      sorted.sort((a, b) => ((b as any).seeders ?? 0) - ((a as any).seeders ?? 0));
+    } else if (selectedSort === "Largest Size") {
+      sorted.sort((a, b) => parseSizeInMB(b.host || "") - parseSizeInMB(a.host || ""));
+    } else if (selectedSort === "Smallest Size") {
+      sorted.sort((a, b) => parseSizeInMB(a.host || "") - parseSizeInMB(b.host || ""));
+    }
+
+    return sorted;
+  }, [torrentSources, selectedAudio, selectedSort]);
 
   if (torrentSources.length === 0) return null;
+
+  const renderContent = () => {
+    return (
+      <View style={{ width: "100%" }}>
+        {/* Single horizontal row containing scrollable audio filters on left, and sort dropdown on right */}
+        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 12, marginBottom: 10, paddingHorizontal: 16, zIndex: 9999 }}>
+          
+          {/* Horizontal Audio Filter Pills (takes remaining space on left) */}
+          {audioOptions.length > 1 ? (
+            <View style={{ flex: 1, marginRight: 8, height: 26 }}>
+              <MaskedView
+                style={{ width: "100%", height: "100%" }}
+                maskElement={
+                  <LinearGradient
+                    colors={["transparent", "black", "black", "transparent"]}
+                    locations={[0, 0.08, 0.92, 1]}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 0 }}
+                    style={StyleSheet.absoluteFillObject}
+                  />
+                }
+              >
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={{ gap: 6, paddingHorizontal: 12 }}
+                >
+                  {audioOptions.map((lang) => {
+                    const isActive = selectedAudio === lang;
+                    return (
+                      <TouchableOpacity
+                        key={lang}
+                        style={[
+                          styles.langFilterChip,
+                          isActive && styles.langFilterChipActive,
+                          { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 }
+                        ]}
+                        onPress={() => setSelectedAudio(lang)}
+                        activeOpacity={0.7}
+                      >
+                        <Text
+                          style={[
+                            styles.langFilterText,
+                            isActive && styles.langFilterTextActive,
+                            { fontSize: 10 }
+                          ]}
+                        >
+                          {lang === "All Audios" ? "All" : lang}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+              </MaskedView>
+            </View>
+          ) : null}
+
+          {/* Sort Dropdown on Right */}
+          <View style={{ position: "relative", zIndex: 99999 }}>
+            <TouchableOpacity
+              style={[styles.seasonSelector, { minWidth: 95, paddingVertical: 4, paddingHorizontal: 8, borderRadius: 12, height: 28, marginTop: 0 }]}
+              activeOpacity={0.7}
+              onPress={() => setShowSortDropdown((v) => !v)}
+            >
+              <Text style={[styles.seasonText, { fontSize: 10 }]}>{selectedSort === "Highest Seeders" ? "Seeders" : selectedSort === "Largest Size" ? "Size 💾" : "Size 💾 Min"}</Text>
+              <Text style={[styles.seasonIcon, { fontSize: 8, marginLeft: 4 }]}>▼</Text>
+            </TouchableOpacity>
+            
+            {showSortDropdown && (
+              <View
+                style={[
+                  styles.floatingDropdown,
+                  { position: "absolute", top: 32, right: 0, width: 140, zIndex: 999999 },
+                ]}
+              >
+                <LinearGradient
+                  colors={["#1c1c22", "#0f0f12"]}
+                  style={StyleSheet.absoluteFillObject}
+                />
+                {[
+                  { label: "Seeders", value: "Highest Seeders" },
+                  { label: "Size (Max)", value: "Largest Size" },
+                  { label: "Size (Min)", value: "Smallest Size" },
+                ].map((opt) => (
+                  <TouchableOpacity
+                    key={opt.value}
+                    style={[
+                      styles.dropdownItem,
+                      selectedSort === opt.value && styles.dropdownItemSelected,
+                      { paddingVertical: 8, paddingHorizontal: 12 }
+                    ]}
+                    onPress={() => {
+                      setSelectedSort(opt.value);
+                      setShowSortDropdown(false);
+                    }}
+                  >
+                    <Text style={[styles.seasonText, { fontSize: 11 }]}>
+                      {opt.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+          </View>
+        </View>
+
+        {visibleSources.slice(0, renderLimit).map((source, idx) => renderRow(source, idx))}
+        {visibleSources.length > renderLimit && (
+          <Text style={{ color: "rgba(255,255,255,0.3)", textAlign: "center", marginVertical: 14, fontSize: 10, fontWeight: "600", letterSpacing: 0.5 }}>
+            SHOWING TOP {renderLimit} OF {visibleSources.length} LINKS
+          </Text>
+        )}
+      </View>
+    );
+  };
+
+  if (alwaysExpanded) {
+    return renderContent();
+  }
 
   return (
     <>
@@ -722,18 +882,19 @@ function TorrentAccordion({
         ]}
         activeOpacity={0.8}
       >
-        <ArrowDownTrayIcon
+        <Download
           size={18}
           color={theme.colors.rose}
+          strokeWidth={2}
           style={{ marginRight: 10 }}
         />
         <Text style={styles.accordionTitle}>
           Torrent & Magnet Links ({torrentSources.length} found)
         </Text>
         {torrentExpanded ? (
-          <ChevronUpIcon size={18} color="#a0a0a5" />
+          <ChevronUp size={18} color="#a0a0a5" strokeWidth={2} />
         ) : (
-          <ChevronDownIcon size={18} color="#a0a0a5" />
+          <ChevronDown size={18} color="#a0a0a5" strokeWidth={2} />
         )}
       </TouchableOpacity>
 
@@ -747,54 +908,7 @@ function TorrentAccordion({
           }}
           style={{ width: "100%", position: "absolute", top: 0 }}
         >
-          <View style={{ position: "relative", marginTop: 10, marginBottom: 6 }}>
-            <TouchableOpacity
-              style={styles.seasonSelector}
-              activeOpacity={0.7}
-              onPress={() => setShowAudioDropdown((v) => !v)}
-            >
-              <Text style={styles.seasonText}>{selectedAudio}</Text>
-              <Text style={styles.seasonIcon}>▼</Text>
-            </TouchableOpacity>
-
-            {showAudioDropdown && (
-              <View
-                style={[
-                  styles.floatingDropdown,
-                  { position: "relative", top: 0, width: "100%", marginTop: 8 },
-                ]}
-              >
-                <LinearGradient
-                  colors={["#1c1c22", "#0f0f12"]}
-                  style={StyleSheet.absoluteFillObject}
-                />
-                <ScrollView
-                  showsVerticalScrollIndicator={false}
-                  style={{ maxHeight: 200 }}
-                >
-                  {audioOptions.map((opt) => (
-                    <TouchableOpacity
-                      key={opt}
-                      style={[
-                        styles.dropdownItem,
-                        selectedAudio === opt && styles.dropdownItemSelected,
-                      ]}
-                      onPress={() => {
-                        setSelectedAudio(opt);
-                        setShowAudioDropdown(false);
-                      }}
-                    >
-                      <Text style={[styles.seasonText, { fontSize: 14 }]}>
-                        {opt}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
-              </View>
-            )}
-          </View>
-
-          {visibleSources.map((source, idx) => renderRow(source, idx))}
+          {renderContent()}
         </View>
       </Animated.View>
     </>
@@ -869,7 +983,6 @@ export default function DetailScreen() {
   const [collapsedDescHeight, setCollapsedDescHeight] = useState(0);
   const [fullDescHeight, setFullDescHeight] = useState(0);
   const [expandedContentHeight, setExpandedContentHeight] = useState(0);
-  const [activeLangFilter, setActiveLangFilter] = useState("All");
 
   const [prevDetailTitle, setPrevDetailTitle] = useState<string | null>(null);
   const currentTitle = detail?.title || null;
@@ -1432,35 +1545,6 @@ export default function DetailScreen() {
     });
   }, [sources, activeProviderTab]);
 
-  // Apply language filter (torrent audio-language codes parsed from host filename).
-  // Direct/HLS sources can't be detected pre-playback, so they always pass through.
-  const langFilteredSources = useMemo(() => {
-    if (activeLangFilter === "All") return filteredSources;
-
-    return filteredSources.filter((s) => {
-      const isTorrent = s.type === "torrent" || s.url.startsWith("magnet:");
-      if (!isTorrent) return true; // direct sources always visible
-
-      const langs = parseAudioLanguages((s as any).host || "");
-      return langs !== "—" && langs.includes(activeLangFilter);
-    });
-  }, [filteredSources, activeLangFilter]);
-
-  // Auto-populate language filter chips from torrent sources currently shown.
-  // Only show the chips row if at least one torrent has a detectable language.
-  const availableLangFilters = useMemo(() => {
-    const codes = new Set<string>();
-    filteredSources.forEach((s) => {
-      const isTorrent = s.type === "torrent" || s.url.startsWith("magnet:");
-      if (!isTorrent) return;
-      const langs = parseAudioLanguages((s as any).host || "");
-      if (langs !== "—") {
-        langs.split(", ").forEach((c) => codes.add(c));
-      }
-    });
-    return ["All", ...Array.from(codes).sort()];
-  }, [filteredSources]);
-
   // If the active tab disappears from the list (e.g. provider had no sources),
   // fall back to 'All' so the user doesn't see a blank filtered view
   useEffect(() => {
@@ -1468,11 +1552,6 @@ export default function DetailScreen() {
       setActiveProviderTab("All");
     }
   }, [providerTabs, activeProviderTab]);
-
-  // Reset the language filter whenever the provider tab changes
-  useEffect(() => {
-    setActiveLangFilter("All");
-  }, [activeProviderTab]);
 
   const isTabResolving = useMemo(() => {
     // Always use isResolving — while ANY provider is still searching, ALL tabs show the circular loader.
@@ -1949,9 +2028,13 @@ export default function DetailScreen() {
                       // Play local HTTP range server stream URL via Kotlin player!
                       closeSourcePicker(true); // Keep torrent active so Kotlin player can read from local http server!
                       setIsOpeningPlayer(false);
+                      const playHeaders = {
+                        ...(source.headers || {}),
+                        __originalMagnetUrl: source.url,
+                      };
                       bridge.playStream(
                         info.streamUrl,
-                        source.headers,
+                        playHeaders,
                         detail?.title || "",
                         subUrl,
                         sources.map((s) => ({
@@ -2306,7 +2389,7 @@ export default function DetailScreen() {
                 activeOpacity={0.8}
               >
                 <View style={styles.closeButtonInner}>
-                  <ArrowLeftIcon size={18} color="#ffffff" />
+                  <ArrowLeft size={18} color="#ffffff" strokeWidth={2} />
                 </View>
               </TouchableOpacity>
 
@@ -2321,9 +2404,9 @@ export default function DetailScreen() {
               >
                 <View style={styles.closeButtonInner}>
                   {isFav ? (
-                    <HeartIconSolid size={20} color={theme.colors.accent} />
+                    <Heart size={20} color={theme.colors.accent} fill={theme.colors.accent} strokeWidth={2} />
                   ) : (
-                    <HeartIconOutline size={20} color="#ffffff" />
+                    <Heart size={20} color="#ffffff" strokeWidth={2} />
                   )}
                 </View>
               </TouchableOpacity>
@@ -2360,7 +2443,7 @@ export default function DetailScreen() {
                       ]}
                     />
                   )}
-                  <PlayIcon size={24} color="#fff" style={{ marginLeft: 3 }} />
+                  <Play size={24} color="#fff" fill="#fff" style={{ marginLeft: 3 }} />
                 </View>
                 <Text style={styles.trailerLabel}>TRAILER</Text>
               </TouchableOpacity>
@@ -2464,9 +2547,10 @@ export default function DetailScreen() {
                         tint="dark"
                         style={styles.errorCard}
                       >
-                        <ExclamationCircleIcon
+                        <AlertCircle
                           size={42}
                           color={theme.colors.rose}
+                          strokeWidth={2}
                           style={{ marginBottom: 12 }}
                         />
                         <Text style={styles.errorTitle}>
@@ -2788,7 +2872,7 @@ export default function DetailScreen() {
         }}
         title="Torrent Engine"
         message={selectedTorrentTitle || "Streaming Video"}
-        Icon={BoltIcon}
+        Icon={Settings}
         iconColor="#0047FF"
         iconBgColor="rgba(0, 71, 255, 0.1)"
         glowColors={["rgba(0, 71, 255, 0.15)", "transparent"] as const}
@@ -2809,7 +2893,7 @@ export default function DetailScreen() {
         <View style={styles.torrentStatsContainer}>
           <View style={styles.torrentStatBox}>
             <View style={styles.torrentStatLabelRow}>
-              <ServerIcon size={12} color="#8E8D92" />
+              <Server size={12} color="#8E8D92" strokeWidth={2} />
               <Text style={styles.torrentStatLabel}>Peers</Text>
             </View>
             <Text style={styles.torrentStatValue}>
@@ -2822,7 +2906,7 @@ export default function DetailScreen() {
           </View>
           <View style={styles.torrentStatBox}>
             <View style={styles.torrentStatLabelRow}>
-              <WifiIcon size={12} color="#8E8D92" />
+              <Wifi size={12} color="#8E8D92" strokeWidth={2} />
               <Text style={styles.torrentStatLabel}>Status</Text>
             </View>
             <Text
@@ -2837,31 +2921,13 @@ export default function DetailScreen() {
                   : "Searching"}
             </Text>
           </View>
-        </View>
-
-        {/* Audio + Subtitle language info row */}
-        <View style={styles.torrentInfoRow}>
-          <View style={styles.torrentInfoBox}>
-            <View style={styles.torrentInfoLabelRow}>
-              <SpeakerWaveIcon size={12} color="#8E8D92" />
-              <Text style={styles.torrentInfoLabel}>Audio</Text>
+          <View style={styles.torrentStatBox}>
+            <View style={styles.torrentStatLabelRow}>
+              <Volume2 size={12} color="#8E8D92" strokeWidth={2} />
+              <Text style={styles.torrentStatLabel}>Audio</Text>
             </View>
-            <Text style={styles.torrentInfoValue} numberOfLines={1} ellipsizeMode="tail">
+            <Text style={styles.torrentStatValue} numberOfLines={1} ellipsizeMode="tail">
               {parseAudioLanguages(selectedTorrentHost)}
-            </Text>
-          </View>
-          <View style={styles.torrentInfoBox}>
-            <View style={styles.torrentInfoLabelRow}>
-              <LanguageIcon size={12} color="#8E8D92" />
-              <Text style={styles.torrentInfoLabel}>Subs</Text>
-            </View>
-            <Text style={styles.torrentInfoValue} numberOfLines={1} ellipsizeMode="tail">
-              {subtitles && subtitles.length > 0
-                ? subtitles
-                    .map((s: any) => normalizeLangCode(s.lang))
-                    .filter(Boolean)
-                    .join(", ")
-                : "None"}
             </Text>
           </View>
         </View>
@@ -2895,7 +2961,7 @@ export default function DetailScreen() {
         onClose={() => setTorrentErrorModal({ visible: false, message: "" })}
         title="Playback Error"
         message={torrentErrorModal.message}
-        Icon={ExclamationCircleIcon}
+        Icon={AlertCircle}
         iconColor="#ff4a7d"
         iconBgColor="rgba(255, 74, 125, 0.1)"
         glowColors={["rgba(255, 74, 125, 0.15)", "transparent"] as const}
@@ -2947,7 +3013,7 @@ export default function DetailScreen() {
                   activeOpacity={0.8}
                   disabled={isResolving}
                 >
-                  <ArrowPathIcon size={18} color="#ffffff" />
+                   <RotateCw size={18} color="#ffffff" strokeWidth={2} />
                 </TouchableOpacity>
 
                 <View style={styles.sheetTitleRow}>
@@ -2965,7 +3031,7 @@ export default function DetailScreen() {
                   onPress={() => closeSourcePicker()}
                   activeOpacity={0.8}
                 >
-                  <XMarkIcon size={20} color="#ffffff" />
+                   <X size={20} color="#ffffff" strokeWidth={2} />
                 </TouchableOpacity>
               </View>
               {/* Dynamic Provider Tabs scroll view */}
@@ -3034,6 +3100,14 @@ export default function DetailScreen() {
                                 ? `${tab} (${tabSourcesCount})`
                                 : `${tab} ⚠`;
                           }
+                        } else {
+                          // Static tabs (like VidSrcMe, VsEmbed) or direct/custom provider calls which don't have progress tracking.
+                          tabLabel =
+                            tabSourcesCount > 0
+                              ? `${tab} (${tabSourcesCount})`
+                              : isResolving
+                              ? tab
+                              : `${tab} (0)`;
                         }
 
                         return (
@@ -3070,56 +3144,19 @@ export default function DetailScreen() {
                 </View>
               )}
 
-              {/* Language filter chips — only when torrent sources expose audio languages */}
-              {availableLangFilters.length > 1 && (
-                <View style={styles.langFilterRow}>
-                  <ScrollView
-                    horizontal
-                    showsHorizontalScrollIndicator={false}
-                    contentContainerStyle={styles.langFilterScrollContent}
-                  >
-                    {availableLangFilters.map((lang) => {
-                      const isActive = activeLangFilter === lang;
-                      return (
-                        <TouchableOpacity
-                          key={lang}
-                          style={[
-                            styles.langFilterChip,
-                            isActive && styles.langFilterChipActive,
-                          ]}
-                          onPress={() => setActiveLangFilter(lang)}
-                          activeOpacity={0.7}
-                        >
-                          <Text
-                            style={[
-                              styles.langFilterText,
-                              isActive && styles.langFilterTextActive,
-                            ]}
-                          >
-                            {lang}
-                          </Text>
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </ScrollView>
-                </View>
-              )}
-
               {/* Always show source list when sources exist, even while still resolving */}
               <View style={{ flex: 1 }}>
-                {langFilteredSources.length > 0 ? (
+                {filteredSources.length > 0 ? (
                   <View style={styles.sheetListContainer}>
                     {(() => {
-                      const directSources = langFilteredSources.filter(
+                      const directSources = filteredSources.filter(
                         (s) =>
                           s.type !== "torrent" && !s.url.startsWith("magnet:"),
                       );
-                      const torrentSources = langFilteredSources
-                        .filter(
-                          (s) =>
-                            s.type === "torrent" || s.url.startsWith("magnet:"),
-                        )
-                        .slice(0, 30);
+                      const torrentSources = filteredSources.filter(
+                        (s) =>
+                          s.type === "torrent" || s.url.startsWith("magnet:"),
+                      );
 
                       const renderSourceRow = (source: any, idx: number) => {
                         // displayName = normalised group base (e.g. "Movies Plus", "4K HDHUB")
@@ -3238,7 +3275,8 @@ export default function DetailScreen() {
                                           },
                                         ]}
                                       >
-                                        <ArrowUpTrayIcon
+                                        <Users
+                                          strokeWidth={2}
                                           size={10}
                                           color={
                                             torrentSeeders >= 50
@@ -3362,6 +3400,7 @@ export default function DetailScreen() {
                               key={activeEpisodeIndex ?? detail?.url ?? "acc"}
                               torrentSources={torrentSources}
                               renderRow={renderSourceRow}
+                              alwaysExpanded={activeProviderTab.toLowerCase() !== "all"}
                             />
                           </ScrollView>
                         </MaskedView>
@@ -3380,9 +3419,7 @@ export default function DetailScreen() {
                     <Text style={{ color: "#8E8D92", fontSize: 14 }}>
                       {isResolving
                         ? "Resolving links..."
-                        : activeLangFilter !== "All"
-                          ? `No ${activeLangFilter} audio sources found`
-                          : "No links found for this provider"}
+                        : "No links found for this provider"}
                     </Text>
                   </View>
                 )}

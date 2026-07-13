@@ -20,19 +20,22 @@ import {
   Easing,
   DimensionValue,
   RefreshControl,
+  Alert,
+  Modal,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BlurView, BlurTargetView } from "expo-blur";
 import Reanimated, { FadeInUp, FadeOut, Easing as ReanimatedEasing } from "react-native-reanimated";
 import { LinearGradient } from "expo-linear-gradient";
-import { SignalIcon, ExclamationCircleIcon } from "react-native-heroicons/solid";
-import type { HomeSection, MediaItem } from "../types/plugin";
+import { WifiOff, AlertCircle } from "lucide-react-native";
+import type { HomeSection, MediaItem, PluginProvider } from "../types/plugin";
 import * as bridge from "../api/cloudStreamBridge";
 import { useTransition, useTransitionActions } from "../context/TransitionContext";
 import type { CardLayout } from "../context/TransitionContext";
 import { HeroCard } from "../components/HeroCard";
 import MediaCard from "../components/MediaCard";
 import { ContinueCard } from "../components/ContinueCard";
+import ChannelCard from "../components/ChannelCard";
 
 import { theme } from "../theme";
 
@@ -76,6 +79,7 @@ const CATEGORY_TABS = [
   "TV Show",
   "Cartoon",
   "Anime",
+  "LiveTV",
 ];
 
 // Display genre/duration/rating tags for hero cards (rotated per item index)
@@ -158,8 +162,30 @@ function SkeletonBox({
 // Components extracted to separate files in src/components/ to keep file clean and structured.
 
 // ── Premium Skeleton Loading Screen ──────────────────────────────────────────
-function HomeSkeletonScreen() {
+function HomeSkeletonScreen({ isLive }: { isLive?: boolean }) {
   const insets = useSafeAreaInsets();
+  if (isLive) {
+    return (
+      <View style={[styles.root, { backgroundColor: theme.colors.background }]}>
+        <View
+          style={{
+            paddingTop: insets.top + 110,
+            paddingHorizontal: 20,
+            gap: 16,
+          }}
+        >
+          {[1, 2, 3, 4, 5].map((rowIdx) => (
+            <View key={rowIdx} style={{ flexDirection: "row", gap: 8 }}>
+              <SkeletonBox width={S_CARD_W} height={S_CARD_W} borderRadius={20} />
+              <SkeletonBox width={S_CARD_W} height={S_CARD_W} borderRadius={20} />
+              <SkeletonBox width={S_CARD_W} height={S_CARD_W} borderRadius={20} />
+            </View>
+          ))}
+        </View>
+      </View>
+    );
+  }
+
   return (
     <View style={[styles.root, { backgroundColor: theme.colors.background }]}>
       <ScrollView
@@ -311,6 +337,9 @@ interface SectionRowProps {
   navigation: any;
   goDetail: (item: MediaItem, layout: CardLayout) => void;
   onDeleteHistoryItem?: (id: string) => void;
+  isLiveTab: boolean;
+  savedUrls: Set<string>;
+  onToggleSave: (item: MediaItem) => void;
 }
 
 const SectionRow = React.memo(function SectionRow({
@@ -318,23 +347,54 @@ const SectionRow = React.memo(function SectionRow({
   navigation,
   goDetail,
   onDeleteHistoryItem,
+  isLiveTab,
+  savedUrls,
+  onToggleSave,
 }: SectionRowProps) {
   const { phase } = useTransition();
   const isCW = section.name === "Continue Watching";
 
   const renderItem = useCallback(
-    ({ item }: { item: any }) =>
-      isCW ? (
-        <ContinueCard item={item} onPress={goDetail} onDelete={onDeleteHistoryItem} />
-      ) : (
+    ({ item }: { item: any }) => {
+      if (isCW) {
+        return (
+          <ContinueCard item={item} onPress={goDetail} onDelete={onDeleteHistoryItem} />
+        );
+      }
+      
+      const isLiveItem = item.type === "live" || isLiveTab;
+      
+      if (isLiveItem) {
+        return (
+          <ChannelCard
+            item={item as MediaItem}
+            onPress={(i) =>
+              goDetail(i, {
+                x: 0,
+                y: 0,
+                width: S_CARD_W,
+                height: S_CARD_W,
+                borderRadius: 22,
+              })
+            }
+            isSaved={savedUrls.has(item.url)}
+            onToggleSave={onToggleSave}
+            width={S_CARD_W}
+            style={{ marginRight: 8 }}
+          />
+        );
+      }
+
+      return (
         <MediaCard
           item={item as MediaItem}
           onPress={goDetail}
           width={S_CARD_W}
           style={{ marginRight: 8, marginHorizontal: 0, marginBottom: 0 }}
         />
-      ),
-    [isCW, goDetail, onDeleteHistoryItem],
+      );
+    },
+    [isCW, goDetail, onDeleteHistoryItem, isLiveTab, savedUrls, onToggleSave],
   );
 
   const handleSeeAll = useCallback(() => {
@@ -383,6 +443,134 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
   const [heroIdx, setHeroIdx] = useState(0);
   const heroIdxRef = useRef(0);
   heroIdxRef.current = heroIdx;
+
+  const [allProviders, setAllProviders] = useState<PluginProvider[]>([
+    { id: "CloudPlay", name: "CloudPlay", url: "", hasMainPage: true, hasSearch: false },
+    { id: "IPTV Player", name: "IPTV Player", url: "", hasMainPage: true, hasSearch: false },
+    { id: "PublicSportsIPTV", name: "PublicSportsIPTV", url: "", hasMainPage: true, hasSearch: false },
+    { id: "Sports IPTV", name: "Sports IPTV", url: "", hasMainPage: true, hasSearch: false },
+    { id: "Pirate IPTV", name: "Pirate IPTV", url: "", hasMainPage: true, hasSearch: false },
+    { id: "Sony IPTV", name: "Sony IPTV", url: "", hasMainPage: true, hasSearch: false },
+    { id: "Japan IPTV", name: "Japan IPTV", url: "", hasMainPage: true, hasSearch: false },
+  ]);
+  const [activeLiveTVProvider, setActiveLiveTVProvider] = useState<string>("IPTV Player");
+  const [savedChannels, setSavedChannels] = useState<MediaItem[]>([]);
+  const [resolvingLiveChannel, setResolvingLiveChannel] = useState<string | null>(null);
+  const [loadingCategory, setLoadingCategory] = useState<string>("");
+
+  const liveTVProviders = useMemo(() => {
+    return allProviders.filter((p) =>
+      ["cloudplay", "iptvplayer", "publicsportsiptv", "quickiptv"].includes(
+        p.name.toLowerCase(),
+      ) || p.name.toLowerCase().includes("iptv"),
+    );
+  }, [allProviders]);
+
+  const savedUrls = useMemo(() => {
+    return new Set(savedChannels.map((x) => x.url));
+  }, [savedChannels]);
+
+  useEffect(() => {
+    if (liveTVProviders.length > 0 && !activeLiveTVProvider) {
+      setActiveLiveTVProvider(liveTVProviders[0].name);
+    }
+  }, [liveTVProviders, activeLiveTVProvider]);
+
+  const loadSavedChannelsList = async () => {
+    try {
+      const list = await bridge.getSavedChannels();
+      setSavedChannels(list);
+      return list;
+    } catch {
+      return [];
+    }
+  };
+
+  const playLiveChannel = useCallback(async (item: MediaItem) => {
+    setResolvingLiveChannel(item.title);
+    try {
+      const result = await bridge.loadLinks(item.provider, item.url);
+      if (result.sources && result.sources.length > 0) {
+        const source = result.sources[0];
+        bridge.playStream(
+          source.url,
+          source.headers,
+          item.title,
+          undefined,
+          result.sources,
+          result.subtitles,
+          undefined,
+          -1,
+          undefined,
+          "live",
+          item.posterUrl || undefined,
+          1,
+          1,
+          item.title,
+          undefined,
+          item.provider,
+          item.url
+        );
+      } else {
+        Alert.alert("Playback Error", "No playable links found for this channel.");
+      }
+    } catch (e: any) {
+      console.warn("Failed to play live channel:", e);
+      Alert.alert("Playback Error", "Failed to load channel: " + (e.message || String(e)));
+    } finally {
+      setResolvingLiveChannel(null);
+    }
+  }, []);
+
+  const handleToggleSaveChannel = useCallback(async (item: MediaItem) => {
+    try {
+      const saved = await bridge.getSavedChannels();
+      const isCurrentlySaved = saved.some((x) => x.url === item.url);
+      let updated: MediaItem[];
+      if (isCurrentlySaved) {
+        updated = await bridge.removeSavedChannel(item.url);
+      } else {
+        const newItem = { ...item, type: "live" };
+        updated = await bridge.saveChannel(newItem);
+      }
+      setSavedChannels(updated);
+
+      if (CATEGORY_TABS[activeTab] === "LiveTV") {
+        setSections((prev) => {
+          const copy = [...prev];
+          const idx = copy.findIndex((x) => x.name === "Saved Channels");
+          if (updated.length > 0) {
+            if (idx !== -1) {
+              copy[idx] = { name: "Saved Channels", items: updated };
+            } else {
+              copy.unshift({ name: "Saved Channels", items: updated });
+            }
+          } else {
+            if (idx !== -1) {
+              copy.splice(idx, 1);
+            }
+          }
+          return copy;
+        });
+      }
+    } catch (e) {
+      console.warn("Failed to toggle save channel:", e);
+    }
+  }, [activeTab]);
+
+  useEffect(() => {
+    async function loadProviders() {
+      try {
+        const provs = await bridge.getProviders();
+        if (provs && provs.length > 0) {
+          setAllProviders(provs);
+        }
+      } catch (e) {
+        console.warn("Failed to load providers:", e);
+      }
+    }
+    loadProviders();
+  }, []);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -623,6 +811,7 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
       
       // Update Continue Watching in background on screen focus
       refreshHistoryOnly();
+      loadSavedChannelsList();
 
       // Only re-fetch sections when we have no data (e.g. after an error).
       // Re-fetching every time the user comes back from a nested screen
@@ -642,8 +831,21 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
     setLoading(true);
     setError(null);
     try {
-      await bridge.loadPlugins();
-      await loadSections();
+      const provs = await bridge.loadPlugins();
+      let defaultLiveProvider = "";
+      if (provs && provs.length > 0) {
+        setAllProviders(provs);
+        const liveProvs = provs.filter((p) =>
+          ["cloudplay", "iptvplayer", "publicsportsiptv", "quickiptv"].includes(
+            p.name.toLowerCase(),
+          ) || p.name.toLowerCase().includes("iptv"),
+        );
+        if (liveProvs.length > 0) {
+          defaultLiveProvider = liveProvs[0].name;
+          setActiveLiveTVProvider(defaultLiveProvider);
+        }
+      }
+      await loadSections(false, CATEGORY_TABS[activeTab], defaultLiveProvider);
     } catch (e: any) {
       setError(cleanGeneralError(e));
     } finally {
@@ -662,43 +864,70 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
   async function loadSections(
     force: boolean = false,
     categoryName: string = CATEGORY_TABS[activeTab],
+    liveTVProvider: string = activeLiveTVProvider,
   ) {
-    if (!force) setSectionsLoading(true);
+    if (!force) {
+      setSectionsLoading(true);
+      setLoadingCategory(categoryName);
+    }
     setSectionError(null);
     try {
+      const targetProvider = categoryName === "LiveTV"
+        ? (liveTVProvider || (liveTVProviders[0]?.name || ""))
+        : "";
       const secs: HomeSection[] = await bridge.getMainPage(
-        "",
+        targetProvider,
         1,
         force,
         categoryName,
       );
-      try {
-        const hist = await bridge.getPlaybackHistory();
-        if (hist && hist.length > 0) {
+
+      if (categoryName === "LiveTV") {
+        const saved = await loadSavedChannelsList();
+        if (saved && saved.length > 0) {
           secs.unshift({
-            name: "Continue Watching",
-            items: hist.map((h: any) => ({
-              provider: h.provider || "Cinemeta",
-              url: h.detailUrl || (h.mediaType + "/" + h.imdbId),
-              title: h.videoTitle,
-              posterUrl: h.posterUrl,
-              type: h.mediaType,
-              position: h.position,
-              duration: h.duration,
-              season: h.season,
-              episode: h.episode,
-              imdbId: h.imdbId,
-            })) as any,
+            name: "Saved Channels",
+            items: saved,
           });
         }
-      } catch (_) {}
+      } else {
+        try {
+          const hist = await bridge.getPlaybackHistory();
+          const filteredHist = (hist || []).filter((h: any) => {
+            const isLive = h.mediaType === "live" || 
+                           h.type === "live" || 
+                           ["cloudplay", "iptv player", "publicsportsiptv", "sports iptv", "pirate iptv", "sony iptv", "japan iptv"].includes(
+                             (h.provider || "").toLowerCase()
+                           );
+            return !isLive;
+          });
+          if (filteredHist && filteredHist.length > 0) {
+            secs.unshift({
+              name: "Continue Watching",
+              items: filteredHist.map((h: any) => ({
+                provider: h.provider || "Cinemeta",
+                url: h.detailUrl || (h.mediaType + "/" + h.imdbId),
+                title: h.videoTitle,
+                posterUrl: h.posterUrl,
+                type: h.mediaType,
+                position: h.position,
+                duration: h.duration,
+                season: h.season,
+                episode: h.episode,
+                imdbId: h.imdbId,
+              })) as any,
+            });
+          }
+        } catch (_) {}
+      }
+
       setSections(secs);
       sectionsLoadedRef.current = true;
 
       // Collect some recommended items from general sections as a fallback
       const fallbacks: MediaItem[] = [];
       secs.forEach((s) => {
-        if (s.name !== "Continue Watching" && s.items) {
+        if (s.name !== "Continue Watching" && s.name !== "Saved Channels" && s.items) {
           fallbacks.push(...s.items.slice(0, 5));
         }
       });
@@ -713,21 +942,34 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
       setSectionError(cleanGeneralError(e));
     } finally {
       setSectionsLoading(false);
+      setLoadingCategory("");
     }
   }
 
   const handleTabPress = (index: number) => {
     setActiveTab(index);
-    // Mark sections as stale so the next focus/init will re-fetch for this tab
     sectionsLoadedRef.current = false;
-    loadSections(false, CATEGORY_TABS[index]);
+    const category = CATEGORY_TABS[index];
+    const targetProvider = category === "LiveTV" ? (activeLiveTVProvider || (liveTVProviders[0]?.name || "")) : "";
+    loadSections(false, category, targetProvider);
+  };
+
+  const handleLiveTVProviderPress = (providerName: string) => {
+    setActiveLiveTVProvider(providerName);
+    sectionsLoadedRef.current = false;
+    loadSections(false, "LiveTV", providerName);
   };
 
   const goDetail = useCallback(
     (item: MediaItem, layout: CardLayout, index?: number) => {
-      openFromCard(item, layout);
+      const isLiveItem = item.type === "live" || CATEGORY_TABS[activeTab] === "LiveTV";
+      if (isLiveItem) {
+        playLiveChannel(item);
+      } else {
+        openFromCard(item, layout);
+      }
     },
-    [openFromCard],
+    [openFromCard, activeTab, playLiveChannel],
   );
 
   const handleDeleteHistoryItem = useCallback(async (id: string) => {
@@ -744,7 +986,7 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
       return (
         <View style={styles.errorContainer}>
           <BlurView intensity={20} tint="dark" style={styles.errorCard}>
-            <SignalIcon size={40} color={theme.colors.rose} style={{ marginBottom: 12 }} />
+            <WifiOff size={40} color={theme.colors.rose} style={{ marginBottom: 12 }} />
             <Text style={styles.errorTitle}>Connection Interrupted</Text>
             <Text style={styles.errText}>{sectionError}</Text>
             <TouchableOpacity
@@ -759,35 +1001,68 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
       );
     }
     if (sectionsLoading) {
+      const isLive = loadingCategory === "LiveTV" || CATEGORY_TABS[activeTab] === "LiveTV";
+      if (isLive) {
+        return (
+          <View style={{ paddingHorizontal: 20, marginTop: 24, gap: 16 }}>
+            {[1, 2, 3, 4].map((rowIdx) => (
+              <View key={rowIdx} style={{ flexDirection: "row", gap: 8 }}>
+                <SkeletonBox width={S_CARD_W} height={S_CARD_W} borderRadius={20} />
+                <SkeletonBox width={S_CARD_W} height={S_CARD_W} borderRadius={20} />
+                <SkeletonBox width={S_CARD_W} height={S_CARD_W} borderRadius={20} />
+              </View>
+            ))}
+          </View>
+        );
+      }
       return (
-        <View style={{ paddingHorizontal: 20, marginTop: 24, gap: 10 }}>
-          <SkeletonBox width={80} height={16} />
-          <View style={{ flexDirection: "row", gap: 8 }}>
-            <SkeletonBox width={S_CARD_W} height={S_CARD_H} borderRadius={22} />
-            <SkeletonBox width={S_CARD_W} height={S_CARD_H} borderRadius={22} />
-            <SkeletonBox width={S_CARD_W} height={S_CARD_H} borderRadius={22} />
+        <View style={{ paddingHorizontal: 20, marginTop: 24, gap: 16 }}>
+          <View style={{ gap: 10 }}>
+            <SkeletonBox width={100} height={16} />
+            <View style={{ flexDirection: "row", gap: 8 }}>
+              <SkeletonBox width={S_CARD_W} height={S_CARD_H} borderRadius={20} />
+              <SkeletonBox width={S_CARD_W} height={S_CARD_H} borderRadius={20} />
+              <SkeletonBox width={S_CARD_W} height={S_CARD_H} borderRadius={20} />
+            </View>
+          </View>
+          <View style={{ gap: 10 }}>
+            <SkeletonBox width={120} height={16} />
+            <View style={{ flexDirection: "row", gap: 8 }}>
+              <SkeletonBox width={S_CARD_W} height={S_CARD_H} borderRadius={20} />
+              <SkeletonBox width={S_CARD_W} height={S_CARD_H} borderRadius={20} />
+              <SkeletonBox width={S_CARD_W} height={S_CARD_H} borderRadius={20} />
+            </View>
           </View>
         </View>
       );
     }
-    return sections
-      .filter((_: HomeSection, i: number) => i !== heroSectionIdx)
-      .map((section: HomeSection, idx: number) => (
-        <SectionRow
-          key={section.name + idx}
-          section={section}
-          navigation={navigation}
-          goDetail={goDetail}
-          onDeleteHistoryItem={handleDeleteHistoryItem}
-        />
-      ));
+    const displaySections = CATEGORY_TABS[activeTab] === "LiveTV"
+      ? sections
+      : sections.filter((_: HomeSection, i: number) => i !== heroSectionIdx);
+
+    return displaySections.map((section: HomeSection, idx: number) => (
+      <SectionRow
+        key={section.name + idx}
+        section={section}
+        navigation={navigation}
+        goDetail={goDetail}
+        onDeleteHistoryItem={handleDeleteHistoryItem}
+        isLiveTab={CATEGORY_TABS[activeTab] === "LiveTV"}
+        savedUrls={savedUrls}
+        onToggleSave={handleToggleSaveChannel}
+      />
+    ));
   }, [
     sections,
     sectionsLoading,
+    loadingCategory,
     sectionError,
     heroSectionIdx,
     navigation,
     goDetail,
+    activeTab,
+    savedUrls,
+    handleToggleSaveChannel,
   ]);
 
   return (
@@ -914,204 +1189,300 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
           </ScrollView>
         </Animated.View>
 
+        {/* ── LiveTV Provider sub-tab row ── */}
+        {CATEGORY_TABS[activeTab] === "LiveTV" && liveTVProviders.length > 0 && (
+          <Animated.View
+            style={[
+              styles.subHeaderContainer,
+              {
+                top: insets.top + 4 + 48 + 8,
+              },
+            ]}
+          >
+            <View style={styles.blurBackdrop}>
+              {blurTarget && !showSkeleton ? (
+                <BlurView
+                  intensity={100}
+                  tint="dark"
+                  style={StyleSheet.absoluteFillObject}
+                  blurMethod="dimezisBlurView"
+                  blurTarget={{ current: blurTarget }}
+                />
+              ) : (
+                <View
+                  style={[
+                    StyleSheet.absoluteFillObject,
+                    { backgroundColor: "rgba(20, 18, 24, 0.95)" },
+                  ]}
+                />
+              )}
+              <View
+                style={[
+                  StyleSheet.absoluteFillObject,
+                  { backgroundColor: "rgba(15, 15, 20, 0.38)" },
+                ]}
+              />
+            </View>
+
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.subTabRow}
+              style={styles.tabRowWrap}
+            >
+              {liveTVProviders.map((provider) => {
+                const isActive = provider.name === activeLiveTVProvider;
+                return (
+                  <TouchableOpacity
+                    key={provider.id}
+                    onPress={() => handleLiveTVProviderPress(provider.name)}
+                    activeOpacity={0.75}
+                    style={[styles.subTabItem, isActive && styles.subTabItemActive]}
+                  >
+                    <Text
+                      style={[styles.subTabText, isActive && styles.subTabTextActive]}
+                    >
+                      {provider.name}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </Animated.View>
+        )}
+
         <Animated.View style={{ flex: 1, zIndex: 1 }}>
           {/* ── Content ── */}
           {error ? (
-            <View style={[styles.errorContainer, { marginTop: 150 }]}>
+            <ScrollView
+              contentContainerStyle={{
+                paddingTop: insets.top + 80,
+                paddingHorizontal: 28,
+                paddingBottom: 40,
+                alignItems: "center",
+                justifyContent: "center",
+                flexGrow: 1,
+              }}
+              style={{ flex: 1 }}
+            >
               <BlurView intensity={20} tint="dark" style={styles.errorCard}>
-                <ExclamationCircleIcon size={42} color={theme.colors.rose} style={{ marginBottom: 12 }} />
+                <AlertCircle size={42} color={theme.colors.rose} style={{ marginBottom: 12 }} />
                 <Text style={styles.errorTitle}>Unable to Load Feed</Text>
                 <Text style={styles.errText}>{error}</Text>
                 <TouchableOpacity style={styles.retryBtn} onPress={init} activeOpacity={0.8}>
                   <Text style={styles.retryTxt}>Try Again</Text>
                 </TouchableOpacity>
               </BlurView>
-            </View>
+            </ScrollView>
           ) : (
-            sections.length > 0 && (
-              <Animated.ScrollView
-                refreshControl={
-                  <RefreshControl
-                    refreshing={refreshing}
-                    onRefresh={onRefresh}
-                    tintColor="transparent"
-                    colors={["transparent"]}
-                    progressBackgroundColor="transparent"
-                    progressViewOffset={insets.top + 65}
-                  />
-                }
-                showsVerticalScrollIndicator={false}
-                contentContainerStyle={{
-                  paddingTop: insets.top + 60,
-                  paddingBottom: 110,
-                }}
-                style={{ flex: 1, overflow: "visible" }}
-                onScroll={Animated.event(
-                  [{ nativeEvent: { contentOffset: { y: scrollY } } }],
-                  { useNativeDriver: true },
-                )}
-                scrollEventThrottle={16}
-              >
-                {/* Hero carousel */}
-                {sectionsLoading || heroItems.length === 0 ? (
-                  <View style={{ alignItems: "center", marginTop: 16 }}>
-                    <SkeletonBox
-                      width={HERO_CARD_WIDTH}
-                      height={HERO_CARD_HEIGHT}
-                      borderRadius={18}
-                    />
-                  </View>
-                ) : (
-                  <Animated.FlatList
-                    ref={flatListRef}
-                    // No forced key here. The old key={`hero-list-${activeTab}`}
-                    // forced a full FlatList remount on every tab press, tearing
-                    // down all items and guaranteed a flash. Data-driven updates
-                    // (loopItems changes) + initialScrolled reset are sufficient.
-                    data={loopItems}
-                    keyExtractor={(_: any, i: number) => String(i)}
-                    horizontal
-                    showsHorizontalScrollIndicator={false}
-                    snapToOffsets={snapOffsets}
-                    decelerationRate="fast"
-                    disableIntervalMomentum={true}
-                    style={{ overflow: "visible" }}
-                    ListHeaderComponent={
-                      <View style={{ width: HERO_OFFSET }} />
-                    }
-                    ListFooterComponent={
-                      <View style={{ width: HERO_OFFSET }} />
-                    }
-                    getItemLayout={(_, index) => ({
-                      length: HERO_SNAP,
-                      offset: HERO_SNAP * index,
-                      index,
-                    })}
-                    contentContainerStyle={{
-                      paddingVertical: 10,
-                      overflow: "visible",
-                    }}
-                    onScroll={Animated.event(
-                      [{ nativeEvent: { contentOffset: { x: scrollX } } }],
-                      { useNativeDriver: true },
-                    )}
-                    scrollEventThrottle={16}
-                    onContentSizeChange={handleContentSizeChange}
-                    onMomentumScrollEnd={handleScrollEnd}
-                    onScrollEndDrag={handleScrollEndDrag}
-                    renderItem={({
-                      item,
-                      index,
-                    }: {
-                      item: MediaItem;
-                      index: number;
-                    }) => (
-                      <HeroCard
-                        item={item}
-                        index={index}
-                        scrollX={scrollX}
-                        onPress={goDetail}
-                        heroSnap={HERO_SNAP}
-                        heroCardWidth={HERO_CARD_WIDTH}
-                        heroCardHeight={HERO_CARD_HEIGHT}
-                        genreSets={GENRE_SETS}
+            <Animated.ScrollView
+              refreshControl={
+                <RefreshControl
+                  refreshing={refreshing}
+                  onRefresh={onRefresh}
+                  tintColor="transparent"
+                  colors={["transparent"]}
+                  progressBackgroundColor="transparent"
+                  progressViewOffset={insets.top + (CATEGORY_TABS[activeTab] === "LiveTV" ? 115 : 65)}
+                />
+              }
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={{
+                paddingTop: insets.top + (CATEGORY_TABS[activeTab] === "LiveTV" ? 110 : 60),
+                paddingBottom: 110,
+                flexGrow: 1,
+              }}
+              style={{ flex: 1, overflow: "visible" }}
+              onScroll={Animated.event(
+                [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+                { useNativeDriver: true },
+              )}
+              scrollEventThrottle={16}
+            >
+                {CATEGORY_TABS[activeTab] !== "LiveTV" && (
+                  <>
+                    {sectionsLoading || heroItems.length === 0 ? (
+                      <View style={{ alignItems: "center", marginTop: 16 }}>
+                        <SkeletonBox
+                          width={HERO_CARD_WIDTH}
+                          height={HERO_CARD_HEIGHT}
+                          borderRadius={18}
+                        />
+                      </View>
+                    ) : (
+                      <Animated.FlatList
+                        ref={flatListRef}
+                        // No forced key here. The old key={`hero-list-${activeTab}`}
+                        // forced a full FlatList remount on every tab press, tearing
+                        // down all items and guaranteed a flash. Data-driven updates
+                        // (loopItems changes) + initialScrolled reset are sufficient.
+                        data={loopItems}
+                        keyExtractor={(_: any, i: number) => String(i)}
+                        horizontal
+                        showsHorizontalScrollIndicator={false}
+                        snapToOffsets={snapOffsets}
+                        decelerationRate="fast"
+                        disableIntervalMomentum={true}
+                        style={{ overflow: "visible" }}
+                        ListHeaderComponent={
+                          <View style={{ width: HERO_OFFSET }} />
+                        }
+                        ListFooterComponent={
+                          <View style={{ width: HERO_OFFSET }} />
+                        }
+                        getItemLayout={(_, index) => ({
+                          length: HERO_SNAP,
+                          offset: HERO_SNAP * index,
+                          index,
+                        })}
+                        contentContainerStyle={{
+                          paddingVertical: 10,
+                          overflow: "visible",
+                        }}
+                        onScroll={Animated.event(
+                          [{ nativeEvent: { contentOffset: { x: scrollX } } }],
+                          { useNativeDriver: true },
+                        )}
+                        scrollEventThrottle={16}
+                        onContentSizeChange={handleContentSizeChange}
+                        onMomentumScrollEnd={handleScrollEnd}
+                        onScrollEndDrag={handleScrollEndDrag}
+                        renderItem={({
+                          item,
+                          index,
+                        }: {
+                          item: MediaItem;
+                          index: number;
+                        }) => (
+                          <HeroCard
+                            item={item}
+                            index={index}
+                            scrollX={scrollX}
+                            onPress={goDetail}
+                            heroSnap={HERO_SNAP}
+                            heroCardWidth={HERO_CARD_WIDTH}
+                            heroCardHeight={HERO_CARD_HEIGHT}
+                            genreSets={GENRE_SETS}
+                          />
+                        )}
                       />
                     )}
-                  />
+
+                    {/* Premium Fluid-Elastic Dots Pagination */}
+                    {!sectionsLoading && heroItems.length > 0 && (
+                      <View
+                        style={[
+                          styles.heroMeta,
+                          { paddingTop: 16, paddingBottom: 16 },
+                        ]}
+                      >
+                        <View
+                          style={{
+                            flexDirection: "row",
+                            alignItems: "center",
+                            position: "relative",
+                            height: 4,
+                          }}
+                        >
+                          {/* Static Base Dots - Pill Shaped and Tighter Spacing */}
+                          {heroItems.map((_, i) => (
+                            <View
+                              key={i}
+                              style={{
+                                width: 8,
+                                height: 4,
+                                borderRadius: 2,
+                                backgroundColor: "rgba(255, 255, 255, 0.2)",
+                                marginHorizontal: 3, // Spacing reduced from 5 to 3
+                              }}
+                            />
+                          ))}
+
+                          {/* Active Sliding Morphing Dot */}
+                          {(() => {
+                            const dotTranslateInputRange: number[] = [];
+                            const dotTranslateOutputRange: number[] = [];
+                            const dotScaleXInputRange: number[] = [];
+                            const dotScaleXOutputRange: number[] = [];
+
+                            const N = heroItems.length;
+                            const totalItems = loopItems.length;
+
+                            for (let k = 0; k < totalItems; k++) {
+                              const origIndex = k % N;
+
+                              // 14 = 8 width + 6 margins (3 left, 3 right)
+                              dotTranslateInputRange.push(k * HERO_SNAP);
+                              dotTranslateOutputRange.push(origIndex * 14);
+
+                              dotScaleXInputRange.push(k * HERO_SNAP);
+                              dotScaleXOutputRange.push(1);
+                              if (k < totalItems - 1) {
+                                dotScaleXInputRange.push((k + 0.5) * HERO_SNAP);
+                                dotScaleXOutputRange.push(2.0); // stretch to double width halfway
+                              }
+                            }
+
+                            const dotScaleX = scrollX.interpolate({
+                              inputRange: dotScaleXInputRange,
+                              outputRange: dotScaleXOutputRange,
+                              extrapolate: "clamp",
+                            });
+
+                            const activeTranslateX = scrollX.interpolate({
+                              inputRange: dotTranslateInputRange,
+                              outputRange: dotTranslateOutputRange,
+                              extrapolate: "clamp",
+                            });
+
+                            return (
+                              <Animated.View
+                                style={{
+                                  position: "absolute",
+                                  left: 0, // perfect alignment for wider dots
+                                  width: 14, // wider base active dot
+                                  height: 4,
+                                  borderRadius: 2,
+                                  backgroundColor: theme.colors.accent,
+                                  transform: [
+                                    { translateX: activeTranslateX },
+                                    { scaleX: dotScaleX },
+                                  ],
+                                }}
+                              />
+                            );
+                          })()}
+                        </View>
+                      </View>
+                    )}
+                  </>
                 )}
 
-                {/* Premium Fluid-Elastic Dots Pagination */}
-                {!sectionsLoading && heroItems.length > 0 && (
-                  <View
-                    style={[
-                      styles.heroMeta,
-                      { paddingTop: 16, paddingBottom: 16 },
-                    ]}
-                  >
-                    <View
-                      style={{
-                        flexDirection: "row",
-                        alignItems: "center",
-                        position: "relative",
-                        height: 4,
-                      }}
-                    >
-                      {/* Static Base Dots - Pill Shaped and Tighter Spacing */}
-                      {heroItems.map((_, i) => (
-                        <View
-                          key={i}
-                          style={{
-                            width: 8,
-                            height: 4,
-                            borderRadius: 2,
-                            backgroundColor: "rgba(255, 255, 255, 0.2)",
-                            marginHorizontal: 3, // Spacing reduced from 5 to 3
-                          }}
-                        />
-                      ))}
-
-                      {/* Active Sliding Morphing Dot */}
-                      {(() => {
-                        const dotTranslateInputRange: number[] = [];
-                        const dotTranslateOutputRange: number[] = [];
-                        const dotScaleXInputRange: number[] = [];
-                        const dotScaleXOutputRange: number[] = [];
-
-                        const N = heroItems.length;
-                        const totalItems = loopItems.length;
-
-                        for (let k = 0; k < totalItems; k++) {
-                          const origIndex = k % N;
-
-                          // 14 = 8 width + 6 margins (3 left, 3 right)
-                          dotTranslateInputRange.push(k * HERO_SNAP);
-                          dotTranslateOutputRange.push(origIndex * 14);
-
-                          dotScaleXInputRange.push(k * HERO_SNAP);
-                          dotScaleXOutputRange.push(1);
-                          if (k < totalItems - 1) {
-                            dotScaleXInputRange.push((k + 0.5) * HERO_SNAP);
-                            dotScaleXOutputRange.push(2.0); // stretch to double width halfway
-                          }
-                        }
-
-                        const dotScaleX = scrollX.interpolate({
-                          inputRange: dotScaleXInputRange,
-                          outputRange: dotScaleXOutputRange,
-                          extrapolate: "clamp",
-                        });
-
-                        const activeTranslateX = scrollX.interpolate({
-                          inputRange: dotTranslateInputRange,
-                          outputRange: dotTranslateOutputRange,
-                          extrapolate: "clamp",
-                        });
-
-                        return (
-                          <Animated.View
-                            style={{
-                              position: "absolute",
-                              left: 0, // perfect alignment for wider dots
-                              width: 14, // wider base active dot
-                              height: 4,
-                              borderRadius: 2,
-                              backgroundColor: theme.colors.accent,
-                              transform: [
-                                { translateX: activeTranslateX },
-                                { scaleX: dotScaleX },
-                              ],
-                            }}
-                          />
-                        );
-                      })()}
-                    </View>
+                {/* If feed loaded empty, render a helpful empty state card */}
+                {!sectionsLoading && sections.length === 0 && !sectionError && (
+                  <View style={[styles.errorContainer, { marginTop: 40 }]}>
+                    <BlurView intensity={20} tint="dark" style={styles.errorCard}>
+                      <AlertCircle size={42} color={theme.colors.textMuted} style={{ marginBottom: 12 }} />
+                      <Text style={styles.errorTitle}>No Channels Found</Text>
+                      <Text style={styles.errText}>
+                        {CATEGORY_TABS[activeTab] === "LiveTV"
+                          ? `No channels are currently available for ${activeLiveTVProvider || "this provider"}.`
+                          : "No categories or media items found."}
+                      </Text>
+                      <TouchableOpacity
+                        style={styles.retryBtn}
+                        onPress={() => loadSections(true)}
+                        activeOpacity={0.8}
+                      >
+                        <Text style={styles.retryTxt}>Reload Feed</Text>
+                      </TouchableOpacity>
+                    </BlurView>
                   </View>
                 )}
 
                 {/* Section rows (skip the hero source section) */}
                 {renderedSections}
               </Animated.ScrollView>
-            )
           )}
         </Animated.View>
       </View>
@@ -1129,7 +1500,7 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
           ]}
           pointerEvents={loading ? "auto" : "none"}
         >
-          <HomeSkeletonScreen />
+          <HomeSkeletonScreen isLive={CATEGORY_TABS[activeTab] === "LiveTV" || loadingCategory === "LiveTV"} />
         </Animated.View>
       )}
 
@@ -1408,5 +1779,42 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '800',
     letterSpacing: 1.5,
+  },
+  subHeaderContainer: {
+    position: "absolute",
+    left: 20,
+    right: 20,
+    height: 38,
+    borderRadius: 19,
+    overflow: "hidden",
+    zIndex: 140,
+    backgroundColor: "rgba(20, 18, 24, 0.45)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.05)",
+  },
+  subTabRow: {
+    paddingHorizontal: 12,
+    alignItems: "center",
+    gap: 6,
+  },
+  subTabItem: {
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 12,
+    backgroundColor: "transparent",
+  },
+  subTabItemActive: {
+    backgroundColor: "rgba(0, 71, 255, 0.15)",
+    borderWidth: 1,
+    borderColor: "rgba(0, 71, 255, 0.3)",
+  },
+  subTabText: {
+    color: "#8E8D92",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  subTabTextActive: {
+    color: "#ffffff",
+    fontWeight: "700",
   },
 });

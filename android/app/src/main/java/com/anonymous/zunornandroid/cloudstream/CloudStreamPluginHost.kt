@@ -45,30 +45,142 @@ class CloudStreamPluginHost(val appContext: ReactApplicationContext) {
 
         // Global OkHttpClient Interceptor Patch to block/fast-fail dead domains
         try {
-            val apiKtCls = Class.forName("com.lagradost.cloudstream3.MainAPIKt")
-            val getAppMethod = apiKtCls.getDeclaredMethod("getApp")
-            getAppMethod.isAccessible = true
-            val appInstance = getAppMethod.invoke(null)
+            val niceHttpRequestsCls = Class.forName("com.lagradost.nicehttp.Requests")
+            val clientField = niceHttpRequestsCls.getDeclaredField("baseClient")
+            clientField.isAccessible = true
+            
+            val searchClasses = listOf(
+                "com.lagradost.cloudstream3.MainAPIKt",
+                "com.lagradost.cloudstream3.MainAPI",
+                "com.lagradost.cloudstream3.MainActivityKt",
+                "com.lagradost.cloudstream3.MainActivity",
+                "com.lagradost.cloudstream3.appKt",
+                "com.lagradost.cloudstream3.AppKt",
+                "com.lagradost.cloudstream3.utils.AppUtilsKt",
+                "com.lagradost.cloudstream3.utils.AppUtils",
+                "com.lagradost.cloudstream3.mvvm.ArchComponentExtKt"
+            )
+            
+            var appInstance: Any? = null
+            var foundClass: String? = null
+            var isField = false
+            var foundMemberName: String? = null
+            
+            for (className in searchClasses) {
+                try {
+                    val cls = Class.forName(className)
+                    // Search fields
+                    for (field in cls.getDeclaredFields()) {
+                        if (niceHttpRequestsCls.isAssignableFrom(field.type)) {
+                            field.isAccessible = true
+                            val value = field.get(null)
+                            if (value != null) {
+                                appInstance = value
+                                foundClass = className
+                                isField = true
+                                foundMemberName = field.name
+                                break
+                            }
+                        }
+                    }
+                    if (appInstance != null) break
+                    
+                    // Search methods
+                    for (method in cls.getDeclaredMethods()) {
+                        if (niceHttpRequestsCls.isAssignableFrom(method.returnType) && method.parameterTypes.isEmpty()) {
+                            method.isAccessible = true
+                            val value = method.invoke(null)
+                            if (value != null) {
+                                appInstance = value
+                                foundClass = className
+                                isField = false
+                                foundMemberName = method.name
+                                break
+                            }
+                        }
+                    }
+                    if (appInstance != null) break
+                } catch (_: Exception) {}
+            }
             
             if (appInstance != null) {
-                val requestsClass = Class.forName("com.lagradost.nicehttp.Requests")
-                val clientField = requestsClass.getDeclaredField("okHttpClient")
-                clientField.isAccessible = true
+                Log.i(TAG, "Found NiceHttp Requests instance in $foundClass via ${if (isField) "field" else "method"} $foundMemberName: $appInstance")
                 val oldClient = clientField.get(appInstance) as? okhttp3.OkHttpClient
                 if (oldClient != null) {
+                    val trustAllCerts = arrayOf<javax.net.ssl.TrustManager>(
+                        object : javax.net.ssl.X509TrustManager {
+                            override fun checkClientTrusted(chain: Array<java.security.cert.X509Certificate>, authType: String) {}
+                            override fun checkServerTrusted(chain: Array<java.security.cert.X509Certificate>, authType: String) {}
+                            override fun getAcceptedIssuers(): Array<java.security.cert.X509Certificate> = arrayOf()
+                        }
+                    )
+                    val sslContext = javax.net.ssl.SSLContext.getInstance("SSL")
+                    sslContext.init(null, trustAllCerts, java.security.SecureRandom())
+                    val sslSocketFactory = sslContext.socketFactory
+
                     val patchedClient = oldClient.newBuilder()
-                        .connectTimeout(3, java.util.concurrent.TimeUnit.SECONDS)
-                        .readTimeout(3, java.util.concurrent.TimeUnit.SECONDS)
-                        .writeTimeout(3, java.util.concurrent.TimeUnit.SECONDS)
+                        .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                        .readTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                        .writeTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                        .sslSocketFactory(sslSocketFactory, trustAllCerts[0] as javax.net.ssl.X509TrustManager)
+                        .hostnameVerifier { _, _ -> true }
                         .addInterceptor { chain ->
                             val request = chain.request()
-                            val host = request.url.host
-                            if (host.contains("123moviesfree9.cv") || 
-                                host.equals("123moviesfree9.cv", ignoreCase = true) ||
-                                host.endsWith(".123moviesfree9.cv", ignoreCase = true)) {
-                                throw java.io.IOException("Blocked/Offline domain: $host")
+                            val urlString = request.url.toString()
+                            
+                            // 1. Redirection for dead/404 GitHub playlists
+                            val targetRequest = when {
+                                urlString.contains("streamed-su-sports") -> {
+                                    Log.i("ZunoPlugin", "Redirecting streamed-su-sports request to public sports.m3u")
+                                    request.newBuilder().url("https://iptv-org.github.io/iptv/categories/sports.m3u").build()
+                                }
+                                urlString.contains("iptv-jp") -> {
+                                    Log.i("ZunoPlugin", "Redirecting iptv-jp request to public jp.m3u")
+                                    request.newBuilder().url("https://iptv-org.github.io/iptv/countries/jp.m3u").build()
+                                }
+                                urlString.contains("PiratesTvPlus") -> {
+                                    Log.i("ZunoPlugin", "Redirecting PiratesTvPlus request to public movies.m3u")
+                                    request.newBuilder().url("https://iptv-org.github.io/iptv/categories/movies.m3u").build()
+                                }
+                                else -> request
                             }
-                            chain.proceed(request)
+                            
+                            val response = chain.proceed(targetRequest)
+                            
+                            // 2. Response body modifications
+                            val targetUrl = targetRequest.url.toString()
+                            if (response.isSuccessful) {
+                                when {
+                                    targetUrl.contains("fancode.json") -> {
+                                        val body = response.body
+                                        if (body != null) {
+                                            val content = body.string()
+                                            val updatedContent = content.replace("\"team\":", "\"teams\":")
+                                            Log.i("ZunoPlugin", "Patched fancode.json: replaced 'team' with 'teams'")
+                                            val newBody = okhttp3.ResponseBody.create(body.contentType(), updatedContent)
+                                            return@addInterceptor response.newBuilder().body(newBody).build()
+                                        }
+                                    }
+                                    targetUrl.contains("Sony%20IPTV%20Live.m3u") || targetUrl.contains("Sony IPTV Live.m3u") -> {
+                                        val body = response.body
+                                        if (body != null) {
+                                            val content = body.string()
+                                            val index = content.indexOf("#EXTM3U")
+                                            if (index != -1) {
+                                                val remaining = content.substring(index)
+                                                val cleanLines = remaining.split("\n").map { it.trim() }.filter { line ->
+                                                    line.isNotEmpty() && (line.startsWith("#") || line.startsWith("http://") || line.startsWith("https://") || line.startsWith("rtmp://") || line.startsWith("rtsp://"))
+                                                }
+                                                val updatedContent = cleanLines.joinToString("\n")
+                                                Log.i("ZunoPlugin", "Cleaned up Sony IPTV playlist: kept ${cleanLines.size} valid lines")
+                                                val newBody = okhttp3.ResponseBody.create(body.contentType(), updatedContent)
+                                                return@addInterceptor response.newBuilder().body(newBody).build()
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            response
                         }
                         .dns(object : okhttp3.Dns {
                             private val dohClient = okhttp3.OkHttpClient.Builder()
@@ -107,24 +219,11 @@ class CloudStreamPluginHost(val appContext: ReactApplicationContext) {
                             }
 
                             override fun lookup(hostname: String): List<java.net.InetAddress> {
-                                return try {
-                                    val systemAddresses = okhttp3.Dns.SYSTEM.lookup(hostname)
-                                    // Block known ISP redirect/block pages by their IPs
-                                    for (addr in systemAddresses) {
-                                        val ip = addr.hostAddress
-                                        if (ip == "49.44.79.236") {
-                                            Log.w(TAG, "ISP block detected for $hostname (redirected to $ip), retrying via DoH...")
-                                            return resolveViaDoH(hostname)
-                                                ?: throw java.io.IOException("DNS blocked and DoH also failed for $hostname")
-                                        }
-                                    }
-                                    systemAddresses
-                                } catch (e: java.net.UnknownHostException) {
-                                    // System DNS resolution failed — ISP may be blocking. Try DoH.
-                                    Log.w(TAG, "System DNS failed for $hostname, retrying via Cloudflare DoH...")
-                                    resolveViaDoH(hostname)
-                                        ?: throw java.io.IOException("Could not resolve $hostname (DNS blocked, DoH also failed)")
+                                if (hostname == "localhost" || hostname == "127.0.0.1" || hostname.endsWith(".local")) {
+                                    return okhttp3.Dns.SYSTEM.lookup(hostname)
                                 }
+                                resolveViaDoH(hostname)?.let { return it }
+                                return okhttp3.Dns.SYSTEM.lookup(hostname)
                             }
                         })
                         .build()
@@ -134,6 +233,19 @@ class CloudStreamPluginHost(val appContext: ReactApplicationContext) {
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to patch NiceHttp OkHttpClient: ${e.message}", e)
+            try {
+                val requestsClass = Class.forName("com.lagradost.nicehttp.Requests")
+                Log.i("ZunoReflection", "Requests class fields:")
+                for (field in requestsClass.declaredFields) {
+                    Log.i("ZunoReflection", " - ${field.name} (${field.type.name})")
+                }
+                Log.i("ZunoReflection", "Requests class methods:")
+                for (method in requestsClass.declaredMethods) {
+                    Log.i("ZunoReflection", " - ${method.name} -> ${method.returnType.name}")
+                }
+            } catch (t: Throwable) {
+                Log.e("ZunoReflection", "Failed to print Requests class info: ${t.message}")
+            }
         }
     }
 
@@ -299,6 +411,47 @@ class CloudStreamPluginHost(val appContext: ReactApplicationContext) {
                 Log.e(TAG, "Failed to load plugin asset $fileName", e)
             }
         }
+        Thread {
+            try {
+                Thread.sleep(3000)
+                Log.i("ZunoPlugin", "=== LIVE TV DIAGNOSTICS ===")
+                val tvProviders = listOf("CloudPlay", "IPTV Player", "PublicSportsIPTV", "Sports IPTV", "Pirate IPTV", "Sony IPTV", "Japan IPTV")
+                for (name in tvProviders) {
+                    val api = apiByName(name)
+                    if (api == null) {
+                        Log.e("ZunoPlugin", "Provider not found: $name")
+                        continue
+                    }
+                    Log.i("ZunoPlugin", "Diagnosing provider: $name")
+                    Log.i("ZunoPlugin", " - mainUrl: ${api.mainUrl}")
+                    Log.i("ZunoPlugin", " - mainPage size: ${api.mainPage.size}")
+                    for (mp in api.mainPage) {
+                        try {
+                            Log.i("ZunoPlugin", " - Calling getMainPage for page '${mp.name}'...")
+                            val resp = kotlinx.coroutines.runBlocking {
+                                api.getMainPage(1, com.lagradost.cloudstream3.MainPageRequest(mp.name, mp.data, false))
+                            }
+                            if (resp == null) {
+                                Log.w("ZunoPlugin", "   -> returned null response")
+                            } else {
+                                Log.i("ZunoPlugin", "   -> success! items sections count: ${resp.items.size}")
+                                for (sec in resp.items) {
+                                    Log.i("ZunoPlugin", "     * Section: '${sec.name}' | items count: ${sec.list.size}")
+                                    if (sec.list.isNotEmpty()) {
+                                        Log.i("ZunoPlugin", "       first item: name='${sec.list[0].name}', url='${sec.list[0].url}'")
+                                    }
+                                }
+                            }
+                        } catch (t: Throwable) {
+                            Log.e("ZunoPlugin", "   -> FAILED: ${t.javaClass.name}: ${t.message}", t)
+                        }
+                    }
+                }
+                Log.i("ZunoPlugin", "==============================")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to run Live TV diagnostics", e)
+            }
+        }.start()
         return allProviders
     }
 
@@ -351,17 +504,25 @@ class CloudStreamPluginHost(val appContext: ReactApplicationContext) {
     }
 
     suspend fun getMainPageJson(providerName: String, page: Int): String {
+        Log.i("ZunoPlugin", "getMainPageJson called for $providerName page $page")
         val api = apiByName(providerName) ?: run {
+            Log.e("ZunoPlugin", "getMainPageJson failed: provider $providerName not found")
             return JSONObject(mapOf("sections" to JSONArray(), "provider" to providerName)).toString()
         }
         val sections = JSONArray()
         for (mp in api.mainPage) {
             try {
+                Log.i("ZunoPlugin", "getMainPageJson calling api.getMainPage for ${mp.name}")
                 val resp = api.getMainPage(page, MainPageRequest(mp.name, mp.data, false))
-                if (resp == null) continue
+                if (resp == null) {
+                    Log.i("ZunoPlugin", "getMainPageJson: api.getMainPage returned null")
+                    continue
+                }
+                Log.i("ZunoPlugin", "getMainPageJson: api.getMainPage returned ${resp.items.size} sections")
                 for (list in resp.items) {
                     val items = JSONArray()
                     for (sr in list.list) items.put(cardJson(sr, api.name))
+                    Log.i("ZunoPlugin", "  - Section ${list.name}: ${items.length()} items")
                     if (items.length() == 0) continue
                     sections.put(JSONObject().apply {
                         put("name", list.name)
@@ -369,13 +530,15 @@ class CloudStreamPluginHost(val appContext: ReactApplicationContext) {
                     })
                 }
             } catch (t: Throwable) {
-                Log.e(TAG, "getMainPage ${api.name} '${mp.name}': ${t.javaClass.simpleName}: ${t.message}")
+                Log.e("ZunoPlugin", "getMainPageJson failed for ${api.name} '${mp.name}': ${t.javaClass.simpleName}: ${t.message}", t)
             }
         }
-        return JSONObject().apply {
+        val result = JSONObject().apply {
             put("provider", api.name)
             put("sections", sections)
         }.toString()
+        Log.i("ZunoPlugin", "getMainPageJson returning: $result")
+        return result
     }
 
     suspend fun searchJson(providerName: String, query: String): String {
@@ -491,10 +654,13 @@ class CloudStreamPluginHost(val appContext: ReactApplicationContext) {
     }
 
     suspend fun loadLinksJson(providerName: String, data: String): String {
+        Log.i("ZunoPlugin", "loadLinksJson called for $providerName with data: $data")
         val api = apiByName(providerName) ?: run {
+            Log.e("ZunoPlugin", "loadLinksJson failed: Provider not found: $providerName")
             return """{"error":"Provider not found: $providerName"}"""
         }
         val resolvedData = resolveUrl(api, data)
+        Log.i("ZunoPlugin", "loadLinksJson resolvedData: $resolvedData")
         val videoSources = JSONArray()
         val subs = JSONArray()
         var error: String? = null
@@ -504,6 +670,7 @@ class CloudStreamPluginHost(val appContext: ReactApplicationContext) {
                 isCasting = false,
                 subtitleCallback = { sf: SubtitleFile ->
                     if (sf.url.isNotEmpty()) {
+                        Log.i("ZunoPlugin", "loadLinksJson subtitle found: lang=${sf.lang}, url=${sf.url}")
                         val subObj = JSONObject().apply {
                             put("lang", sf.lang)
                             put("url", sf.url)
@@ -527,6 +694,7 @@ class CloudStreamPluginHost(val appContext: ReactApplicationContext) {
                 },
                 callback = { link: ExtractorLink ->
                     if (link.url.isNotEmpty()) {
+                        Log.i("ZunoPlugin", "loadLinksJson source found: name=${link.name}, url=${link.url}, referer=${link.referer}")
                         val headers = JSONObject()
                         if (link.referer.isNotEmpty()) headers.put("Referer", link.referer)
                         try {
@@ -563,14 +731,17 @@ class CloudStreamPluginHost(val appContext: ReactApplicationContext) {
                 }
             )
         } catch (t: Throwable) {
+            Log.e("ZunoPlugin", "loadLinksJson failed for $providerName: ${t.javaClass.name}: ${t.message}", t)
             val msg = "${t.javaClass.simpleName}: ${t.message}"
             error = msg
         }
-        return JSONObject().apply {
+        val resultJson = JSONObject().apply {
             put("videoUrl", if (videoSources.length() > 0) videoSources.getJSONObject(0).optString("url") else null)
             put("sources", videoSources)
             put("subtitles", subs)
             if (error != null) put("error", error)
         }.toString()
+        Log.i("ZunoPlugin", "loadLinksJson returning: $resultJson")
+        return resultJson
     }
 }
