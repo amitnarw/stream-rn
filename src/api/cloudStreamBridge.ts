@@ -299,6 +299,40 @@ export async function getMainPage(
   }
 
   if (category === 'LiveTV') {
+    if (providerName === 'USA TV Next') {
+      try {
+        const resp = await fetch('https://raw.githubusercontent.com/yowmamasita/usa-tv-next/main/catalog/tv/all.json');
+        const catalog = await resp.json();
+        
+        // Group by genre
+        const sectionsMap = new Map<string, any[]>();
+        (catalog.metas ?? []).forEach((meta: any) => {
+          const mainGenre = meta.genre || 'Local';
+          if (!sectionsMap.has(mainGenre)) {
+            sectionsMap.set(mainGenre, []);
+          }
+          sectionsMap.get(mainGenre)!.push({
+            provider: 'USA TV Next',
+            url: JSON.stringify({ id: meta.id, streams: meta.streams }),
+            title: meta.name ?? 'Unknown Channel',
+            posterUrl: meta.logo ?? null,
+            type: 'live'
+          });
+        });
+        
+        const resultSections = Array.from(sectionsMap.entries()).map(([name, items]) => ({
+          name,
+          items
+        }));
+
+        await setCache(cacheKey, resultSections);
+        return resultSections;
+      } catch (err) {
+        console.warn(`Failed to fetch USA TV Next catalog:`, err);
+        return [];
+      }
+    }
+
     try {
       const targetProvider = providerName || 'CloudPlay';
       const json = await CloudStreamModule.getMainPage(targetProvider, page);
@@ -879,6 +913,32 @@ export async function loadLinks(
     );
 
     return result;
+  }
+
+  if (providerName === 'USA TV Next') {
+    try {
+      const parsed = JSON.parse(data);
+      const streams = parsed.streams ?? [];
+      const sources = streams.map((s: any) => ({
+        quality: s.name || "HD",
+        url: s.url,
+        type: "hls",
+        headers: {},
+        provider: "USA TV Next",
+        host: s.description || "USA TV Next"
+      }));
+      const result: LinksResult = {
+        sources,
+        subtitles: []
+      };
+      
+      linksCache.set(cacheKey, { timestamp: now, result });
+      onAllDone?.();
+      return result;
+    } catch (err) {
+      console.warn("Failed to parse USA TV Next streams:", err);
+      throw new Error("No playable sources found");
+    }
   }
 
   const json = await CloudStreamModule.loadLinks(providerName, data);

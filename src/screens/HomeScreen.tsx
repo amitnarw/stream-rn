@@ -22,12 +22,13 @@ import {
   RefreshControl,
   Alert,
   Modal,
+  TextInput,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BlurView, BlurTargetView } from "expo-blur";
-import Reanimated, { FadeInUp, FadeOut, Easing as ReanimatedEasing } from "react-native-reanimated";
+import Reanimated, { FadeInUp, FadeIn, FadeOut, Easing as ReanimatedEasing } from "react-native-reanimated";
 import { LinearGradient } from "expo-linear-gradient";
-import { WifiOff, AlertCircle } from "lucide-react-native";
+import { WifiOff, AlertCircle, RotateCw } from "lucide-react-native";
 import type { HomeSection, MediaItem, PluginProvider } from "../types/plugin";
 import * as bridge from "../api/cloudStreamBridge";
 import { useTransition, useTransitionActions } from "../context/TransitionContext";
@@ -67,7 +68,7 @@ const HERO_SNAP = SCREEN_WIDTH * 0.77;
 const HERO_OFFSET = (SCREEN_WIDTH - HERO_SNAP) / 2;
 
 // Card dimensions for skeletons and styling
-const S_CARD_W = (SCREEN_WIDTH - 40 - 16) / 3;
+const S_CARD_W = (SCREEN_WIDTH - 40 - 16) / 3 - 2;
 const S_CARD_H = S_CARD_W * 1.5;
 const CW_CARD_W = S_CARD_W * 1.2;
 
@@ -444,6 +445,8 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
   const heroIdxRef = useRef(0);
   heroIdxRef.current = heroIdx;
 
+  const lastLoadRequestRef = useRef<{ category: string; provider: string } | null>(null);
+
   const [allProviders, setAllProviders] = useState<PluginProvider[]>([
     { id: "CloudPlay", name: "CloudPlay", url: "", hasMainPage: true, hasSearch: false },
     { id: "IPTV Player", name: "IPTV Player", url: "", hasMainPage: true, hasSearch: false },
@@ -452,15 +455,19 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
     { id: "Pirate IPTV", name: "Pirate IPTV", url: "", hasMainPage: true, hasSearch: false },
     { id: "Sony IPTV", name: "Sony IPTV", url: "", hasMainPage: true, hasSearch: false },
     { id: "Japan IPTV", name: "Japan IPTV", url: "", hasMainPage: true, hasSearch: false },
+    { id: "USA TV Next", name: "USA TV Next", url: "", hasMainPage: true, hasSearch: false },
   ]);
   const [activeLiveTVProvider, setActiveLiveTVProvider] = useState<string>("IPTV Player");
   const [savedChannels, setSavedChannels] = useState<MediaItem[]>([]);
   const [resolvingLiveChannel, setResolvingLiveChannel] = useState<string | null>(null);
   const [loadingCategory, setLoadingCategory] = useState<string>("");
+  const [liveTVSearchQuery, setLiveTVSearchQuery] = useState("");
+  const [selectedCategory, setSelectedCategory] = useState("All");
+  const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
 
   const liveTVProviders = useMemo(() => {
     return allProviders.filter((p) =>
-      ["cloudplay", "iptvplayer", "publicsportsiptv", "quickiptv"].includes(
+      ["cloudplay", "iptvplayer", "publicsportsiptv", "usa tv next"].includes(
         p.name.toLowerCase(),
       ) || p.name.toLowerCase().includes("iptv"),
     );
@@ -563,7 +570,12 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
       try {
         const provs = await bridge.getProviders();
         if (provs && provs.length > 0) {
-          setAllProviders(provs);
+          const hasUsaTv = provs.some(p => p.name === "USA TV Next");
+          const customProvs = hasUsaTv ? provs : [
+            ...provs,
+            { id: "USA TV Next", name: "USA TV Next", url: "", hasMainPage: true, hasSearch: false }
+          ];
+          setAllProviders(customProvs);
         }
       } catch (e) {
         console.warn("Failed to load providers:", e);
@@ -803,8 +815,13 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
     } catch (_) {}
   }
 
+  // Load plugins exactly once on mount
   useEffect(() => {
     init();
+  }, []);
+
+  // Update history & focus listener
+  useEffect(() => {
     const unsub = navigation.addListener('focus', () => {
       // Restore blur target whenever the screen regains focus
       setGlobalBlurTarget(blurTargetRef.current);
@@ -834,9 +851,14 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
       const provs = await bridge.loadPlugins();
       let defaultLiveProvider = "";
       if (provs && provs.length > 0) {
-        setAllProviders(provs);
-        const liveProvs = provs.filter((p) =>
-          ["cloudplay", "iptvplayer", "publicsportsiptv", "quickiptv"].includes(
+        const hasUsaTv = provs.some(p => p.name === "USA TV Next");
+        const customProvs = hasUsaTv ? provs : [
+          ...provs,
+          { id: "USA TV Next", name: "USA TV Next", url: "", hasMainPage: true, hasSearch: false }
+        ];
+        setAllProviders(customProvs);
+        const liveProvs = customProvs.filter((p) =>
+          ["cloudplay", "iptvplayer", "publicsportsiptv", "usa tv next"].includes(
             p.name.toLowerCase(),
           ) || p.name.toLowerCase().includes("iptv"),
         );
@@ -865,22 +887,34 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
     force: boolean = false,
     categoryName: string = CATEGORY_TABS[activeTab],
     liveTVProvider: string = activeLiveTVProvider,
+    showLoader: boolean = !force,
   ) {
-    if (!force) {
+    const currentProviderName = categoryName === "LiveTV"
+      ? (liveTVProvider || (liveTVProviders[0]?.name || ""))
+      : "";
+    lastLoadRequestRef.current = { category: categoryName, provider: currentProviderName };
+
+    if (showLoader) {
       setSectionsLoading(true);
       setLoadingCategory(categoryName);
     }
     setSectionError(null);
     try {
-      const targetProvider = categoryName === "LiveTV"
-        ? (liveTVProvider || (liveTVProviders[0]?.name || ""))
-        : "";
+      const targetProvider = currentProviderName;
       const secs: HomeSection[] = await bridge.getMainPage(
         targetProvider,
         1,
         force,
         categoryName,
       );
+
+      // Check if this request is still the most recent active one
+      if (
+        lastLoadRequestRef.current?.category !== categoryName ||
+        (categoryName === "LiveTV" && lastLoadRequestRef.current?.provider !== targetProvider)
+      ) {
+        return;
+      }
 
       if (categoryName === "LiveTV") {
         const saved = await loadSavedChannelsList();
@@ -939,15 +973,27 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
         setFallbackRecommendations(unique.slice(0, 10));
       }
     } catch (e: any) {
-      setSectionError(cleanGeneralError(e));
+      if (
+        lastLoadRequestRef.current?.category === categoryName &&
+        (categoryName !== "LiveTV" || lastLoadRequestRef.current?.provider === currentProviderName)
+      ) {
+        setSectionError(cleanGeneralError(e));
+      }
     } finally {
-      setSectionsLoading(false);
-      setLoadingCategory("");
+      if (
+        lastLoadRequestRef.current?.category === categoryName &&
+        (categoryName !== "LiveTV" || lastLoadRequestRef.current?.provider === currentProviderName)
+      ) {
+        setSectionsLoading(false);
+        setLoadingCategory("");
+      }
     }
   }
 
   const handleTabPress = (index: number) => {
     setActiveTab(index);
+    setLiveTVSearchQuery("");
+    setSelectedCategory("All");
     sectionsLoadedRef.current = false;
     const category = CATEGORY_TABS[index];
     const targetProvider = category === "LiveTV" ? (activeLiveTVProvider || (liveTVProviders[0]?.name || "")) : "";
@@ -956,6 +1002,8 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
 
   const handleLiveTVProviderPress = (providerName: string) => {
     setActiveLiveTVProvider(providerName);
+    setLiveTVSearchQuery("");
+    setSelectedCategory("All");
     sectionsLoadedRef.current = false;
     loadSections(false, "LiveTV", providerName);
   };
@@ -1036,9 +1084,222 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
         </View>
       );
     }
-    const displaySections = CATEGORY_TABS[activeTab] === "LiveTV"
-      ? sections
-      : sections.filter((_: HomeSection, i: number) => i !== heroSectionIdx);
+    if (CATEGORY_TABS[activeTab] === "LiveTV") {
+      const categoriesList = sections.map((s) => s.name);
+      
+      let filtered: MediaItem[] = [];
+      if (selectedCategory === "All") {
+        const seen = new Set<string>();
+        sections.forEach((sec) => {
+          (sec.items ?? []).forEach((item) => {
+            if (!seen.has(item.url)) {
+              seen.add(item.url);
+              filtered.push(item);
+            }
+          });
+        });
+      } else {
+        const sec = sections.find((s) => s.name === selectedCategory);
+        if (sec) {
+          filtered = [...(sec.items ?? [])];
+        }
+      }
+
+      if (liveTVSearchQuery.trim()) {
+        const q = liveTVSearchQuery.toLowerCase();
+        filtered = filtered.filter((item) => item.title.toLowerCase().includes(q));
+      }
+
+      return (
+        <View style={{ paddingBottom: 40, position: "relative", zIndex: 10 }}>
+          {showCategoryDropdown && (
+            <Pressable
+              style={{
+                position: "absolute",
+                top: -SCREEN_HEIGHT,
+                bottom: -SCREEN_HEIGHT,
+                left: -SCREEN_HEIGHT,
+                right: -SCREEN_HEIGHT,
+                zIndex: 90,
+              }}
+              onPress={() => setShowCategoryDropdown(false)}
+            />
+          )}
+
+          <View style={styles.liveTVControlRow}>
+            <View style={styles.liveTVSearchContainer}>
+              <TextInput
+                style={styles.liveTVSearchInput}
+                placeholder="Search channels..."
+                placeholderTextColor="#8E8D92"
+                value={liveTVSearchQuery}
+                onChangeText={setLiveTVSearchQuery}
+              />
+            </View>
+            
+            <TouchableOpacity
+              style={styles.liveTVDropdown}
+              onPress={() => setShowCategoryDropdown(!showCategoryDropdown)}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.liveTVDropdownText} numberOfLines={1}>
+                {selectedCategory === "All" ? "All Categories" : selectedCategory}
+              </Text>
+              <Text style={{ color: "#8E8D92", fontSize: 10, marginLeft: 6 }}>▼</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.liveTVRefreshButton}
+              onPress={() => loadSections(true, "LiveTV", activeLiveTVProvider, true)}
+              disabled={sectionsLoading}
+              activeOpacity={0.75}
+            >
+              {sectionsLoading ? (
+                <ActivityIndicator size="small" color="#ffffff" />
+              ) : (
+                <RotateCw size={16} color="#ffffff" />
+              )}
+            </TouchableOpacity>
+          </View>
+
+          {/* Floating Modern Dropdown */}
+          {showCategoryDropdown && (
+            <Reanimated.View
+              entering={FadeIn.duration(200)}
+              exiting={FadeOut.duration(150)}
+              style={[styles.floatingDropdown, { top: 60, right: 68, zIndex: 100 }]}
+            >
+              <LinearGradient
+                colors={["#1c1c22", "#0f0f12"]}
+                style={StyleSheet.absoluteFillObject}
+              />
+              <ScrollView
+                nestedScrollEnabled={true}
+                showsVerticalScrollIndicator={true}
+                style={{ maxHeight: 280 }}
+              >
+                <TouchableOpacity
+                  style={[
+                    styles.dropdownItem,
+                    selectedCategory === "All" && styles.dropdownItemSelected,
+                  ]}
+                  onPress={() => {
+                    setSelectedCategory("All");
+                    setShowCategoryDropdown(false);
+                  }}
+                >
+                  <View style={styles.dropdownItemLeft}>
+                    <View
+                      style={[
+                        styles.seasonNumberBox,
+                        selectedCategory === "All" && styles.seasonNumberBoxSelected,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.seasonNumberText,
+                          selectedCategory === "All" && styles.seasonNumberTextSelected,
+                          { fontSize: 10 }
+                        ]}
+                      >
+                        ALL
+                      </Text>
+                    </View>
+                    <Text
+                      style={[
+                        styles.dropdownItemText,
+                        selectedCategory === "All" && styles.dropdownItemTextSelected,
+                      ]}
+                    >
+                      All Categories
+                    </Text>
+                  </View>
+                  {selectedCategory === "All" && (
+                    <Text style={styles.checkmark}>✓</Text>
+                  )}
+                </TouchableOpacity>
+
+                {categoriesList.map((cat) => (
+                  <TouchableOpacity
+                    key={cat}
+                    style={[
+                      styles.dropdownItem,
+                      selectedCategory === cat && styles.dropdownItemSelected,
+                    ]}
+                    onPress={() => {
+                      setSelectedCategory(cat);
+                      setShowCategoryDropdown(false);
+                    }}
+                  >
+                    <View style={styles.dropdownItemLeft}>
+                      <View
+                        style={[
+                          styles.seasonNumberBox,
+                          selectedCategory === cat && styles.seasonNumberBoxSelected,
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.seasonNumberText,
+                            selectedCategory === cat && styles.seasonNumberTextSelected,
+                            { fontSize: 10 }
+                          ]}
+                        >
+                          {cat.substring(0, 2).toUpperCase()}
+                        </Text>
+                      </View>
+                      <Text
+                        style={[
+                          styles.dropdownItemText,
+                          selectedCategory === cat && styles.dropdownItemTextSelected,
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {cat}
+                      </Text>
+                    </View>
+                    {selectedCategory === cat && (
+                      <Text style={styles.checkmark}>✓</Text>
+                    )}
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </Reanimated.View>
+          )}
+
+          {filtered.length === 0 ? (
+            <View style={{ alignItems: "center", marginTop: 40, paddingHorizontal: 20 }}>
+              <Text style={{ color: "#8E8D92", fontSize: 13, textAlign: "center" }}>
+                No channels match your search or filter.
+              </Text>
+            </View>
+          ) : (
+            <View style={styles.gridContainer}>
+              {filtered.map((item, idx) => (
+                <ChannelCard
+                  key={item.url + idx}
+                  item={item}
+                  onPress={(i) =>
+                    goDetail(i, {
+                      x: 0,
+                      y: 0,
+                      width: S_CARD_W,
+                      height: S_CARD_W,
+                      borderRadius: 22,
+                    })
+                  }
+                  isSaved={savedUrls.has(item.url)}
+                  onToggleSave={handleToggleSaveChannel}
+                  width={S_CARD_W}
+                />
+              ))}
+            </View>
+          )}
+        </View>
+      );
+    }
+
+    const displaySections = sections.filter((_: HomeSection, i: number) => i !== heroSectionIdx);
 
     return displaySections.map((section: HomeSection, idx: number) => (
       <SectionRow
@@ -1047,7 +1308,7 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
         navigation={navigation}
         goDetail={goDetail}
         onDeleteHistoryItem={handleDeleteHistoryItem}
-        isLiveTab={CATEGORY_TABS[activeTab] === "LiveTV"}
+        isLiveTab={false}
         savedUrls={savedUrls}
         onToggleSave={handleToggleSaveChannel}
       />
@@ -1063,6 +1324,9 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
     activeTab,
     savedUrls,
     handleToggleSaveChannel,
+    liveTVSearchQuery,
+    selectedCategory,
+    showCategoryDropdown,
   ]);
 
   return (
@@ -1276,6 +1540,7 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
             </ScrollView>
           ) : (
             <Animated.ScrollView
+              scrollEnabled={!showCategoryDropdown}
               refreshControl={
                 <RefreshControl
                   refreshing={refreshing}
@@ -1458,27 +1723,7 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
                   </>
                 )}
 
-                {/* If feed loaded empty, render a helpful empty state card */}
-                {!sectionsLoading && sections.length === 0 && !sectionError && (
-                  <View style={[styles.errorContainer, { marginTop: 40 }]}>
-                    <BlurView intensity={20} tint="dark" style={styles.errorCard}>
-                      <AlertCircle size={42} color={theme.colors.textMuted} style={{ marginBottom: 12 }} />
-                      <Text style={styles.errorTitle}>No Channels Found</Text>
-                      <Text style={styles.errText}>
-                        {CATEGORY_TABS[activeTab] === "LiveTV"
-                          ? `No channels are currently available for ${activeLiveTVProvider || "this provider"}.`
-                          : "No categories or media items found."}
-                      </Text>
-                      <TouchableOpacity
-                        style={styles.retryBtn}
-                        onPress={() => loadSections(true)}
-                        activeOpacity={0.8}
-                      >
-                        <Text style={styles.retryTxt}>Reload Feed</Text>
-                      </TouchableOpacity>
-                    </BlurView>
-                  </View>
-                )}
+                {/* Main empty state card removed */}
 
                 {/* Section rows (skip the hero source section) */}
                 {renderedSections}
@@ -1816,5 +2061,129 @@ const styles = StyleSheet.create({
   subTabTextActive: {
     color: "#ffffff",
     fontWeight: "700",
+  },
+  liveTVControlRow: {
+    flexDirection: "row",
+    paddingHorizontal: 20,
+    marginTop: 16,
+    gap: 8,
+    alignItems: "center",
+    zIndex: 10,
+  },
+  liveTVSearchContainer: {
+    flex: 1.6,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "rgba(20, 18, 24, 0.65)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
+    justifyContent: "center",
+    paddingHorizontal: 16,
+  },
+  liveTVSearchInput: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "500",
+    padding: 0,
+  },
+  liveTVDropdown: {
+    flex: 1,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "rgba(20, 18, 24, 0.65)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+  },
+  liveTVDropdownText: {
+    color: "#fff",
+    fontSize: 13,
+    fontWeight: "600",
+    maxWidth: "80%",
+  },
+  floatingDropdown: {
+    position: "absolute",
+    top: 44, // Right below the live tv dropdown button (height: 40)
+    right: 0,
+    width: 220,
+    borderRadius: 20,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+    zIndex: 100,
+  },
+  dropdownItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "rgba(255,255,255,0.05)",
+  },
+  dropdownItemSelected: {
+    backgroundColor: "rgba(255,255,255,0.06)",
+  },
+  dropdownItemLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  seasonNumberBox: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    backgroundColor: "rgba(255,255,255,0.05)",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+  },
+  seasonNumberBoxSelected: {
+    backgroundColor: "rgba(255,255,255,0.12)",
+    borderColor: "rgba(255,255,255,0.2)",
+  },
+  seasonNumberText: {
+    color: "rgba(255,255,255,0.5)",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  seasonNumberTextSelected: {
+    color: "#fff",
+  },
+  dropdownItemText: {
+    color: "rgba(255,255,255,0.65)",
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  dropdownItemTextSelected: {
+    color: "#fff",
+    fontWeight: "700",
+  },
+  checkmark: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "bold",
+  },
+  liveTVRefreshButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "rgba(20, 18, 24, 0.65)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  gridContainer: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "flex-start",
+    paddingHorizontal: 20,
+    gap: 8,
+    marginTop: 16,
   },
 });

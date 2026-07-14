@@ -24,7 +24,7 @@ interface Props {
   style?: any;
 }
 
-export default function ChannelCard({ item, onPress, isSaved, onToggleSave, width: propWidth, style }: Props) {
+const ChannelCard = React.memo(function ChannelCard({ item, onPress, isSaved, onToggleSave, width: propWidth, style }: Props) {
   const scale = useRef(new Animated.Value(1)).current;
   const cardWidth = propWidth || CARD_WIDTH;
   const cardHeight = cardWidth; // 1:1 aspect ratio!
@@ -88,7 +88,9 @@ export default function ChannelCard({ item, onPress, isSaved, onToggleSave, widt
       </Text>
     </Pressable>
   );
-}
+});
+
+export default ChannelCard;
 
 const styles = StyleSheet.create({
   card: {

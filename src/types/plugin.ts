@@ -1,6 +1,8 @@
 export interface PluginProvider {
   id: string;
   name: string;
+  url?: string;
+  hasMainPage?: boolean;
   hasSearch?: boolean;
 }
 

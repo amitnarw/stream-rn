@@ -61,31 +61,32 @@ import {
   Languages,
   Volume2,
   Check,
+  Activity,
+  Database,
+  Monitor,
 } from "lucide-react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as favoritesApi from "../api/favorites";
 import { LinearGradient } from "expo-linear-gradient";
 import MaskedView from "@react-native-masked-view/masked-view";
 import { theme } from "../theme";
-import type {
-  EpisodeItem,
-  VideoSource,
-  MediaItem,
-  Actor,
-  PluginProvider,
-} from "../types/plugin";
+import type { EpisodeItem, VideoSource, PluginProvider } from "../types/plugin";
 import * as bridge from "../api/cloudStreamBridge";
 import { useTransition } from "../context/TransitionContext";
-import type { CardLayout } from "../context/TransitionContext";
 import { CustomModal } from "../components/CustomModal";
 import CustomVideoPlayer from "../components/CustomVideoPlayer";
-import Svg, {
-  Circle,
-  Defs,
-  LinearGradient as SvgLinearGradient,
-  Stop,
-  Path,
-} from "react-native-svg";
+import SkeletonPlaceholder from "../components/SkeletonPlaceholder";
+import ActorAvatar from "../components/ActorAvatar";
+import RecommendationCard from "../components/RecommendationCard";
+import HeroEpisodeRow from "../components/HeroEpisodeRow";
+import {
+  parseAudioLanguages,
+  extractTorrentSize,
+  cleanQualityTag,
+  extractResolution,
+  normalizeLangCode,
+} from "../utils/detailHelpers";
+import { styles } from "./DetailScreen.styles";
 
 function getHighQualityImageUrl(
   url: string | null | undefined,
@@ -135,126 +136,6 @@ function isIspBlock(err: string | undefined): boolean {
     e.includes("timeout")
   );
 }
-
-const TorrentCircularProgress = ({
-  progress,
-  speed,
-}: {
-  progress: number;
-  speed: number;
-}) => {
-  const rotateVal = useSharedValue(0);
-
-  useEffect(() => {
-    rotateVal.value = withRepeat(
-      withTiming(360, {
-        duration: 3000,
-        easing: Easing.linear,
-      }),
-      -1,
-      false,
-    );
-  }, [rotateVal]);
-
-  const animatedRotStyle = useAnimatedStyle(() => {
-    return {
-      transform: [{ rotate: `${rotateVal.value}deg` }],
-    };
-  });
-
-  const size = 120;
-  const strokeWidth = 5;
-  const radius = 48;
-  const center = size / 2;
-  const circumference = 2 * Math.PI * radius;
-
-  const pct = Math.min(100, Math.max(0, (progress / 1.5) * 100));
-  const strokeDashoffset = circumference * (1 - pct / 100);
-
-  const speedText = speed
-    ? speed >= 1024 * 1024
-      ? `${(speed / (1024 * 1024)).toFixed(1)} MB/s`
-      : `${(speed / 1024).toFixed(0)} kB/s`
-    : "0 kB/s";
-
-  return (
-    <View style={styles.circularContainer}>
-      <View
-        style={{
-          width: size,
-          height: size,
-          justifyContent: "center",
-          alignItems: "center",
-        }}
-      >
-        <Animated.View
-          style={[
-            {
-              position: "absolute",
-              width: size + 16,
-              height: size + 16,
-            },
-            animatedRotStyle,
-          ]}
-        >
-          <Svg width={size + 16} height={size + 16}>
-            <Circle
-              cx={(size + 16) / 2}
-              cy={(size + 16) / 2}
-              r={radius + 6}
-              stroke="rgba(0, 71, 255, 0.18)"
-              strokeWidth={1.5}
-              strokeDasharray="6, 8"
-              fill="transparent"
-            />
-          </Svg>
-        </Animated.View>
-
-        <Svg width={size} height={size}>
-          <Defs>
-            <SvgLinearGradient
-              id="blueGlow"
-              x1="0%"
-              y1="0%"
-              x2="100%"
-              y2="100%"
-            >
-              <Stop offset="0%" stopColor="#0047FF" />
-              <Stop offset="100%" stopColor="#5580FF" />
-            </SvgLinearGradient>
-          </Defs>
-          <Circle
-            cx={center}
-            cy={center}
-            r={radius}
-            stroke="rgba(255, 255, 255, 0.04)"
-            strokeWidth={strokeWidth}
-            fill="transparent"
-          />
-          <Circle
-            cx={center}
-            cy={center}
-            r={radius}
-            stroke="url(#blueGlow)"
-            strokeWidth={strokeWidth}
-            strokeDasharray={circumference}
-            strokeDashoffset={strokeDashoffset}
-            strokeLinecap="round"
-            fill="transparent"
-            transform={`rotate(-90 ${center} ${center})`}
-          />
-        </Svg>
-
-        <View style={styles.circularTextWrapper}>
-          <Text style={styles.circularPercentText}>{Math.round(pct)}%</Text>
-          <View style={styles.circularSpeedBadge}>
-            <Text style={styles.circularSpeedText}>{speedText}</Text>
-          </View>
-        </View>
-      </View>
-    </View>
-  );
-};
 
 function cleanErrorMessage(err: string | undefined): string {
   if (!err) return "";
@@ -310,268 +191,10 @@ function cleanTorrentError(err: string | undefined): string {
  * Torrentio / Stremio expose audio languages only inside the release title
  * string — there is no structured API field — so we parse the filename.
  */
-const LANG_CODES: Record<string, string> = {
-  en: "EN", eng: "EN", english: "EN",
-  hi: "HI", hin: "HI", hindi: "HI",
-  ta: "TA", tam: "TA", tamil: "TA",
-  te: "TE", tel: "TE", telugu: "TE",
-  ml: "ML", mal: "ML", malayalam: "ML",
-  kn: "KN", kan: "KN", kannada: "KN",
-  pa: "PA", pan: "PA", punjabi: "PA",
-  bn: "BN", ben: "BN", bengali: "BN", bangla: "BN",
-  it: "IT", ita: "IT", ital: "IT", italian: "IT",
-  fr: "FR", fre: "FR", french: "FR",
-  de: "DE", ger: "DE", german: "DE",
-  es: "ES", spa: "ES", spanish: "ES",
-  pt: "PT", por: "PT", portuguese: "PT",
-  ru: "RU", rus: "RU", russian: "RU",
-  ja: "JA", jpn: "JA", japanese: "JA",
-  ko: "KO", kor: "KO", korean: "KO",
-  zh: "ZH", chi: "ZH", chn: "ZH", chinese: "ZH",
-  ar: "AR", ara: "AR", arabic: "AR",
-  tr: "TR", tur: "TR", turkish: "TR",
-  nl: "NL", dut: "NL", dutch: "NL",
-  pl: "PL", pol: "PL", polish: "PL",
-  cs: "CS", cze: "CS", czech: "CS",
-  sv: "SV", swe: "SV", swedish: "SV",
-  da: "DA", dan: "DA", danish: "DA",
-  no: "NO", nor: "NO", norwegian: "NO",
-  fi: "FI", fin: "FI", finnish: "FI",
-  el: "EL", ell: "EL", gre: "GR", greek: "GR",
-  he: "HE", heb: "HE", hebrew: "HE",
-  th: "TH", tha: "TH", thai: "TH",
-  vi: "VI", vie: "VI", vietnamese: "VI",
-  uk: "UK", ukr: "UK", ukrainian: "UK",
-  fa: "FA", per: "FA", persian: "FA",
-  ur: "UR", urd: "UR", urdu: "UR",
-};
-
-/** Normalize a single language label (e.g. from subtitles) to a short code. */
-function normalizeLangCode(lang: string): string {
-  if (!lang) return "";
-  const code = LANG_CODES[lang.trim().toLowerCase()];
-  return code ?? lang.trim().toUpperCase().slice(0, 3);
-}
-
-/**
- * Parse a torrent filename / title for embedded audio-language tags.
- * Handles slash/dot/space/plus separated codes (EN/ITA/FR/ES, Eng.Fre.Ger,
- * Hindi English, Ita Eng), full language names, and Dual/Multi labels.
- * Returns "—" when no language info can be detected (discovered at playback).
- */
-function parseAudioLanguages(fileName: string): string {
-  if (!fileName) return "—";
-  const lower = fileName.toLowerCase();
-  const found: string[] = [];
-
-  // Tokenize on whitespace, dots, slashes and plus signs
-  const tokens = lower.split(/[\s.+/]+/).filter(Boolean);
-  tokens.forEach((tok) => {
-    const code = LANG_CODES[tok];
-    if (code && !found.includes(code)) found.push(code);
-  });
-
-  if (/\bdual\s*audio\b|\bdual\b/i.test(fileName)) {
-    if (!found.includes("DUAL")) found.push("DUAL");
-  }
-  if (/\bmulti\s*audio\b|\bmultilang\b|\bmulti\s*lang\b|\bmulti\b/i.test(fileName)) {
-    if (!found.includes("MULTI")) found.push("MULTI");
-  }
-
-  return found.length > 0 ? found.join(", ") : "—";
-}
-
-function SkeletonPlaceholder({ style }: { style: any }) {
-  const pulseAnim = React.useRef(new RNAnimated.Value(0)).current;
-
-  React.useEffect(() => {
-    const sharedAnimation = RNAnimated.loop(
-      RNAnimated.sequence([
-        RNAnimated.timing(pulseAnim, {
-          toValue: 1,
-          duration: 1000,
-          useNativeDriver: true,
-        }),
-        RNAnimated.timing(pulseAnim, {
-          toValue: 0,
-          duration: 1000,
-          useNativeDriver: true,
-        }),
-      ]),
-    );
-    sharedAnimation.start();
-    return () => sharedAnimation.stop();
-  }, [pulseAnim]);
-
-  const opacity = pulseAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0.12, 0.28],
-  });
-
-  return (
-    <View style={[style, { backgroundColor: "#121214" }]}>
-      <RNAnimated.View
-        style={[
-          StyleSheet.absoluteFillObject,
-          {
-            backgroundColor: "#ffffff",
-            opacity,
-          },
-        ]}
-      />
-    </View>
-  );
-}
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 const HERO_HEIGHT = SCREEN_HEIGHT * 0.5; // 50% for hero, overlaps with sheet
 const EASE_OUT = Easing.bezier(0.25, 1, 0.5, 1);
-
-const actorImageCache = new Map<string, string | null>();
-
-function ActorAvatar({
-  name,
-  initials,
-  style,
-}: {
-  name: string;
-  initials: string;
-  style: any;
-}) {
-  const [imageUrl, setImageUrl] = useState<string | null>(
-    actorImageCache.has(name) ? actorImageCache.get(name) || null : null,
-  );
-
-  useEffect(() => {
-    if (actorImageCache.has(name)) {
-      setImageUrl(actorImageCache.get(name) || null);
-      return;
-    }
-
-    let active = true;
-    async function fetchImage() {
-      try {
-        const cleanName = name.replace(/\s+/g, "_");
-        const url = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(cleanName)}`;
-        const res = await fetch(url);
-        if (res.ok) {
-          const data = await res.json();
-          const img = data.thumbnail?.source || null;
-          actorImageCache.set(name, img);
-          if (active) setImageUrl(img);
-        } else {
-          actorImageCache.set(name, null);
-        }
-      } catch (e) {
-        actorImageCache.set(name, null);
-      }
-    }
-
-    fetchImage();
-    return () => {
-      active = false;
-    };
-  }, [name]);
-
-  if (imageUrl) {
-    return (
-      <Image source={{ uri: imageUrl, cache: "force-cache" }} style={style} />
-    );
-  }
-
-  return (
-    <View style={[style, styles.castPlaceholder]}>
-      <Text style={styles.castInitials}>{initials}</Text>
-    </View>
-  );
-}
-
-interface HeroEpisodeRowProps {
-  ep: EpisodeItem;
-  index: number;
-  playingEpisode: number | null;
-  playEpisode: (ep: EpisodeItem, index: number) => void;
-  posterUrl: string | undefined;
-  isSerial: boolean;
-  title: string;
-  fallbackDuration?: number | null;
-}
-
-const HeroEpisodeRow = React.memo(
-  function HeroEpisodeRow({
-    ep,
-    index,
-    playingEpisode,
-    playEpisode,
-    posterUrl,
-    isSerial,
-    title,
-    fallbackDuration,
-  }: HeroEpisodeRowProps) {
-    return (
-      <TouchableOpacity
-        style={styles.episodeRow}
-        disabled={playingEpisode !== null}
-        onPress={() => playEpisode(ep, index)}
-        activeOpacity={0.8}
-      >
-        <View style={styles.episodeThumbContainer}>
-          <Image
-            source={{
-              uri: ep.image || posterUrl || undefined,
-              cache: "force-cache",
-            }}
-            style={styles.episodeThumb}
-            resizeMode="cover"
-          />
-          <View style={styles.playIconOverlay}>
-            {playingEpisode === index ? (
-              <BlurView
-                intensity={90}
-                tint="dark"
-                style={styles.playIconGlassBlur}
-              >
-                <ActivityIndicator color="#fff" size="small" />
-              </BlurView>
-            ) : (
-              <BlurView
-                intensity={90}
-                tint="dark"
-                style={styles.playIconGlassBlur}
-              >
-                <Play size={20} color="white" fill="white" />
-              </BlurView>
-            )}
-          </View>
-        </View>
-
-        <View style={styles.episodeInfo}>
-          {isSerial && (
-            <Text style={styles.episodeMeta}>
-              Episode {String(ep.episode).padStart(2, "0")}
-              {ep.runtime || fallbackDuration
-                ? ` • ${ep.runtime || fallbackDuration}m`
-                : ""}
-            </Text>
-          )}
-          <Text style={styles.episodeTitle} numberOfLines={2}>
-            {ep.label || (isSerial ? `Episode ${ep.episode}` : title)}
-          </Text>
-        </View>
-      </TouchableOpacity>
-    );
-  },
-  (prev, next) => {
-    const wasPlaying = prev.playingEpisode === prev.index;
-    const isPlaying = next.playingEpisode === next.index;
-    return (
-      wasPlaying === isPlaying &&
-      prev.ep.mediaRef === next.ep.mediaRef &&
-      prev.posterUrl === next.posterUrl &&
-      prev.isSerial === next.isSerial
-    );
-  },
-);
 
 function getQualityBadgeBg(quality: string) {
   const q = quality.toLowerCase();
@@ -741,11 +364,17 @@ function TorrentAccordion({
     // 2. Sort the filtered sources
     const sorted = [...filtered];
     if (selectedSort === "Highest Seeders") {
-      sorted.sort((a, b) => ((b as any).seeders ?? 0) - ((a as any).seeders ?? 0));
+      sorted.sort(
+        (a, b) => ((b as any).seeders ?? 0) - ((a as any).seeders ?? 0),
+      );
     } else if (selectedSort === "Largest Size") {
-      sorted.sort((a, b) => parseSizeInMB(b.host || "") - parseSizeInMB(a.host || ""));
+      sorted.sort(
+        (a, b) => parseSizeInMB(b.host || "") - parseSizeInMB(a.host || ""),
+      );
     } else if (selectedSort === "Smallest Size") {
-      sorted.sort((a, b) => parseSizeInMB(a.host || "") - parseSizeInMB(b.host || ""));
+      sorted.sort(
+        (a, b) => parseSizeInMB(a.host || "") - parseSizeInMB(b.host || ""),
+      );
     }
 
     return sorted;
@@ -757,8 +386,17 @@ function TorrentAccordion({
     return (
       <View style={{ width: "100%" }}>
         {/* Single horizontal row containing scrollable audio filters on left, and sort dropdown on right */}
-        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 12, marginBottom: 10, paddingHorizontal: 16, zIndex: 9999 }}>
-          
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginTop: 12,
+            marginBottom: 10,
+            paddingHorizontal: 16,
+            zIndex: 9999,
+          }}
+        >
           {/* Horizontal Audio Filter Pills (takes remaining space on left) */}
           {audioOptions.length > 1 ? (
             <View style={{ flex: 1, marginRight: 8, height: 26 }}>
@@ -787,7 +425,11 @@ function TorrentAccordion({
                         style={[
                           styles.langFilterChip,
                           isActive && styles.langFilterChipActive,
-                          { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 }
+                          {
+                            paddingHorizontal: 10,
+                            paddingVertical: 4,
+                            borderRadius: 12,
+                          },
                         ]}
                         onPress={() => setSelectedAudio(lang)}
                         activeOpacity={0.7}
@@ -796,7 +438,7 @@ function TorrentAccordion({
                           style={[
                             styles.langFilterText,
                             isActive && styles.langFilterTextActive,
-                            { fontSize: 10 }
+                            { fontSize: 10 },
                           ]}
                         >
                           {lang === "All Audios" ? "All" : lang}
@@ -812,19 +454,43 @@ function TorrentAccordion({
           {/* Sort Dropdown on Right */}
           <View style={{ position: "relative", zIndex: 99999 }}>
             <TouchableOpacity
-              style={[styles.seasonSelector, { minWidth: 95, paddingVertical: 4, paddingHorizontal: 8, borderRadius: 12, height: 28, marginTop: 0 }]}
+              style={[
+                styles.seasonSelector,
+                {
+                  minWidth: 95,
+                  paddingVertical: 4,
+                  paddingHorizontal: 8,
+                  borderRadius: 12,
+                  height: 28,
+                  marginTop: 0,
+                },
+              ]}
               activeOpacity={0.7}
               onPress={() => setShowSortDropdown((v) => !v)}
             >
-              <Text style={[styles.seasonText, { fontSize: 10 }]}>{selectedSort === "Highest Seeders" ? "Seeders" : selectedSort === "Largest Size" ? "Size 💾" : "Size 💾 Min"}</Text>
-              <Text style={[styles.seasonIcon, { fontSize: 8, marginLeft: 4 }]}>▼</Text>
+              <Text style={[styles.seasonText, { fontSize: 10 }]}>
+                {selectedSort === "Highest Seeders"
+                  ? "Seeders"
+                  : selectedSort === "Largest Size"
+                    ? "Size 💾"
+                    : "Size 💾 Min"}
+              </Text>
+              <Text style={[styles.seasonIcon, { fontSize: 8, marginLeft: 4 }]}>
+                ▼
+              </Text>
             </TouchableOpacity>
-            
+
             {showSortDropdown && (
               <View
                 style={[
                   styles.floatingDropdown,
-                  { position: "absolute", top: 32, right: 0, width: 140, zIndex: 999999 },
+                  {
+                    position: "absolute",
+                    top: 32,
+                    right: 0,
+                    width: 140,
+                    zIndex: 999999,
+                  },
                 ]}
               >
                 <LinearGradient
@@ -841,7 +507,7 @@ function TorrentAccordion({
                     style={[
                       styles.dropdownItem,
                       selectedSort === opt.value && styles.dropdownItemSelected,
-                      { paddingVertical: 8, paddingHorizontal: 12 }
+                      { paddingVertical: 8, paddingHorizontal: 12 },
                     ]}
                     onPress={() => {
                       setSelectedSort(opt.value);
@@ -858,9 +524,20 @@ function TorrentAccordion({
           </View>
         </View>
 
-        {visibleSources.slice(0, renderLimit).map((source, idx) => renderRow(source, idx))}
+        {visibleSources
+          .slice(0, renderLimit)
+          .map((source, idx) => renderRow(source, idx))}
         {visibleSources.length > renderLimit && (
-          <Text style={{ color: "rgba(255,255,255,0.3)", textAlign: "center", marginVertical: 14, fontSize: 10, fontWeight: "600", letterSpacing: 0.5 }}>
+          <Text
+            style={{
+              color: "rgba(255,255,255,0.3)",
+              textAlign: "center",
+              marginVertical: 14,
+              fontSize: 10,
+              fontWeight: "600",
+              letterSpacing: 0.5,
+            }}
+          >
             SHOWING TOP {renderLimit} OF {visibleSources.length} LINKS
           </Text>
         )}
@@ -1435,6 +1112,19 @@ export default function DetailScreen() {
     } else {
       list.push(providerName);
     }
+
+    // Dynamic addition: ALWAYS ensure any provider that actually has sources in our state
+    // is present in the tabs list (helps with cached data loads).
+    sources.forEach((s) => {
+      if (s.provider) {
+        const exists = list.some(
+          (p) => p.toLowerCase() === s.provider!.toLowerCase(),
+        );
+        if (!exists) {
+          list.push(s.provider);
+        }
+      }
+    });
 
     if (!list.includes("VidSrcMe")) list.push("VidSrcMe");
     if (!list.includes("VsEmbed")) list.push("VsEmbed");
@@ -2404,7 +2094,12 @@ export default function DetailScreen() {
               >
                 <View style={styles.closeButtonInner}>
                   {isFav ? (
-                    <Heart size={20} color={theme.colors.accent} fill={theme.colors.accent} strokeWidth={2} />
+                    <Heart
+                      size={20}
+                      color={theme.colors.accent}
+                      fill={theme.colors.accent}
+                      strokeWidth={2}
+                    />
                   ) : (
                     <Heart size={20} color="#ffffff" strokeWidth={2} />
                   )}
@@ -2443,7 +2138,12 @@ export default function DetailScreen() {
                       ]}
                     />
                   )}
-                  <Play size={24} color="#fff" fill="#fff" style={{ marginLeft: 3 }} />
+                  <Play
+                    size={24}
+                    color="#fff"
+                    fill="#fff"
+                    style={{ marginLeft: 3 }}
+                  />
                 </View>
                 <Text style={styles.trailerLabel}>TRAILER</Text>
               </TouchableOpacity>
@@ -2871,64 +2571,134 @@ export default function DetailScreen() {
           bridge.stopTorrentStream().catch(() => {});
         }}
         title="Torrent Engine"
-        message={selectedTorrentTitle || "Streaming Video"}
-        Icon={Settings}
+        message=""
+        Icon={Activity}
         iconColor="#0047FF"
         iconBgColor="rgba(0, 71, 255, 0.1)"
-        glowColors={["rgba(0, 71, 255, 0.15)", "transparent"] as const}
+        glowColors={["rgba(249, 115, 22, 0.16)", "transparent"] as const}
       >
-        {/* Subtitle with quality and provider */}
-        <Text style={styles.torrentSubtitle}>
-          {selectedSourceQuality ? `${selectedSourceQuality} · ` : ""}
-          {selectedSourceProvider || "P2P Source"}
+        <Text
+          style={[
+            styles.torrentStatValue,
+            { textAlign: "center", marginBottom: 10 },
+          ]}
+        >
+          {sources[selectedSourceIndex]?.host}
         </Text>
 
-        {/* Circular Progress piece */}
-        <TorrentCircularProgress
-          progress={torrentStatus?.progress ?? 0}
-          speed={torrentStatus?.speed ?? 0}
-        />
+        {/* Linear Progress Card */}
+        <View style={styles.torrentProgressCard}>
+          <View style={styles.torrentProgressHeader}>
+            <Text style={styles.torrentProgressPercent}>
+              {Math.min(
+                100,
+                Math.max(0, ((torrentStatus?.progress ?? 0) / 1.5) * 100),
+              ).toFixed(0)}
+              %
+            </Text>
+            <Text style={styles.torrentProgressSpeed}>
+              {torrentStatus?.speed
+                ? torrentStatus.speed >= 1024 * 1024
+                  ? `${(torrentStatus.speed / (1024 * 1024)).toFixed(1)} MB/s`
+                  : `${(torrentStatus.speed / 1024).toFixed(0)} kB/s`
+                : "0 kB/s"}
+            </Text>
+          </View>
+          <View style={styles.torrentProgressBarTrack}>
+            <View
+              style={[
+                styles.torrentProgressBarFill,
+                {
+                  width: `${Math.min(100, Math.max(0, ((torrentStatus?.progress ?? 0) / 1.5) * 100))}%`,
+                },
+              ]}
+            />
+          </View>
+        </View>
 
-        {/* Stats row - Side-by-side glass cards */}
-        <View style={styles.torrentStatsContainer}>
-          <View style={styles.torrentStatBox}>
-            <View style={styles.torrentStatLabelRow}>
-              <Server size={12} color="#8E8D92" strokeWidth={2} />
-              <Text style={styles.torrentStatLabel}>Peers</Text>
+        {/* Stats Grid - 2 rows of glass cards */}
+        <View style={{ width: "100%", gap: 8, marginTop: 10, marginBottom: 8 }}>
+          {/* Row 1: Peers | Size | Status */}
+          <View style={{ flexDirection: "row", gap: 8 }}>
+            {/* Box 1: Peers */}
+            <View style={styles.torrentStatBox}>
+              <View style={styles.torrentStatLabelRow}>
+                <Users size={11} color="#8E8D92" strokeWidth={2} />
+                <Text style={styles.torrentStatLabel}>Peers</Text>
+              </View>
+              <Text style={styles.torrentStatValue}>
+                {torrentStatus?.peers && torrentStatus.peers > 0
+                  ? `${torrentStatus.peers}`
+                  : selectedTorrentSeeders > 0
+                    ? `${selectedTorrentSeeders}`
+                    : "0"}
+              </Text>
             </View>
-            <Text style={styles.torrentStatValue}>
-              {torrentStatus?.peers && torrentStatus.peers > 0
-                ? `${torrentStatus.peers}`
-                : selectedTorrentSeeders > 0
-                  ? `${selectedTorrentSeeders}`
-                  : "0"}
-            </Text>
+
+            {/* Box 2: Size */}
+            <View style={styles.torrentStatBox}>
+              <View style={styles.torrentStatLabelRow}>
+                <Database size={11} color="#8E8D92" strokeWidth={2} />
+                <Text style={styles.torrentStatLabel}>Size</Text>
+              </View>
+              <Text
+                style={styles.torrentStatValue}
+                numberOfLines={1}
+                ellipsizeMode="tail"
+              >
+                {extractTorrentSize(selectedSourceQuality)}
+              </Text>
+            </View>
+
+            {/* Box 3: Status */}
+            <View style={styles.torrentStatBox}>
+              <View style={styles.torrentStatLabelRow}>
+                <Wifi size={11} color="#8E8D92" strokeWidth={2} />
+                <Text style={styles.torrentStatLabel}>Status</Text>
+              </View>
+              <Text
+                style={styles.torrentStatValue}
+                numberOfLines={1}
+                ellipsizeMode="tail"
+              >
+                {torrentStatus?.peers && torrentStatus.peers > 0
+                  ? "Streaming"
+                  : "Resolving"}
+              </Text>
+            </View>
           </View>
-          <View style={styles.torrentStatBox}>
-            <View style={styles.torrentStatLabelRow}>
-              <Wifi size={12} color="#8E8D92" strokeWidth={2} />
-              <Text style={styles.torrentStatLabel}>Status</Text>
+
+          {/* Row 2: Quality | Audio */}
+          <View style={{ flexDirection: "row", gap: 8 }}>
+            {/* Box 4: Quality */}
+            <View style={styles.torrentStatBox}>
+              <View style={styles.torrentStatLabelRow}>
+                <Monitor size={11} color="#8E8D92" strokeWidth={2} />
+                <Text style={styles.torrentStatLabel}>Quality</Text>
+              </View>
+              <Text
+                style={styles.torrentStatValue}
+                numberOfLines={1}
+                ellipsizeMode="tail"
+              >
+                {extractResolution(selectedSourceQuality)}
+              </Text>
             </View>
-            <Text
-              style={styles.torrentStatValue}
-              numberOfLines={1}
-              ellipsizeMode="tail"
-            >
-              {torrentStatus?.peers && torrentStatus.peers > 0
-                ? "Streaming"
-                : selectedTorrentSeeders > 0
-                  ? "Resolving"
-                  : "Searching"}
-            </Text>
-          </View>
-          <View style={styles.torrentStatBox}>
-            <View style={styles.torrentStatLabelRow}>
-              <Volume2 size={12} color="#8E8D92" strokeWidth={2} />
-              <Text style={styles.torrentStatLabel}>Audio</Text>
+
+            {/* Box 5: Audio */}
+            <View style={styles.torrentStatBox}>
+              <View style={styles.torrentStatLabelRow}>
+                <Volume2 size={11} color="#8E8D92" strokeWidth={2} />
+                <Text style={styles.torrentStatLabel}>Audio</Text>
+              </View>
+              <Text
+                style={styles.torrentStatValue}
+                numberOfLines={1}
+                ellipsizeMode="tail"
+              >
+                {parseAudioLanguages(selectedTorrentHost)}
+              </Text>
             </View>
-            <Text style={styles.torrentStatValue} numberOfLines={1} ellipsizeMode="tail">
-              {parseAudioLanguages(selectedTorrentHost)}
-            </Text>
           </View>
         </View>
 
@@ -3005,476 +2775,467 @@ export default function DetailScreen() {
             style={StyleSheet.absoluteFillObject}
           />
           <View style={styles.sheetContent}>
-              <View style={styles.sheetHandle} />
-              <View style={styles.sheetHeaderRow}>
-                <TouchableOpacity
-                  style={styles.sheetRefreshButton}
-                  onPress={handleRefreshLinks}
-                  activeOpacity={0.8}
-                  disabled={isResolving}
-                >
-                   <RotateCw size={18} color="#ffffff" strokeWidth={2} />
-                </TouchableOpacity>
+            <View style={styles.sheetHandle} />
+            <View style={styles.sheetHeaderRow}>
+              <TouchableOpacity
+                style={styles.sheetRefreshButton}
+                onPress={handleRefreshLinks}
+                activeOpacity={0.8}
+                disabled={isResolving}
+              >
+                <RotateCw size={18} color="#ffffff" strokeWidth={2} />
+              </TouchableOpacity>
 
-                <View style={styles.sheetTitleRow}>
-                  {isResolving && (
-                    <ActivityIndicator
-                      size="small"
-                      color="#0047FF"
-                      style={{ marginRight: 8 }}
-                    />
-                  )}
-                  <Text style={styles.sheetTitle}>Select Source</Text>
-                </View>
-                <TouchableOpacity
-                  style={styles.sheetCloseButton}
-                  onPress={() => closeSourcePicker()}
-                  activeOpacity={0.8}
-                >
-                   <X size={20} color="#ffffff" strokeWidth={2} />
-                </TouchableOpacity>
+              <View style={styles.sheetTitleRow}>
+                {isResolving && (
+                  <ActivityIndicator
+                    size="small"
+                    color="#0047FF"
+                    style={{ marginRight: 8 }}
+                  />
+                )}
+                <Text style={styles.sheetTitle}>Select Source</Text>
               </View>
-              {/* Dynamic Provider Tabs scroll view */}
-              {providerTabs.length > 1 && (
-                <View style={styles.tabsContainer}>
-                  <MaskedView
-                    style={styles.tabsMaskedView}
-                    maskElement={
-                      <LinearGradient
-                        colors={[
-                          "transparent",
-                          "black",
-                          "black",
-                          "transparent",
-                        ]}
-                        locations={[0, 0.08, 0.92, 1]}
-                        start={{ x: 0, y: 0 }}
-                        end={{ x: 1, y: 0 }}
-                        style={StyleSheet.absoluteFillObject}
-                      />
-                    }
+              <TouchableOpacity
+                style={styles.sheetCloseButton}
+                onPress={() => closeSourcePicker()}
+                activeOpacity={0.8}
+              >
+                <X size={20} color="#ffffff" strokeWidth={2} />
+              </TouchableOpacity>
+            </View>
+            {/* Dynamic Provider Tabs scroll view */}
+            {providerTabs.length > 1 && (
+              <View style={styles.tabsContainer}>
+                <MaskedView
+                  style={styles.tabsMaskedView}
+                  maskElement={
+                    <LinearGradient
+                      colors={["transparent", "black", "black", "transparent"]}
+                      locations={[0, 0.08, 0.92, 1]}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 0 }}
+                      style={StyleSheet.absoluteFillObject}
+                    />
+                  }
+                >
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.tabsScrollContent}
                   >
-                    <ScrollView
-                      horizontal
-                      showsHorizontalScrollIndicator={false}
-                      contentContainerStyle={styles.tabsScrollContent}
-                    >
-                      {providerTabs.map((tab) => {
-                        const isActive = activeProviderTab === tab;
+                    {providerTabs.map((tab) => {
+                      const isActive = activeProviderTab === tab;
 
-                        // Calculate tab status decorations
-                        const prog = resolvingProgress.find(
-                          (p) => p.providerName === tab,
-                        );
-                        let tabLabel = tab;
-                        const tabSubLabel = cleanErrorMessage(
-                          prog?.errorReason,
-                        );
-                        const isSearching =
-                          (tab === "All" && isResolving) ||
-                          prog?.status === "searching";
+                      // Calculate tab status decorations
+                      const prog = resolvingProgress.find(
+                        (p) => p.providerName === tab,
+                      );
+                      let tabLabel = tab;
+                      const tabSubLabel = cleanErrorMessage(prog?.errorReason);
+                      const isSearching =
+                        (tab === "All" && isResolving) ||
+                        prog?.status === "searching";
 
-                        const tabSourcesCount = sources.filter(
-                          (s) =>
-                            (s.provider ?? "").toLowerCase() ===
-                            tab.toLowerCase(),
-                        ).length;
-                        if (tab === "All") {
-                          tabLabel =
-                            sources.length > 0
-                              ? `All (${sources.length})`
-                              : "All";
-                        } else if (prog) {
-                          if (prog.status === "searching") {
-                            tabLabel =
-                              tabSourcesCount > 0
-                                ? `${tab} (${tabSourcesCount})`
-                                : tab;
-                          } else if (prog.status === "found") {
-                            tabLabel = `${tab} (${tabSourcesCount})`;
-                          } else if (prog.status === "none") {
-                            tabLabel = `${tab} (0)`;
-                          } else if (prog.status === "error") {
-                            tabLabel =
-                              tabSourcesCount > 0
-                                ? `${tab} (${tabSourcesCount})`
-                                : `${tab} ⚠`;
-                          }
-                        } else {
-                          // Static tabs (like VidSrcMe, VsEmbed) or direct/custom provider calls which don't have progress tracking.
+                      const tabSourcesCount = sources.filter(
+                        (s) =>
+                          (s.provider ?? "").toLowerCase() ===
+                          tab.toLowerCase(),
+                      ).length;
+                      if (tab === "All") {
+                        tabLabel =
+                          sources.length > 0
+                            ? `All (${sources.length})`
+                            : "All";
+                      } else if (prog) {
+                        if (prog.status === "searching") {
                           tabLabel =
                             tabSourcesCount > 0
                               ? `${tab} (${tabSourcesCount})`
-                              : isResolving
+                              : tab;
+                        } else if (prog.status === "found") {
+                          tabLabel = `${tab} (${tabSourcesCount})`;
+                        } else if (prog.status === "none") {
+                          tabLabel = `${tab} (0)`;
+                        } else if (prog.status === "error") {
+                          tabLabel =
+                            tabSourcesCount > 0
+                              ? `${tab} (${tabSourcesCount})`
+                              : `${tab} ⚠`;
+                        }
+                      } else {
+                        // Static tabs (like VidSrcMe, VsEmbed) or direct/custom provider calls which don't have progress tracking.
+                        tabLabel =
+                          tabSourcesCount > 0
+                            ? `${tab} (${tabSourcesCount})`
+                            : isResolving
                               ? tab
                               : `${tab} (0)`;
-                        }
+                      }
 
-                        return (
-                          <TouchableOpacity
-                            key={tab}
+                      return (
+                        <TouchableOpacity
+                          key={tab}
+                          style={[
+                            styles.tabButton,
+                            isActive && styles.tabButtonActive,
+                            { flexDirection: "row", alignItems: "center" },
+                          ]}
+                          onPress={() => setActiveProviderTab(tab)}
+                          activeOpacity={0.7}
+                        >
+                          {isSearching && (
+                            <ActivityIndicator
+                              size="small"
+                              color={isActive ? "#ffffff" : "#0047FF"}
+                              style={{ marginRight: 6 }}
+                            />
+                          )}
+                          <Text
                             style={[
-                              styles.tabButton,
-                              isActive && styles.tabButtonActive,
-                              { flexDirection: "row", alignItems: "center" },
+                              styles.tabText,
+                              isActive && styles.tabTextActive,
                             ]}
-                            onPress={() => setActiveProviderTab(tab)}
+                          >
+                            {tabLabel}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </ScrollView>
+                </MaskedView>
+              </View>
+            )}
+
+            {/* Always show source list when sources exist, even while still resolving */}
+            <View style={{ flex: 1 }}>
+              {filteredSources.length > 0 ? (
+                <View style={styles.sheetListContainer}>
+                  {(() => {
+                    const directSources = filteredSources.filter(
+                      (s) =>
+                        s.type !== "torrent" && !s.url.startsWith("magnet:"),
+                    );
+                    const torrentSources = filteredSources.filter(
+                      (s) =>
+                        s.type === "torrent" || s.url.startsWith("magnet:"),
+                    );
+
+                    const renderSourceRow = (source: any, idx: number) => {
+                      // displayName = normalised group base (e.g. "Movies Plus", "4K HDHUB")
+                      const hostName =
+                        source.displayName ||
+                        source.host ||
+                        source.quality?.split(" · ")[0] ||
+                        "Direct";
+                      const qualityTag =
+                        source.availableQualities?.[0] ?? "Auto";
+                      const hasHeaders =
+                        source.headers &&
+                        Object.keys(source.headers).length > 0;
+                      const protocolLabel = getProtocolLabel(
+                        source.type,
+                        source.url,
+                      );
+
+                      const showProviderBadge = activeProviderTab === "All";
+                      const isTorrentSource =
+                        source.type === "torrent" ||
+                        source.url.startsWith("magnet:");
+                      const torrentSeeders = (source as any).seeders as
+                        | number
+                        | undefined;
+
+                      return (
+                        <View
+                          key={`source-${source.type}-${idx}`}
+                          style={[
+                            styles.sheetRow,
+                            {
+                              flexDirection: "row",
+                              alignItems: "center",
+                              paddingRight: 10,
+                              gap: 5,
+                            },
+                          ]}
+                        >
+                          <TouchableOpacity
+                            style={{ flex: 1 }}
+                            onPress={() => onSourceSelect(source)}
                             activeOpacity={0.7}
                           >
-                            {isSearching && (
-                              <ActivityIndicator
-                                size="small"
-                                color={isActive ? "#ffffff" : "#0047FF"}
-                                style={{ marginRight: 6 }}
-                              />
-                            )}
-                            <Text
-                              style={[
-                                styles.tabText,
-                                isActive && styles.tabTextActive,
-                              ]}
-                            >
-                              {tabLabel}
-                            </Text>
-                          </TouchableOpacity>
-                        );
-                      })}
-                    </ScrollView>
-                  </MaskedView>
-                </View>
-              )}
-
-              {/* Always show source list when sources exist, even while still resolving */}
-              <View style={{ flex: 1 }}>
-                {filteredSources.length > 0 ? (
-                  <View style={styles.sheetListContainer}>
-                    {(() => {
-                      const directSources = filteredSources.filter(
-                        (s) =>
-                          s.type !== "torrent" && !s.url.startsWith("magnet:"),
-                      );
-                      const torrentSources = filteredSources.filter(
-                        (s) =>
-                          s.type === "torrent" || s.url.startsWith("magnet:"),
-                      );
-
-                      const renderSourceRow = (source: any, idx: number) => {
-                        // displayName = normalised group base (e.g. "Movies Plus", "4K HDHUB")
-                        const hostName =
-                          source.displayName ||
-                          source.host ||
-                          source.quality?.split(" · ")[0] ||
-                          "Direct";
-                        const qualityTag =
-                          source.availableQualities?.[0] ?? "Auto";
-                        const hasHeaders =
-                          source.headers &&
-                          Object.keys(source.headers).length > 0;
-                        const protocolLabel = getProtocolLabel(
-                          source.type,
-                          source.url,
-                        );
-
-                        const showProviderBadge = activeProviderTab === "All";
-                        const isTorrentSource =
-                          source.type === "torrent" ||
-                          source.url.startsWith("magnet:");
-                        const torrentSeeders = (source as any).seeders as
-                          | number
-                          | undefined;
-
-                        return (
-                          <View
-                            key={`source-${source.type}-${idx}`}
-                            style={[
-                              styles.sheetRow,
-                              {
-                                flexDirection: "row",
-                                alignItems: "center",
-                                paddingRight: 10,
-                                gap: 5
-                              },
-                            ]}
-                          >
-                            <TouchableOpacity
-                              style={{ flex: 1 }}
-                              onPress={() => onSourceSelect(source)}
-                              activeOpacity={0.7}
-                            >
-                              <View style={styles.sheetRowInfo}>
-                                <View
+                            <View style={styles.sheetRowInfo}>
+                              <View
+                                style={[
+                                  styles.sheetQualityRow,
+                                  { flexWrap: "wrap", gap: 6 },
+                                ]}
+                              >
+                                <Text
                                   style={[
-                                    styles.sheetQualityRow,
-                                    { flexWrap: "wrap", gap: 6 },
+                                    styles.sheetQuality,
+                                    { marginRight: 4 },
                                   ]}
                                 >
-                                  <Text
+                                  {hostName}
+                                </Text>
+
+                                {(
+                                  source.availableQualities || [qualityTag]
+                                ).map((tag: string, tagIdx: number) => (
+                                  <View
+                                    key={`tag-${tagIdx}`}
                                     style={[
-                                      styles.sheetQuality,
-                                      { marginRight: 4 },
+                                      styles.sheetBadge,
+                                      {
+                                        backgroundColor: getQualityBadgeBg(tag),
+                                      },
                                     ]}
                                   >
-                                    {hostName}
-                                  </Text>
-
-                                  {(
-                                    source.availableQualities || [qualityTag]
-                                  ).map((tag: string, tagIdx: number) => (
-                                    <View
-                                      key={`tag-${tagIdx}`}
+                                    <Text
                                       style={[
-                                        styles.sheetBadge,
+                                        styles.sheetBadgeText,
                                         {
-                                          backgroundColor:
-                                            getQualityBadgeBg(tag),
+                                          color: "#ffffff",
+                                          fontWeight: "bold",
                                         },
                                       ]}
                                     >
-                                      <Text
-                                        style={[
-                                          styles.sheetBadgeText,
-                                          {
-                                            color: "#ffffff",
-                                            fontWeight: "bold",
-                                          },
-                                        ]}
-                                      >
-                                        {tag}
-                                      </Text>
-                                    </View>
-                                  ))}
-
-                                  <View style={styles.sheetBadge}>
-                                    <Text style={styles.sheetBadgeText}>
-                                      {protocolLabel}
+                                      {tag}
                                     </Text>
                                   </View>
+                                ))}
 
-                                  {isTorrentSource &&
-                                    torrentSeeders !== undefined &&
-                                    torrentSeeders > 0 && (
-                                      <View
-                                        style={[
-                                          styles.sheetBadge,
-                                          {
-                                            flexDirection: "row",
-                                            alignItems: "center",
-                                            backgroundColor:
-                                              torrentSeeders >= 50
-                                                ? "rgba(34, 197, 94, 0.12)"
-                                                : torrentSeeders >= 10
-                                                  ? "rgba(234, 179, 8, 0.10)"
-                                                  : "rgba(255, 255, 255, 0.06)",
-                                            borderColor:
-                                              torrentSeeders >= 50
-                                                ? "rgba(34, 197, 94, 0.3)"
-                                                : torrentSeeders >= 10
-                                                  ? "rgba(234, 179, 8, 0.25)"
-                                                  : "rgba(255,255,255,0.1)",
-                                            borderWidth: 0.5,
-                                          },
-                                        ]}
-                                      >
-                                        <Users
-                                          strokeWidth={2}
-                                          size={10}
-                                          color={
-                                            torrentSeeders >= 50
-                                              ? "#22c55e"
-                                              : torrentSeeders >= 10
-                                                ? "#eab308"
-                                                : "#a0a0a5"
-                                          }
-                                          style={{ marginRight: 3 }}
-                                        />
-                                        <Text
-                                          style={[
-                                            styles.sheetBadgeText,
-                                            {
-                                              color:
-                                                torrentSeeders >= 50
-                                                  ? "#22c55e"
-                                                  : torrentSeeders >= 10
-                                                    ? "#eab308"
-                                                    : "#a0a0a5",
-                                              fontWeight: "600",
-                                            },
-                                          ]}
-                                        >
-                                          {`${torrentSeeders}`}
-                                        </Text>
-                                      </View>
-                                    )}
+                                <View style={styles.sheetBadge}>
+                                  <Text style={styles.sheetBadgeText}>
+                                    {protocolLabel}
+                                  </Text>
+                                </View>
 
-                                  {showProviderBadge && (
+                                {isTorrentSource &&
+                                  torrentSeeders !== undefined &&
+                                  torrentSeeders > 0 && (
                                     <View
                                       style={[
                                         styles.sheetBadge,
                                         {
+                                          flexDirection: "row",
+                                          alignItems: "center",
                                           backgroundColor:
-                                            "rgba(85,128,255,0.1)",
-                                          borderColor: "rgba(85,128,255,0.2)",
+                                            torrentSeeders >= 50
+                                              ? "rgba(34, 197, 94, 0.12)"
+                                              : torrentSeeders >= 10
+                                                ? "rgba(234, 179, 8, 0.10)"
+                                                : "rgba(255, 255, 255, 0.06)",
+                                          borderColor:
+                                            torrentSeeders >= 50
+                                              ? "rgba(34, 197, 94, 0.3)"
+                                              : torrentSeeders >= 10
+                                                ? "rgba(234, 179, 8, 0.25)"
+                                                : "rgba(255,255,255,0.1)",
                                           borderWidth: 0.5,
                                         },
                                       ]}
                                     >
+                                      <Users
+                                        strokeWidth={2}
+                                        size={10}
+                                        color={
+                                          torrentSeeders >= 50
+                                            ? "#22c55e"
+                                            : torrentSeeders >= 10
+                                              ? "#eab308"
+                                              : "#a0a0a5"
+                                        }
+                                        style={{ marginRight: 3 }}
+                                      />
                                       <Text
                                         style={[
                                           styles.sheetBadgeText,
                                           {
-                                            color: "#5580FF",
+                                            color:
+                                              torrentSeeders >= 50
+                                                ? "#22c55e"
+                                                : torrentSeeders >= 10
+                                                  ? "#eab308"
+                                                  : "#a0a0a5",
                                             fontWeight: "600",
                                           },
                                         ]}
                                       >
-                                        {source.provider}
+                                        {`${torrentSeeders}`}
                                       </Text>
                                     </View>
                                   )}
 
-                                  {hasHeaders && (
-                                    <View
+                                {showProviderBadge && (
+                                  <View
+                                    style={[
+                                      styles.sheetBadge,
+                                      {
+                                        backgroundColor: "rgba(85,128,255,0.1)",
+                                        borderColor: "rgba(85,128,255,0.2)",
+                                        borderWidth: 0.5,
+                                      },
+                                    ]}
+                                  >
+                                    <Text
                                       style={[
-                                        styles.sheetBadge,
+                                        styles.sheetBadgeText,
                                         {
-                                          backgroundColor:
-                                            "rgba(0,71,255,0.08)",
-                                          borderColor: "rgba(0,71,255,0.2)",
-                                          borderWidth: 0.5,
+                                          color: "#5580FF",
+                                          fontWeight: "600",
                                         },
                                       ]}
                                     >
-                                      <Text
-                                        style={[
-                                          styles.sheetBadgeText,
-                                          { color: theme.colors.accentLight },
-                                        ]}
-                                      >
-                                        Headers
-                                      </Text>
-                                    </View>
-                                  )}
+                                      {source.provider}
+                                    </Text>
+                                  </View>
+                                )}
 
-                                </View>
+                                {hasHeaders && (
+                                  <View
+                                    style={[
+                                      styles.sheetBadge,
+                                      {
+                                        backgroundColor: "rgba(0,71,255,0.08)",
+                                        borderColor: "rgba(0,71,255,0.2)",
+                                        borderWidth: 0.5,
+                                      },
+                                    ]}
+                                  >
+                                    <Text
+                                      style={[
+                                        styles.sheetBadgeText,
+                                        { color: theme.colors.accentLight },
+                                      ]}
+                                    >
+                                      Headers
+                                    </Text>
+                                  </View>
+                                )}
                               </View>
-                            </TouchableOpacity>
-                          </View>
-                        );
-                      };
+                            </View>
+                          </TouchableOpacity>
+                        </View>
+                      );
+                    };
 
-                      return (
-                        <MaskedView
-                          style={styles.sheetListMaskedView}
-                          maskElement={
-                            <LinearGradient
-                              colors={[
-                                "transparent",
-                                "black",
-                                "black",
-                                "transparent",
-                              ]}
-                              locations={[0, 0.08, 0.92, 1]}
-                              start={{ x: 0, y: 0 }}
-                              end={{ x: 0, y: 1 }}
-                              style={StyleSheet.absoluteFillObject}
-                            />
-                          }
+                    return (
+                      <MaskedView
+                        style={styles.sheetListMaskedView}
+                        maskElement={
+                          <LinearGradient
+                            colors={[
+                              "transparent",
+                              "black",
+                              "black",
+                              "transparent",
+                            ]}
+                            locations={[0, 0.08, 0.92, 1]}
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 0, y: 1 }}
+                            style={StyleSheet.absoluteFillObject}
+                          />
+                        }
+                      >
+                        <ScrollView
+                          showsVerticalScrollIndicator={false}
+                          style={styles.sheetList}
+                          contentContainerStyle={{
+                            paddingTop: 12,
+                            paddingBottom: 24,
+                          }}
                         >
-                          <ScrollView
-                            showsVerticalScrollIndicator={false}
-                            style={styles.sheetList}
-                            contentContainerStyle={{
-                              paddingTop: 12,
-                              paddingBottom: 24,
-                            }}
-                          >
-                            {/* Direct/HLS Sources rendered first */}
-                            {directSources.map((source, idx) =>
-                              renderSourceRow(source, idx),
-                            )}
+                          {/* Direct/HLS Sources rendered first */}
+                          {directSources.map((source, idx) =>
+                            renderSourceRow(source, idx),
+                          )}
 
-                            {/* Collapsible Torrent Accordion — isolated child so toggling
+                          {/* Collapsible Torrent Accordion — isolated child so toggling
                                 it never re-renders the parent (the 100+ row source list,
                                 provider tabs, hero and background blurs). */}
-                            <TorrentAccordion
-                              key={activeEpisodeIndex ?? detail?.url ?? "acc"}
-                              torrentSources={torrentSources}
-                              renderRow={renderSourceRow}
-                              alwaysExpanded={activeProviderTab.toLowerCase() !== "all"}
-                            />
-                          </ScrollView>
-                        </MaskedView>
-                      );
-                    })()}
-                  </View>
-                ) : (
-                  // Empty state when there are no sources for this tab
-                  <View
-                    style={{
-                      flex: 1,
-                      alignItems: "center",
-                      justifyContent: "center",
-                    }}
-                  >
-                    <Text style={{ color: "#8E8D92", fontSize: 14 }}>
-                      {isResolving
-                        ? "Resolving links..."
-                        : "No links found for this provider"}
-                    </Text>
-                  </View>
-                )}
-              </View>
-
-              {subtitles.length > 0 && (
-                <View style={styles.sheetSubRow}>
-                  <Text style={styles.sheetSubLabel}>Subtitles: </Text>
-                  <Text style={styles.sheetSubLangs} numberOfLines={1}>
-                    {subtitles.map((s) => s.lang).join(", ")}
+                          <TorrentAccordion
+                            key={activeEpisodeIndex ?? detail?.url ?? "acc"}
+                            torrentSources={torrentSources}
+                            renderRow={renderSourceRow}
+                            alwaysExpanded={
+                              activeProviderTab.toLowerCase() !== "all"
+                            }
+                          />
+                        </ScrollView>
+                      </MaskedView>
+                    );
+                  })()}
+                </View>
+              ) : (
+                // Empty state when there are no sources for this tab
+                <View
+                  style={{
+                    flex: 1,
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <Text style={{ color: "#8E8D92", fontSize: 14 }}>
+                    {isResolving
+                      ? "Resolving links..."
+                      : "No links found for this provider"}
                   </Text>
                 </View>
               )}
-
-              {/* VPN Tip Banner at bottom */}
-              <View style={styles.sheetVpnTip}>
-                <Text style={styles.sheetVpnTipText}>
-                  Tip: Use a VPN app (e.g. ProtonVPN or WARP) if links fail to
-                  load.
-                </Text>
-              </View>
             </View>
-            {isOpeningPlayer && (
-              <View
-                style={[
-                  StyleSheet.absoluteFillObject,
-                  {
-                    backgroundColor: "rgba(15, 15, 20, 0.92)",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    zIndex: 999,
-                    borderTopLeftRadius: 28,
-                    borderTopRightRadius: 28,
-                  },
-                ]}
-              >
-                <ActivityIndicator
-                  size="large"
-                  color="#0047FF"
-                  style={{ marginBottom: 12 }}
-                />
-                <Text
-                  style={{ color: "#ffffff", fontSize: 16, fontWeight: "600" }}
-                >
-                  Opening Player...
-                </Text>
-                <Text style={{ color: "#A0A0A5", marginTop: 6, fontSize: 12 }}>
-                  Please wait, initializing stream configuration
+
+            {subtitles.length > 0 && (
+              <View style={styles.sheetSubRow}>
+                <Text style={styles.sheetSubLabel}>Subtitles: </Text>
+                <Text style={styles.sheetSubLangs} numberOfLines={1}>
+                  {subtitles.map((s) => s.lang).join(", ")}
                 </Text>
               </View>
             )}
-            </Animated.View>
-          </Animated.View>
 
-        {/* Premium Edge Fades */}
+            {/* VPN Tip Banner at bottom */}
+            <View style={styles.sheetVpnTip}>
+              <Text style={styles.sheetVpnTipText}>
+                Tip: Use a VPN app (e.g. ProtonVPN or WARP) if links fail to
+                load.
+              </Text>
+            </View>
+          </View>
+          {isOpeningPlayer && (
+            <View
+              style={[
+                StyleSheet.absoluteFillObject,
+                {
+                  backgroundColor: "rgba(15, 15, 20, 0.92)",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  zIndex: 999,
+                  borderTopLeftRadius: 28,
+                  borderTopRightRadius: 28,
+                },
+              ]}
+            >
+              <ActivityIndicator
+                size="large"
+                color="#0047FF"
+                style={{ marginBottom: 12 }}
+              />
+              <Text
+                style={{ color: "#ffffff", fontSize: 16, fontWeight: "600" }}
+              >
+                Opening Player...
+              </Text>
+              <Text style={{ color: "#A0A0A5", marginTop: 6, fontSize: 12 }}>
+                Please wait, initializing stream configuration
+              </Text>
+            </View>
+          )}
+        </Animated.View>
+      </Animated.View>
+
+      {/* Premium Edge Fades */}
       <Animated.View
         style={[StyleSheet.absoluteFillObject, fadeStyle, { zIndex: 96 }]}
         pointerEvents="none"
@@ -3620,1520 +3381,3 @@ function DetailsSkeleton() {
     </View>
   );
 }
-
-// ── Recommendation Card Sub-component ──────────────────────────────────────────
-function RecommendationCard({
-  item,
-  onPress,
-}: {
-  item: MediaItem;
-  onPress: (item: MediaItem) => void;
-}) {
-  const scale = useSharedValue(1);
-
-  const handlePress = () => {
-    onPress(item);
-  };
-
-  const animatedStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: scale.value }],
-  }));
-
-  return (
-    <Pressable
-      onPress={handlePress}
-      onPressIn={() => {
-        scale.value = withTiming(0.94, { duration: 150 });
-      }}
-      onPressOut={() => {
-        scale.value = withTiming(1, { duration: 150 });
-      }}
-      style={{ marginRight: 12, width: 100 }}
-    >
-      <Animated.View style={animatedStyle}>
-        {item.posterUrl ? (
-          <Image
-            source={{ uri: item.posterUrl, cache: "force-cache" }}
-            style={styles.recPoster}
-            resizeMode="cover"
-          />
-        ) : (
-          <View style={[styles.recPoster, styles.recPlaceholder]} />
-        )}
-        <Text style={styles.recTitle} numberOfLines={2}>
-          {item.title}
-        </Text>
-      </Animated.View>
-    </Pressable>
-  );
-}
-
-const styles = StyleSheet.create({
-  root: {
-    ...StyleSheet.absoluteFillObject,
-    zIndex: 9999,
-    elevation: 9999,
-  },
-  shadowWrap: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 18 },
-  },
-  surface: {
-    overflow: "hidden",
-    backgroundColor: "#000",
-  },
-  imageWrap: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    overflow: "hidden",
-    backgroundColor: "transparent",
-  },
-  image: {
-    width: "100%",
-    height: "100%",
-  },
-  imageFallback: {
-    width: "100%",
-    height: "100%",
-    backgroundColor: "transparent",
-  },
-  headerControls: {
-    position: "absolute",
-    left: 20,
-    width: SCREEN_WIDTH - 40,
-    height: 48,
-    zIndex: 50,
-  },
-  headerControlsContent: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 16,
-  },
-  headerBorder: {
-    ...StyleSheet.absoluteFillObject,
-    borderRadius: 24,
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.12)",
-  },
-  headerSpacer: {
-    width: 32,
-    height: 32,
-  },
-  headerTitle: {
-    color: "#fff",
-    fontSize: 18,
-    fontWeight: "600",
-    letterSpacing: 0.5,
-    textShadowColor: "rgba(0,0,0,0.5)",
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 3,
-  },
-  closeButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    overflow: "hidden",
-    backgroundColor: "rgba(0,0,0,0.4)",
-  },
-  closeButtonInner: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  closeButtonText: {
-    color: "rgba(255,255,255,0.8)",
-    fontSize: 16,
-    fontWeight: "600",
-    marginTop: -2,
-  },
-  fullScreenScroll: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    width: SCREEN_WIDTH,
-    height: SCREEN_HEIGHT,
-    zIndex: 10,
-  },
-  fixedHeaderContainer: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    width: SCREEN_WIDTH,
-    height: SCREEN_HEIGHT * 0.45,
-    justifyContent: "center",
-    alignItems: "center",
-    zIndex: 25,
-  },
-  touchCatcher: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    width: SCREEN_WIDTH,
-    height: SCREEN_HEIGHT * 0.45,
-    zIndex: 20,
-  },
-  pillBottom: {
-    position: "absolute",
-    bottom: 24,
-    left: 0,
-    right: 0,
-    alignItems: "center",
-  },
-  sheetContentWrap: {
-    flex: 1,
-    minHeight: SCREEN_HEIGHT * 0.6,
-    zIndex: 20,
-    elevation: 20,
-  },
-  pillBackground: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "rgba(15, 15, 20, 0.45)",
-    paddingHorizontal: 20,
-    paddingVertical: 8,
-    borderRadius: 20,
-    overflow: "hidden",
-    gap: 10,
-  },
-  trailerButton: {
-    marginBottom: 12,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  trailerCircle: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: "rgba(15, 15, 20, 0.45)",
-    overflow: "hidden",
-    alignItems: "center",
-    justifyContent: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 6,
-  },
-  trailerLabel: {
-    color: "#ffffffa9",
-    fontSize: 12,
-    fontWeight: "700",
-    letterSpacing: 0.6,
-    marginTop: 8,
-    textTransform: "uppercase",
-    textShadowColor: "rgba(0, 0, 0, 0.6)",
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 3,
-  },
-  pillText: {
-    color: "rgba(255,255,255,0.9)",
-    fontSize: 12,
-    fontWeight: "500",
-    letterSpacing: 0.5,
-  },
-  pillDot: {
-    width: 4,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: "rgba(255,255,255,0.5)",
-  },
-  bottomSheetBackground: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "transparent",
-  },
-  blurContainer: {
-    ...StyleSheet.absoluteFillObject,
-    borderTopLeftRadius: 32,
-    borderTopRightRadius: 32,
-    overflow: "hidden",
-  },
-  scrollContent: {
-    paddingTop: 32,
-    paddingHorizontal: 24,
-    zIndex: 95,
-  },
-  centerState: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingTop: 100,
-  },
-  mutedText: {
-    color: "#A0A0A5",
-    marginTop: 16,
-    fontSize: 14,
-    fontWeight: "500",
-  },
-  errorContainer: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    paddingHorizontal: 28,
-    paddingTop: 100,
-  },
-  errorCard: {
-    backgroundColor: "rgba(20, 18, 24, 0.65)",
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.08)",
-    borderRadius: 20,
-    padding: 24,
-    width: "100%",
-    alignItems: "center",
-    overflow: "hidden",
-  },
-  errorTitle: {
-    color: "#ffffff",
-    fontSize: 16,
-    fontWeight: "700",
-    marginBottom: 8,
-    textAlign: "center",
-  },
-  errorText: {
-    color: "#8E8D92",
-    fontSize: 13,
-    textAlign: "center",
-    marginBottom: 16,
-    lineHeight: 18,
-  },
-  retryBtn: {
-    backgroundColor: theme.colors.accent,
-    paddingHorizontal: 28,
-    paddingVertical: 10,
-    borderRadius: 20,
-  },
-  retryBtnText: {
-    color: "#fff",
-    fontWeight: "700",
-    fontSize: 14,
-  },
-  titleContainer: {
-    alignItems: "center",
-    marginBottom: 16,
-  },
-  mainTitle: {
-    color: "#fff",
-    fontSize: 30,
-    fontWeight: "700",
-    letterSpacing: -0.5,
-    textAlign: "center",
-    marginBottom: 8,
-  },
-  sheetTitleRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  seasonSelector: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "rgba(255,255,255,0.08)",
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.12)",
-    gap: 6,
-  },
-  seasonText: {
-    color: "rgba(255,255,255,0.9)",
-    fontSize: 16,
-    fontWeight: "500",
-  },
-  seasonIcon: {
-    color: "rgba(255,255,255,0.9)",
-    fontSize: 10,
-    marginTop: 2,
-  },
-  descriptionText: {
-    color: "#A0A0A5",
-    fontSize: 14,
-    lineHeight: 22,
-    textAlign: "center",
-    paddingHorizontal: 8,
-  },
-  genreRatingRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 12,
-    marginBottom: 32,
-  },
-  genreText: {
-    color: "#A0A0A5",
-    fontSize: 14,
-  },
-  imdbBadgeContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-  },
-  imdbBadge: {
-    backgroundColor: "#F5C518",
-    paddingHorizontal: 4,
-    paddingVertical: 2,
-    borderRadius: 3,
-  },
-  imdbText: {
-    color: "#000",
-    fontSize: 10,
-    fontWeight: "800",
-    letterSpacing: -0.5,
-  },
-  ratingText: {
-    color: "#fff",
-    fontSize: 14,
-    fontWeight: "600",
-  },
-  linksError: {
-    color: "#ffb4ab",
-    fontSize: 13,
-    textAlign: "center",
-    marginBottom: 16,
-  },
-  episodesList: {
-    flex: 1,
-  },
-  empty: {
-    color: "#666",
-    textAlign: "center",
-    paddingVertical: 40,
-  },
-  episodeRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 16,
-  },
-  episodeThumbContainer: {
-    width: 160,
-    height: 96,
-    borderRadius: 12,
-    overflow: "hidden",
-    backgroundColor: "#1f1f22",
-  },
-  episodeThumb: {
-    width: "100%",
-    height: "100%",
-    opacity: 0.8,
-  },
-  playIconOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  playIconGlass: {
-    width: 40,
-    height: 40,
-    borderRadius: 23,
-    backgroundColor: "rgba(255, 255, 255, 0.85)",
-    borderWidth: 1.5,
-    borderColor: "rgba(255, 255, 255, 0.45)",
-    alignItems: "center",
-    justifyContent: "center",
-    overflow: "hidden",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  playIconGlassBlur: {
-    width: 40,
-    height: 40,
-    borderRadius: 23,
-    alignItems: "center",
-    justifyContent: "center",
-    overflow: "hidden",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  playIconText: {
-    color: "#fff",
-    fontSize: 14,
-    marginLeft: 3,
-  },
-  sectionTitle: {
-    color: "#fff",
-    fontSize: 18,
-    fontWeight: "700",
-    marginBottom: 16,
-    letterSpacing: -0.2,
-  },
-  episodeInfo: {
-    flex: 1,
-    paddingLeft: 16,
-    justifyContent: "center",
-  },
-  episodeMeta: {
-    color: "#A0A0A5",
-    fontSize: 12,
-    marginBottom: 6,
-  },
-  episodeTitle: {
-    color: "#fff",
-    fontSize: 16,
-    fontWeight: "600",
-    lineHeight: 22,
-  },
-  floatingDropdown: {
-    position: "absolute",
-    top: 42, // Right below the season selector button
-    width: 200,
-    borderRadius: 20,
-    overflow: "hidden",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.12)",
-    zIndex: 100,
-  },
-  dropdownItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "rgba(255,255,255,0.05)",
-  },
-  dropdownItemSelected: {
-    backgroundColor: "rgba(255,255,255,0.06)",
-  },
-  dropdownItemLeft: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-  },
-  seasonNumberBox: {
-    width: 28,
-    height: 28,
-    borderRadius: 8,
-    backgroundColor: "rgba(255,255,255,0.05)",
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
-  },
-  seasonNumberBoxSelected: {
-    backgroundColor: "rgba(255,255,255,0.12)",
-    borderColor: "rgba(255,255,255,0.2)",
-  },
-  seasonNumberText: {
-    color: "rgba(255,255,255,0.5)",
-    fontSize: 12,
-    fontWeight: "700",
-  },
-  seasonNumberTextSelected: {
-    color: "#fff",
-  },
-  dropdownItemText: {
-    color: "rgba(255,255,255,0.65)",
-    fontSize: 14,
-    fontWeight: "600",
-  },
-  dropdownItemTextSelected: {
-    color: "#fff",
-    fontWeight: "700",
-  },
-  checkmark: {
-    color: "#fff",
-    fontSize: 14,
-    fontWeight: "bold",
-  },
-  recommendationsSection: {
-    marginTop: 32,
-    borderTopWidth: 1,
-    borderTopColor: "rgba(255,255,255,0.06)",
-    paddingTop: 24,
-  },
-  recommendationsTitle: {
-    color: "#fff",
-    fontSize: 18,
-    fontWeight: "700",
-    marginBottom: 16,
-  },
-  recommendationsList: {
-    paddingBottom: 8,
-  },
-  recPoster: {
-    width: 100,
-    height: 150,
-    borderRadius: 12,
-    backgroundColor: "#1f1f22",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
-  },
-  recPlaceholder: {
-    backgroundColor: "#1f1f22",
-  },
-  recTitle: {
-    color: "rgba(255,255,255,0.7)",
-    fontSize: 12,
-    fontWeight: "500",
-    marginTop: 6,
-    lineHeight: 16,
-  },
-  seeMoreBtn: {
-    backgroundColor: "rgba(255, 255, 255, 0.08)",
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.12)",
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    alignSelf: "center",
-    marginTop: 12,
-    marginBottom: 20,
-  },
-  seeMoreText: {
-    color: "#ffffff",
-    fontSize: 12,
-    fontWeight: "700",
-    letterSpacing: 1,
-  },
-  descriptionContainer: {
-    marginBottom: 4,
-  },
-  expandedDetails: {
-    marginTop: 8,
-    marginBottom: 8,
-    width: "100%",
-  },
-  detailLogo: {
-    width: 140,
-    height: 48,
-    alignSelf: "center",
-    marginBottom: 16,
-  },
-  metaGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 12,
-    marginBottom: 20,
-    backgroundColor: "rgba(255, 255, 255, 0.03)",
-    borderRadius: 16,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.06)",
-  },
-  metaGridItem: {
-    flex: 1,
-    minWidth: "28%",
-  },
-  metaGridItemFull: {
-    width: "100%",
-  },
-  metaGridLabel: {
-    color: "#8E8D92",
-    fontSize: 11,
-    fontWeight: "700",
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-    marginBottom: 2,
-  },
-  metaGridValue: {
-    color: "#ffffff",
-    fontSize: 13,
-    fontWeight: "500",
-  },
-  castSection: {
-    marginBottom: 24,
-  },
-  castScrollContainer: {
-    position: "relative",
-    overflow: "hidden",
-  },
-  castMaskedView: {
-    width: "100%",
-  },
-  castList: {
-    paddingLeft: 28,
-    paddingRight: 16,
-  },
-  castCard: {
-    width: 80,
-    alignItems: "center",
-    marginRight: 12,
-  },
-  castImage: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    marginBottom: 6,
-    backgroundColor: "#1c1b1c",
-  },
-  castPlaceholder: {
-    backgroundColor: "rgba(255, 255, 255, 0.05)",
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.12)",
-  },
-  castInitials: {
-    color: "#E5E2E3",
-    fontSize: 14,
-    fontWeight: "800",
-    letterSpacing: 0.5,
-  },
-  castName: {
-    color: "#fff",
-    fontSize: 11,
-    textAlign: "center",
-  },
-  castRole: {
-    color: "#888",
-    fontSize: 10,
-    textAlign: "center",
-    marginTop: 1,
-  },
-  castImdbBadge: {
-    marginTop: 4,
-    backgroundColor: "rgba(245, 197, 24, 0.15)",
-    borderWidth: 1,
-    borderColor: "rgba(245, 197, 24, 0.35)",
-    borderRadius: 4,
-    paddingHorizontal: 5,
-    paddingVertical: 1,
-  },
-  castImdbBadgeText: {
-    color: "#f5c518",
-    fontSize: 8,
-    fontWeight: "700",
-    letterSpacing: 0.5,
-  },
-  skeletonContainer: {
-    paddingTop: 32,
-    paddingHorizontal: 24,
-    width: "100%",
-  },
-  skeletonTitle: {
-    height: 36,
-    borderRadius: 10,
-    width: "75%",
-    marginBottom: 12,
-  },
-  skeletonSeason: {
-    height: 32,
-    borderRadius: 16,
-    width: 110,
-    marginBottom: 20,
-  },
-  skeletonTagsRow: {
-    flexDirection: "row",
-    gap: 8,
-    marginBottom: 20,
-  },
-  skeletonTag: {
-    height: 18,
-    borderRadius: 9,
-    width: 70,
-  },
-  skeletonText: {
-    height: 14,
-    borderRadius: 4,
-    marginBottom: 10,
-  },
-  skeletonHeader: {
-    height: 22,
-    borderRadius: 6,
-    width: 90,
-    marginBottom: 16,
-  },
-  skeletonRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 16,
-    width: "100%",
-  },
-  skeletonThumb: {
-    width: 140,
-    height: 84,
-    borderRadius: 10,
-  },
-  skeletonMetaWrap: {
-    flex: 1,
-    paddingLeft: 16,
-    gap: 8,
-  },
-  skeletonMeta: {
-    height: 10,
-    width: 60,
-    borderRadius: 3,
-  },
-  skeletonLine: {
-    height: 14,
-    width: "80%",
-    borderRadius: 4,
-  },
-  skeletonDescLine: {
-    height: 10,
-    width: "95%",
-    borderRadius: 3,
-  },
-  sheetOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "transparent",
-    justifyContent: "flex-end",
-    zIndex: 10000,
-    elevation: 10000,
-  },
-  sheet: {
-    width: "100%",
-    height: SCREEN_HEIGHT * 0.7,
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    overflow: "hidden",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
-    backgroundColor: "rgba(20, 18, 24, 0.45)",
-  },
-  sheetContent: {
-    flex: 1,
-    paddingBottom: 24,
-    paddingHorizontal: 0,
-    paddingTop: 8,
-  },
-  sheetHandle: {
-    width: 36,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: "rgba(255,255,255,0.15)",
-    alignSelf: "center",
-    marginBottom: 16,
-  },
-  sheetTitle: {
-    color: "#fff",
-    fontSize: 20,
-    fontWeight: "700",
-    textAlign: "center",
-  },
-  sheetHeaderRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    position: "relative",
-    width: "100%",
-    marginBottom: 20,
-    paddingHorizontal: 16,
-  },
-  sheetCloseButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: "rgba(255, 255, 255, 0.08)",
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.12)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  sheetRefreshButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: "rgba(255, 255, 255, 0.08)",
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.12)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  sheetVpnTip: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "rgba(85, 128, 255, 0.04)",
-    borderWidth: 1,
-    borderColor: "rgba(85, 128, 255, 0.12)",
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    marginHorizontal: 16,
-    marginTop: 8,
-    marginBottom: 4,
-  },
-  sheetVpnTipText: {
-    color: "#8E8D92",
-    fontSize: 10,
-    flex: 1,
-  },
-  sheetListContainer: {
-    flex: 1,
-    position: "relative",
-    overflow: "hidden",
-    paddingHorizontal: 16,
-  },
-  sheetList: {
-    flex: 1,
-  },
-  sheetRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    borderRadius: 16,
-    backgroundColor: "rgba(255,255,255,0.02)",
-    marginBottom: 8,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.04)",
-  },
-  sheetRowActive: {
-    backgroundColor: "rgba(255,255,255,0.07)",
-    borderColor: "rgba(255,255,255,0.15)",
-  },
-  sheetRadio: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    borderWidth: 2,
-    borderColor: "rgba(255,255,255,0.3)",
-    alignItems: "center",
-    justifyContent: "center",
-    marginRight: 16,
-  },
-  sheetRadioActive: {
-    borderColor: "#fff",
-  },
-  sheetRadioDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: "#fff",
-  },
-  sheetRowInfo: {
-    flex: 1,
-  },
-  sheetQualityRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    marginBottom: 4,
-  },
-  sheetQuality: {
-    color: "rgba(255,255,255,0.85)",
-    fontSize: 15,
-    fontWeight: "600",
-  },
-  sheetQualityActive: {
-    color: "#fff",
-  },
-  sheetBadge: {
-    backgroundColor: "rgba(255,255,255,0.08)",
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-  sheetBadgeText: {
-    color: "rgba(255,255,255,0.5)",
-    fontSize: 10,
-    fontWeight: "700",
-    letterSpacing: 0.5,
-  },
-  sheetHost: {
-    color: "rgba(255,255,255,0.45)",
-    fontSize: 12,
-    fontWeight: "500",
-  },
-  sheetSubRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginTop: 16,
-    paddingTop: 16,
-    borderTopWidth: 1,
-    borderTopColor: "rgba(255,255,255,0.06)",
-  },
-  sheetSubLabel: {
-    color: "rgba(255,255,255,0.45)",
-    fontSize: 13,
-    fontWeight: "500",
-  },
-  sheetSubLangs: {
-    color: "rgba(255,255,255,0.85)",
-    fontSize: 13,
-    fontWeight: "500",
-    flex: 1,
-  },
-  progressContainer: {
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: "rgba(255, 255, 255, 0.08)",
-  },
-  progressHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 10,
-  },
-  progressTitle: {
-    color: "rgba(255, 255, 255, 0.7)",
-    fontSize: 13,
-    fontWeight: "600",
-  },
-  progressChipsList: {
-    gap: 8,
-    paddingRight: 20,
-  },
-  progressChip: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.12)",
-    backgroundColor: "rgba(255, 255, 255, 0.04)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  chipSearching: {
-    borderColor: "rgba(85, 128, 255, 0.35)",
-    backgroundColor: "rgba(85, 128, 255, 0.08)",
-  },
-  chipFound: {
-    borderColor: "rgba(46, 204, 113, 0.45)",
-    backgroundColor: "rgba(46, 204, 113, 0.12)",
-  },
-  chipNone: {
-    borderColor: "rgba(255, 255, 255, 0.05)",
-    backgroundColor: "rgba(255, 255, 255, 0.01)",
-  },
-  chipError: {
-    borderColor: "rgba(255, 74, 125, 0.35)",
-    backgroundColor: "rgba(255, 74, 125, 0.08)",
-  },
-  chipText: {
-    color: "#ffffff",
-    fontSize: 11,
-    fontWeight: "600",
-  },
-  chipTextNone: {
-    color: "rgba(255, 255, 255, 0.35)",
-  },
-  chipTextFound: {
-    color: "#2ecc71",
-  },
-  chipTextError: {
-    color: "#ff4a7d",
-  },
-  vpnNoticeCard: {
-    marginTop: 16,
-    backgroundColor: "rgba(255, 74, 125, 0.08)",
-    borderWidth: 1,
-    borderColor: "rgba(255, 74, 125, 0.25)",
-    borderRadius: 14,
-    padding: 16,
-    maxWidth: 300,
-    alignItems: "center",
-  },
-  vpnNoticeTitle: {
-    color: "#ffffff",
-    fontSize: 13,
-    fontWeight: "700",
-    marginBottom: 6,
-    textAlign: "center",
-  },
-  vpnNoticeText: {
-    color: "#A0A0A5",
-    fontSize: 12,
-    textAlign: "center",
-    lineHeight: 18,
-  },
-  errorReasonCard: {
-    marginTop: 12,
-    backgroundColor: "rgba(255, 74, 125, 0.06)",
-    borderRadius: 8,
-    padding: 10,
-    maxWidth: 280,
-  },
-  errorReasonText: {
-    color: "#ffb4ab",
-    fontSize: 11,
-    textAlign: "center",
-  },
-  noSourcesContainer: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 32,
-  },
-  noSourcesText: {
-    color: "#ffffff",
-    fontSize: 16,
-    fontWeight: "700",
-    marginTop: 12,
-    textAlign: "center",
-  },
-  noSourcesSubtext: {
-    color: "#8e8d92",
-    fontSize: 13,
-    marginTop: 6,
-    textAlign: "center",
-    lineHeight: 18,
-  },
-  tabsContainer: {
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: "rgba(255,255,255,0.08)",
-    overflow: "hidden",
-    position: "relative",
-  },
-  tabsScrollContent: {
-    gap: 8,
-    paddingHorizontal: 28, // extra room so first/last tab aren't hidden behind the fade overlays
-  },
-  tabsMaskedView: {
-    width: "100%",
-    height: 38,
-  },
-  sheetListMaskedView: {
-    flex: 1,
-    width: "100%",
-  },
-  tabButton: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 18,
-    backgroundColor: "rgba(255,255,255,0.05)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
-  },
-  tabButtonActive: {
-    backgroundColor: "rgba(0, 71, 255, 0.15)",
-    borderColor: "#0047FF",
-  },
-  tabText: {
-    color: "rgba(255,255,255,0.5)",
-    fontSize: 12,
-    fontWeight: "700",
-  },
-  tabTextActive: {
-    color: "#ffffff",
-  },
-  tabSubText: {
-    color: "rgba(255,255,255,0.3)",
-    fontSize: 9,
-    fontWeight: "500",
-    marginTop: 2,
-    maxWidth: 100,
-  },
-  langFilterRow: {
-    width: "100%",
-    paddingVertical: 8,
-    marginBottom: 2,
-  },
-  langFilterScrollContent: {
-    gap: 6,
-    paddingHorizontal: 28,
-  },
-  langFilterChip: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 14,
-    backgroundColor: "rgba(255,255,255,0.05)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
-  },
-  langFilterChipActive: {
-    backgroundColor: "rgba(0, 71, 255, 0.15)",
-    borderColor: "#0047FF",
-  },
-  langFilterText: {
-    color: "rgba(255,255,255,0.5)",
-    fontSize: 11,
-    fontWeight: "700",
-    letterSpacing: 0.5,
-  },
-  langFilterTextActive: {
-    color: "#ffffff",
-  },
-  skeletonStreamRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    padding: 16,
-    borderRadius: 12,
-    backgroundColor: "rgba(255,255,255,0.03)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.06)",
-    marginBottom: 10,
-  },
-  skeletonRowInfo: {
-    flex: 1,
-  },
-  skeletonQualityRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-  },
-  skeletonBadgeLarge: {
-    width: 90,
-    height: 18,
-    borderRadius: 4,
-    backgroundColor: "rgba(255,255,255,0.06)",
-  },
-  skeletonBadgeSmall: {
-    width: 45,
-    height: 18,
-    borderRadius: 4,
-    backgroundColor: "rgba(255,255,255,0.04)",
-  },
-  skeletonBadgeMedium: {
-    width: 60,
-    height: 18,
-    borderRadius: 4,
-    backgroundColor: "rgba(255,255,255,0.05)",
-  },
-  dohNotice: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginHorizontal: 16,
-    marginBottom: 6,
-    marginTop: 4,
-    paddingVertical: 7,
-    paddingHorizontal: 12,
-    backgroundColor: "rgba(85, 128, 255, 0.07)",
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "rgba(85, 128, 255, 0.18)",
-  },
-  dohNoticeText: {
-    color: "#5580FF",
-    fontSize: 11,
-    flex: 1,
-    lineHeight: 15,
-  },
-  listSearchingIndicator: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 8,
-    backgroundColor: "rgba(0, 71, 255, 0.05)",
-    borderRadius: 8,
-    marginHorizontal: 16,
-    marginTop: 8,
-    borderWidth: 1,
-    borderColor: "rgba(0, 71, 255, 0.15)",
-  },
-  listSearchingText: {
-    color: "#5580FF",
-    fontSize: 12,
-    fontWeight: "600",
-  },
-  activeOverlay: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    zIndex: 1,
-  },
-  searchLoaderContainer: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 32,
-    paddingVertical: 48,
-  },
-  searchLoaderText: {
-    color: "#ffffff",
-    fontSize: 16,
-    fontWeight: "700",
-    marginTop: 12,
-  },
-  searchLoaderSubtext: {
-    marginTop: 8,
-    textAlign: "center",
-    lineHeight: 18,
-  },
-  torrentModalContainer: {
-    flex: 1,
-    backgroundColor: "rgba(5, 5, 5, 0.85)",
-    justifyContent: "center",
-    alignItems: "center",
-    padding: 24,
-  },
-  torrentContentCard: {
-    width: "85%",
-    backgroundColor: "rgba(20, 18, 24, 0.9)",
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.08)",
-    borderRadius: 24,
-    padding: 24,
-    alignItems: "center",
-    elevation: 8,
-    shadowColor: "#0047FF",
-    shadowOpacity: 0.15,
-    shadowRadius: 16,
-  },
-  torrentTitleText: {
-    color: "#ffffff",
-    fontSize: 18,
-    fontWeight: "700",
-    marginTop: 18,
-  },
-  torrentSubTitleText: {
-    color: "#8E8D92",
-    fontSize: 13,
-    marginTop: 6,
-    textAlign: "center",
-  },
-  torrentProgressTrack: {
-    width: "100%",
-    height: 6,
-    backgroundColor: "rgba(255, 255, 255, 0.08)",
-    borderRadius: 3,
-    marginTop: 20,
-    overflow: "hidden",
-  },
-  torrentProgressFill: {
-    height: "100%",
-    backgroundColor: "#0047FF",
-    borderRadius: 3,
-  },
-  torrentStatsRow: {
-    width: "100%",
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginTop: 10,
-  },
-  torrentStatsText: {
-    color: "#A0A0A5",
-    fontSize: 12,
-    fontWeight: "500",
-  },
-  torrentCancelButton: {
-    marginTop: 24,
-    backgroundColor: "rgba(255, 255, 255, 0.08)",
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.12)",
-    paddingVertical: 10,
-    paddingHorizontal: 32,
-    borderRadius: 20,
-  },
-  torrentCancelText: {
-    color: "#ffffff",
-    fontSize: 14,
-    fontWeight: "600",
-  },
-  torrentCancelButtonCustom: {
-    backgroundColor: "rgba(255, 255, 255, 0.05)",
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.08)",
-    paddingVertical: 12,
-    borderRadius: 12,
-    alignItems: "center",
-    justifyContent: "center",
-    marginTop: 24,
-    width: "100%",
-  },
-  torrentOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(5, 5, 5, 0.88)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  torrentGlassCard: {
-    width: "88%",
-    backgroundColor: "rgba(20, 18, 24, 0.93)",
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.08)",
-    borderRadius: 32,
-    padding: 24,
-    alignItems: "center",
-    overflow: "hidden",
-    elevation: 12,
-    shadowColor: "#0047FF",
-    shadowOffset: { width: 0, height: 12 },
-    shadowOpacity: 0.28,
-    shadowRadius: 28,
-  },
-  torrentGlow: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    height: 140,
-  },
-  torrentBadgeContainer: {
-    backgroundColor: "rgba(0, 71, 255, 0.08)",
-    borderWidth: 1.5,
-    borderColor: "rgba(0, 71, 255, 0.25)",
-    paddingHorizontal: 12,
-    paddingVertical: 5,
-    borderRadius: 14,
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 8,
-  },
-  torrentBadgeText: {
-    color: "#5580FF",
-    fontSize: 10,
-    fontWeight: "800",
-    letterSpacing: 1.2,
-  },
-  torrentTitle: {
-    color: "#ffffff",
-    fontSize: 18,
-    fontWeight: "800",
-    textAlign: "center",
-    marginTop: 8,
-    marginBottom: 4,
-    paddingHorizontal: 12,
-  },
-  torrentSubtitle: {
-    color: "#8E8D92",
-    fontSize: 12,
-    fontWeight: "500",
-    textAlign: "center",
-    marginBottom: 16,
-  },
-  torrentStatsContainer: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    width: "100%",
-    gap: 12,
-    marginTop: 16,
-    marginBottom: 12,
-  },
-  torrentStatBox: {
-    flex: 1,
-    backgroundColor: "rgba(255, 255, 255, 0.03)",
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.06)",
-    borderRadius: 16,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  torrentStatLabel: {
-    color: "#8E8D92",
-    fontSize: 11,
-    fontWeight: "600",
-    marginBottom: 4,
-  },
-  torrentStatLabelRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    marginBottom: 4,
-  },
-  torrentStatValue: {
-    color: "#E5E2E3",
-    fontSize: 14,
-    fontWeight: "700",
-  },
-  torrentInfoRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    width: "100%",
-    gap: 12,
-    marginBottom: 14,
-  },
-  torrentInfoBox: {
-    flex: 1,
-    backgroundColor: "rgba(255, 255, 255, 0.03)",
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.06)",
-    borderRadius: 16,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    alignItems: "flex-start",
-    justifyContent: "center",
-  },
-  torrentInfoLabelRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    marginBottom: 4,
-  },
-  torrentInfoLabel: {
-    color: "#8E8D92",
-    fontSize: 11,
-    fontWeight: "600",
-  },
-  torrentInfoValue: {
-    color: "#E5E2E3",
-    fontSize: 13,
-    fontWeight: "700",
-    letterSpacing: 0.5,
-  },
-  torrentCaption: {
-    color: "#8E8D92",
-    fontSize: 11,
-    textAlign: "center",
-    lineHeight: 16,
-    paddingHorizontal: 16,
-    marginBottom: 24,
-  },
-  torrentCancelBtn: {
-    backgroundColor: "rgba(255, 74, 125, 0.08)",
-    borderWidth: 1,
-    borderColor: "rgba(255, 74, 125, 0.22)",
-    paddingVertical: 14,
-    borderRadius: 20,
-    alignItems: "center",
-    justifyContent: "center",
-    width: "100%",
-  },
-  torrentCancelBtnText: {
-    color: "#ff4a7d",
-    fontSize: 14,
-    fontWeight: "700",
-    letterSpacing: 0.6,
-  },
-  circularContainer: {
-    alignItems: "center",
-    justifyContent: "center",
-    marginVertical: 16,
-    width: "100%",
-  },
-  circularTextWrapper: {
-    position: "absolute",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  circularPercentText: {
-    color: "#ffffff",
-    fontSize: 26,
-    fontWeight: "800",
-  },
-  circularSpeedBadge: {
-    backgroundColor: "rgba(0, 71, 255, 0.08)",
-    borderWidth: 1,
-    borderColor: "rgba(0, 71, 255, 0.2)",
-    borderRadius: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    marginTop: 4,
-  },
-  circularSpeedText: {
-    color: "#5580FF",
-    fontSize: 10,
-    fontWeight: "700",
-  },
-  accordionHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    borderRadius: 16,
-    backgroundColor: "rgba(255,255,255,0.04)",
-    marginBottom: 8,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
-    marginTop: 8,
-  },
-  accordionHeaderActive: {
-    backgroundColor: "rgba(255,255,255,0.08)",
-    borderColor: "rgba(255,255,255,0.15)",
-  },
-  accordionTitle: {
-    color: "#fff",
-    fontSize: 14,
-    fontWeight: "700",
-    flex: 1,
-  },
-});

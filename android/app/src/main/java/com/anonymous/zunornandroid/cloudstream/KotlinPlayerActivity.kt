@@ -148,6 +148,8 @@ class KotlinPlayerActivity : AppCompatActivity() {
     private var logoPulseAnimatorSet: android.animation.AnimatorSet? = null
     private val isMovie: Boolean
         get() = intent.getStringExtra("mediaType") == "movie" || episodesArray == null || episodesArray!!.length() <= 1
+    private val isLive: Boolean
+        get() = intent.getStringExtra("mediaType") == "live"
     private var initialScrollVolume = 0
     private var initialScrollBrightness = 0.5f
 
@@ -1061,38 +1063,40 @@ class KotlinPlayerActivity : AppCompatActivity() {
         val episode = getCurrentEpisodeNumber()
 
         var savedPosition = 0L
-        val lookupKey = if (detailUrl.isNotEmpty()) detailUrl else if (id.isNotEmpty()) id else title
-        if (lookupKey.isNotEmpty()) {
-            val prefs = getSharedPreferences("sozo_playback_history", MODE_PRIVATE)
-            val historyStr = prefs.getString("history", "[]") ?: "[]"
-            try {
-                val historyArr = JSONArray(historyStr)
-                for (i in 0 until historyArr.length()) {
-                    val obj = historyArr.getJSONObject(i)
-                    val oldId = obj.optString("imdbId")
-                    val oldDetailUrl = obj.optString("detailUrl")
-                    val oldTitle = obj.optString("videoTitle")
-                    
-                    val isMatch = (detailUrl.isNotEmpty() && oldDetailUrl == detailUrl) ||
-                                  (id.isNotEmpty() && oldId == id) ||
-                                  (detailUrl.isEmpty() && id.isEmpty() && oldTitle == title)
-                                  
-                    if (isMatch) {
-                        val oldType = obj.optString("mediaType")
-                        if (oldType == "series") {
-                            val oldSeason = obj.optInt("season")
-                            val oldEpisode = obj.optInt("episode")
-                            if (oldSeason == season && oldEpisode == episode) {
+        if (!isLive) {
+            val lookupKey = if (detailUrl.isNotEmpty()) detailUrl else if (id.isNotEmpty()) id else title
+            if (lookupKey.isNotEmpty()) {
+                val prefs = getSharedPreferences("sozo_playback_history", MODE_PRIVATE)
+                val historyStr = prefs.getString("history", "[]") ?: "[]"
+                try {
+                    val historyArr = JSONArray(historyStr)
+                    for (i in 0 until historyArr.length()) {
+                        val obj = historyArr.getJSONObject(i)
+                        val oldId = obj.optString("imdbId")
+                        val oldDetailUrl = obj.optString("detailUrl")
+                        val oldTitle = obj.optString("videoTitle")
+                        
+                        val isMatch = (detailUrl.isNotEmpty() && oldDetailUrl == detailUrl) ||
+                                      (id.isNotEmpty() && oldId == id) ||
+                                      (detailUrl.isEmpty() && id.isEmpty() && oldTitle == title)
+                                      
+                        if (isMatch) {
+                            val oldType = obj.optString("mediaType")
+                            if (oldType == "series") {
+                                val oldSeason = obj.optInt("season")
+                                val oldEpisode = obj.optInt("episode")
+                                if (oldSeason == season && oldEpisode == episode) {
+                                    savedPosition = obj.optLong("position", 0L)
+                                    break
+                                }
+                            } else {
                                 savedPosition = obj.optLong("position", 0L)
                                 break
                             }
-                        } else {
-                            savedPosition = obj.optLong("position", 0L)
-                            break
                         }
                     }
-                }
-            } catch (_: Exception) {}
+                } catch (_: Exception) {}
+            }
         }
 
         player?.setMediaItem(mediaItemBuilder.build())
@@ -1490,7 +1494,7 @@ class KotlinPlayerActivity : AppCompatActivity() {
                 shape = GradientDrawable.OVAL
                 setColor(Color.parseColor("#D9141218"))   // rgba(20,18,24,0.85)
             }
-            visibility = if (isMovie) View.GONE else View.VISIBLE
+            visibility = if (isMovie || isLive) View.GONE else View.VISIBLE
             setOnClickListener { playPreviousEpisode() }
         }
         addPremiumTouchAnimation(prevEpBtn)
@@ -1502,6 +1506,7 @@ class KotlinPlayerActivity : AppCompatActivity() {
                 shape = GradientDrawable.OVAL
                 setColor(Color.parseColor("#D9141218"))
             }
+            visibility = if (isLive) View.GONE else View.VISIBLE
             setOnClickListener {
                 player?.let { p -> p.seekTo((p.currentPosition - 10000).coerceAtLeast(0)) }
                 showSeekFeedback(false, 10)
@@ -1563,6 +1568,7 @@ class KotlinPlayerActivity : AppCompatActivity() {
                 shape = GradientDrawable.OVAL
                 setColor(Color.parseColor("#D9141218"))
             }
+            visibility = if (isLive) View.GONE else View.VISIBLE
             setOnClickListener {
                 player?.let { p ->
                     val dur = p.duration
@@ -1599,7 +1605,7 @@ class KotlinPlayerActivity : AppCompatActivity() {
                 shape = GradientDrawable.OVAL
                 setColor(Color.parseColor("#D9141218"))
             }
-            visibility = if (isMovie) View.GONE else View.VISIBLE
+            visibility = if (isMovie || isLive) View.GONE else View.VISIBLE
             setOnClickListener { playNextEpisode() }
         }
         addPremiumTouchAnimation(nextEpBtn)
@@ -2097,7 +2103,9 @@ class KotlinPlayerActivity : AppCompatActivity() {
         }
 
         // Subtitles icon button
-        subtitleBtn = addGlassCapsuleIconBtn(settingsCapsule, R.drawable.ic_hero_language) { showSettingsDialog("Subtitles") }
+        subtitleBtn = addGlassCapsuleIconBtn(settingsCapsule, R.drawable.ic_hero_language) { showSettingsDialog("Subtitles") }.apply {
+            if (isLive) visibility = View.GONE
+        }
 
         // Quality icon button
         qualityBtn = addGlassCapsuleIconBtn(settingsCapsule, R.drawable.ic_lucide_hd) { showSettingsDialog("Video Quality") }
@@ -2149,6 +2157,10 @@ class KotlinPlayerActivity : AppCompatActivity() {
 
     private fun updateContinueWatchingPill(savedMs: Long, durationMs: Long) {
         val pill = continueWatchingPill ?: return
+        if (isLive) {
+            pill.visibility = View.GONE
+            return
+        }
         // Show pill only if savedMs > 10s and not within last 15s of video
         val showPill = savedMs > 10000L && durationMs > 0L && savedMs < (durationMs - 15000L)
         continueWatchingPillMs = savedMs
@@ -4512,11 +4524,11 @@ class KotlinPlayerActivity : AppCompatActivity() {
         topBar.visibility = View.VISIBLE
         bottomBar.visibility = View.VISIBLE
         
-        prevEpBtn.visibility = if (isMovie) View.GONE else View.VISIBLE
-        rewindBtn.visibility = View.VISIBLE
+        prevEpBtn.visibility = if (isMovie || isLive) View.GONE else View.VISIBLE
+        rewindBtn.visibility = if (isLive) View.GONE else View.VISIBLE
         playFrame.visibility = View.VISIBLE
-        ffBtn.visibility = View.VISIBLE
-        nextEpBtn.visibility = if (isMovie) View.GONE else View.VISIBLE
+        ffBtn.visibility = if (isLive) View.GONE else View.VISIBLE
+        nextEpBtn.visibility = if (isMovie || isLive) View.GONE else View.VISIBLE
         updateEpisodeButtonState()
         
         centerControls.visibility = View.VISIBLE
@@ -4609,6 +4621,7 @@ class KotlinPlayerActivity : AppCompatActivity() {
     private inner class PlayerGestureListener : GestureDetector.SimpleOnGestureListener() {
 
         override fun onDoubleTap(e: MotionEvent): Boolean {
+            if (isLive) return true
             if (loadingGroup.visibility == View.VISIBLE) return true
             player?.let { p ->
                 val dur = p.duration
@@ -5007,6 +5020,7 @@ class KotlinPlayerActivity : AppCompatActivity() {
     }
 
     private fun savePlaybackPosition() {
+        if (isLive) return
         val exo = player ?: return
         val pos = exo.currentPosition
         val dur = exo.duration

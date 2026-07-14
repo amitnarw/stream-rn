@@ -108,6 +108,7 @@ class LocalHttpServer(private val torrent: Torrent, private val port: Int) {
             out.write(headers.toString().toByteArray())
             out.flush()
 
+            torrent.setInterestedBytes(startByte)
             inputStream = torrent.getVideoStream()
             var skipped = 0L
             while (skipped < startByte) {
