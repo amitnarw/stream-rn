@@ -68,6 +68,13 @@ import {
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as favoritesApi from "../api/favorites";
 import { LinearGradient } from "expo-linear-gradient";
+import Svg, {
+  Circle,
+  Defs,
+  LinearGradient as SvgGradient,
+  Stop,
+  Path,
+} from "react-native-svg";
 import MaskedView from "@react-native-masked-view/masked-view";
 import { theme } from "../theme";
 import type { EpisodeItem, VideoSource, PluginProvider } from "../types/plugin";
@@ -87,6 +94,8 @@ import {
   normalizeLangCode,
 } from "../utils/detailHelpers";
 import { styles } from "./DetailScreen.styles";
+import MeshGradient from "../components/MeshGradient";
+import { Canvas, Circle as SkiaCircle, BlurMask } from "@shopify/react-native-skia";
 
 function getHighQualityImageUrl(
   url: string | null | undefined,
@@ -592,6 +601,117 @@ function TorrentAccordion({
   );
 }
 
+// Custom Socket Cards for the Bento Grid Dashboard
+const SvgCardTop = ({
+  children,
+  style,
+}: {
+  children: React.ReactNode;
+  style?: any;
+}) => {
+  const [width, setWidth] = useState(0);
+  const H = 110;
+  const R = 58;
+
+  const path = useMemo(() => {
+    if (width === 0) return "";
+    return `M 0,20 Q 0,0 20,0 H ${width - 20} Q ${width},0 ${width},20 V ${H - 20} Q ${width},${H} ${width - 20},${H} H ${width / 2 + R} A ${R},${R} 0 0,0 ${width / 2 - R},${H} H 20 Q 0,${H} 0,${H - 20} Z`;
+  }, [width]);
+
+  return (
+    <View
+      style={[{ height: H, width: "100%", position: "relative" }, style]}
+      onLayout={(e) => setWidth(e.nativeEvent.layout.width)}
+    >
+      {width > 0 && (
+        <Svg style={StyleSheet.absoluteFillObject}>
+          <Defs>
+            <SvgGradient id="topCardGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+              <Stop offset="0%" stopColor="rgba(30, 27, 36, 0.72)" />
+              <Stop offset="100%" stopColor="rgba(15, 13, 18, 0.72)" />
+            </SvgGradient>
+          </Defs>
+          <Path
+            d={path}
+            fill="url(#topCardGrad)"
+            stroke="rgba(255, 255, 255, 0.08)"
+            strokeWidth={1}
+          />
+        </Svg>
+      )}
+      <View
+        style={[
+          StyleSheet.absoluteFillObject,
+          {
+            paddingHorizontal: 10,
+            paddingTop: 14,
+            paddingBottom: 0,
+            justifyContent: "flex-start",
+            alignItems: "center",
+          },
+        ]}
+      >
+        {children}
+      </View>
+    </View>
+  );
+};
+
+const SvgCardBottom = ({
+  children,
+  style,
+}: {
+  children: React.ReactNode;
+  style?: any;
+}) => {
+  const [width, setWidth] = useState(0);
+  const H = 110;
+  const R = 58;
+
+  const path = useMemo(() => {
+    if (width === 0) return "";
+    return `M 0,20 Q 0,0 20,0 H ${width / 2 - R} A ${R},${R} 0 0,0 ${width / 2 + R},0 H ${width - 20} Q ${width},0 ${width},20 V ${H - 20} Q ${width},${H} ${width - 20},${H} H 20 Q 0,${H} 0,${H - 20} Z`;
+  }, [width]);
+
+  return (
+    <View
+      style={[{ height: H, width: "100%", position: "relative" }, style]}
+      onLayout={(e) => setWidth(e.nativeEvent.layout.width)}
+    >
+      {width > 0 && (
+        <Svg style={StyleSheet.absoluteFillObject}>
+          <Defs>
+            <SvgGradient id="botCardGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+              <Stop offset="0%" stopColor="rgba(30, 27, 36, 0.72)" />
+              <Stop offset="100%" stopColor="rgba(15, 13, 18, 0.72)" />
+            </SvgGradient>
+          </Defs>
+          <Path
+            d={path}
+            fill="url(#botCardGrad)"
+            stroke="rgba(255, 255, 255, 0.08)"
+            strokeWidth={1}
+          />
+        </Svg>
+      )}
+      <View
+        style={[
+          StyleSheet.absoluteFillObject,
+          {
+            paddingHorizontal: 10,
+            paddingTop: 0,
+            paddingBottom: 14,
+            justifyContent: "flex-end",
+            alignItems: "center",
+          },
+        ]}
+      >
+        {children}
+      </View>
+    </View>
+  );
+};
+
 export default function DetailScreen() {
   const [blurTarget, setBlurTarget] = useState<any>(null);
   const blurTargetRef = useRef<any>(null);
@@ -753,6 +873,7 @@ export default function DetailScreen() {
   const [showSourcePicker, setShowSourcePicker] = useState(false);
   const [selectedSourceIndex, setSelectedSourceIndex] = useState(0);
   const [isTorrentBuffering, setIsTorrentBuffering] = useState(false);
+
   const [torrentStatus, setTorrentStatus] =
     useState<bridge.TorrentStatus | null>(null);
   const [selectedTorrentSeeders, setSelectedTorrentSeeders] = useState(0);
@@ -1128,6 +1249,22 @@ export default function DetailScreen() {
 
     if (!list.includes("VidSrcMe")) list.push("VidSrcMe");
     if (!list.includes("VsEmbed")) list.push("VsEmbed");
+
+    // Stable canonical sorting to prevent dynamic sequence changes
+    const canonical = [
+      "all",
+      ...allProviders.map((p) => p.name.toLowerCase()),
+      "vidsrcme",
+      "vsembed",
+    ];
+    list.sort((a, b) => {
+      const idxA = canonical.indexOf(a.toLowerCase());
+      const idxB = canonical.indexOf(b.toLowerCase());
+      if (idxA === -1 && idxB === -1) return a.localeCompare(b);
+      if (idxA === -1) return 1;
+      if (idxB === -1) return -1;
+      return idxA - idxB;
+    });
 
     return list;
   }, [allProviders, providerName, resolvingProgress, sources]);
@@ -2557,173 +2694,269 @@ export default function DetailScreen() {
         </Animated.View>
       </Animated.View>
 
-      {/* Torrent Buffering Overlay */}
-      <CustomModal
+      {/* Bento Grid Torrent Buffering Modal */}
+      {/* Bento Grid Torrent Buffering Modal */}
+      <Modal
         visible={isTorrentBuffering}
-        dismissable={false}
-        onClose={() => {
+        transparent={true}
+        animationType="fade"
+        statusBarTranslucent={true}
+        onRequestClose={() => {
           setIsTorrentBuffering(false);
           setIsOpeningPlayer(false);
-          torrentSessionIdRef.current++; // Invalidate active torrent load session
+          torrentSessionIdRef.current++;
           if (torrentIntervalRef.current) {
             clearInterval(torrentIntervalRef.current);
           }
           bridge.stopTorrentStream().catch(() => {});
         }}
-        title="Torrent Engine"
-        message=""
-        Icon={Activity}
-        iconColor="#0047FF"
-        iconBgColor="rgba(0, 71, 255, 0.1)"
-        glowColors={["rgba(249, 115, 22, 0.16)", "transparent"] as const}
       >
-        <Text
-          style={[
-            styles.torrentStatValue,
-            { textAlign: "center", marginBottom: 10 },
-          ]}
-        >
-          {sources[selectedSourceIndex]?.host}
-        </Text>
+        <View style={styles.torrentDashboardOverlay}>
+          <BlurView
+            intensity={35}
+            tint="dark"
+            style={StyleSheet.absoluteFillObject}
+          />
 
-        {/* Linear Progress Card */}
-        <View style={styles.torrentProgressCard}>
-          <View style={styles.torrentProgressHeader}>
-            <Text style={styles.torrentProgressPercent}>
-              {Math.min(
-                100,
-                Math.max(0, ((torrentStatus?.progress ?? 0) / 1.5) * 100),
-              ).toFixed(0)}
-              %
-            </Text>
-            <Text style={styles.torrentProgressSpeed}>
-              {torrentStatus?.speed
-                ? torrentStatus.speed >= 1024 * 1024
-                  ? `${(torrentStatus.speed / (1024 * 1024)).toFixed(1)} MB/s`
-                  : `${(torrentStatus.speed / 1024).toFixed(0)} kB/s`
-                : "0 kB/s"}
-            </Text>
-          </View>
-          <View style={styles.torrentProgressBarTrack}>
-            <View
-              style={[
-                styles.torrentProgressBarFill,
-                {
-                  width: `${Math.min(100, Math.max(0, ((torrentStatus?.progress ?? 0) / 1.5) * 100))}%`,
-                },
-              ]}
-            />
+          {/* Ambient Glows */}
+          <LinearGradient
+            colors={["rgba(0, 71, 255, 0.15)", "transparent"]}
+            style={styles.torrentDashboardTopGlow}
+          />
+          <LinearGradient
+            colors={["transparent", "rgba(255, 74, 125, 0.05)"]}
+            style={styles.torrentDashboardBottomGlow}
+          />
+
+          <View style={styles.torrentDashboardContainer}>
+            {/* Header outside bento cards to show the full long release name without truncation */}
+            <View style={styles.torrentDashboardHeaderOutside}>
+              <View style={styles.torrentDashboardBadge}>
+                <View style={styles.torrentDashboardBadgeDot} />
+                <Text style={styles.torrentDashboardBadgeText}>
+                  TORRENT ENGINE
+                </Text>
+              </View>
+              <Text style={styles.torrentDashboardFullHostText}>
+                {sources[selectedSourceIndex]?.host ||
+                  selectedTorrentHost ||
+                  "Torrent"}
+              </Text>
+            </View>
+
+            {/* Bento Grid Section */}
+            <View style={styles.torrentBentoGrid}>
+              {/* Row: Left Column | Center Progress Socket Column | Right Column */}
+              <View style={styles.torrentBentoMiddleRow}>
+                {/* Left Column (Stats: Peers, Quality) */}
+                <View style={styles.torrentBentoSideCol}>
+                  {/* Peers Card */}
+                  <View style={styles.torrentBentoCard}>
+                    <View style={styles.torrentBentoCardHeader}>
+                      <Users size={14} color="#5580FF" />
+                      <Text style={styles.torrentBentoCardLabel}>PEERS</Text>
+                    </View>
+                    <Text style={styles.torrentBentoCardValue}>
+                      {torrentStatus?.peers && torrentStatus.peers > 0
+                        ? `${torrentStatus.peers}`
+                        : selectedTorrentSeeders > 0
+                          ? `${selectedTorrentSeeders}`
+                          : "0"}
+                    </Text>
+                  </View>
+
+                  {/* Quality Card */}
+                  <View style={styles.torrentBentoCard}>
+                    <View style={styles.torrentBentoCardHeader}>
+                      <Monitor size={14} color="#5580FF" />
+                      <Text style={styles.torrentBentoCardLabel}>QUALITY</Text>
+                    </View>
+                    <Text
+                      style={styles.torrentBentoCardValue}
+                      numberOfLines={1}
+                      ellipsizeMode="tail"
+                    >
+                      {extractResolution(selectedSourceQuality) || "N/A"}
+                    </Text>
+                  </View>
+                </View>
+
+                {/* Center Column: The Orb socketed between SvgCardTop and SvgCardBottom */}
+                <View style={styles.torrentBentoCenterCol}>
+                  {/* Top Card (Symmetric Socket Card) */}
+                  <SvgCardTop style={styles.torrentDashboardHeaderCard}>
+                    <Text style={styles.torrentBentoCardLabel}>ENGINE</Text>
+                    <Text
+                      style={[
+                        styles.torrentBentoCardValue,
+                        { color: "#5580FF" },
+                      ]}
+                    >
+                      ACTIVE
+                    </Text>
+                  </SvgCardTop>
+
+                  {/* Center Progress Orb Container */}
+                  <View style={styles.torrentBentoOrbWrapper}>
+                    {/* 1. Real Soft Gaussian Blur Neon Glow Backdrop (Skia driven) */}
+                    <View
+                      style={{
+                        position: "absolute",
+                        width: 172,
+                        height: 172,
+                        top: -30,
+                        left: -30,
+                      }}
+                      pointerEvents="none"
+                    >
+                      <Canvas style={StyleSheet.absoluteFillObject}>
+                        <SkiaCircle cx={86} cy={86} r={46} color={theme.colors.accent}>
+                          <BlurMask blur={24} style="normal" />
+                        </SkiaCircle>
+                      </Canvas>
+                    </View>
+
+                    {/* Main Glowing Circle */}
+                    <View
+                      style={[
+                        styles.torrentBentoOrbCard,
+                        {
+                          overflow: "hidden",
+                        },
+                      ]}
+                    >
+                      {/* Skia MeshGradient — fluid aurora background */}
+                      <MeshGradient
+                        width={112}
+                        height={112}
+                        colors={[
+                          theme.colors.accent,
+                          theme.colors.accentLight,
+                          theme.colors.lightGlass.backdropDim,
+                          theme.colors.accentGlow,
+                        ]}
+                        speed={2}
+                        style={[
+                          StyleSheet.absoluteFillObject,
+                          { borderRadius: 56 },
+                        ]}
+                      />
+
+                      {/* 3. Glossy Glass 3D Highlight Reflection Overlay */}
+                      <LinearGradient
+                        colors={[
+                          "rgba(255, 255, 255, 0.22)",
+                          "rgba(255, 255, 255, 0.0)",
+                        ]}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 0.8, y: 0.8 }}
+                        style={StyleSheet.absoluteFillObject}
+                        pointerEvents="none"
+                      />
+
+                      {/* Stats Inside Orb */}
+                      <View style={styles.torrentBentoOrbTextContainer}>
+                        <Text style={styles.torrentBentoOrbPercent}>
+                          {Math.min(
+                            100,
+                            Math.max(
+                              0,
+                              ((torrentStatus?.progress ?? 0) / 1.5) * 100,
+                            ),
+                          ).toFixed(0)}
+                          %
+                        </Text>
+                        <Text style={styles.torrentBentoOrbSpeed}>
+                          {torrentStatus?.speed
+                            ? torrentStatus.speed >= 1024 * 1024
+                              ? `${(torrentStatus.speed / (1024 * 1024)).toFixed(1)} MB/s`
+                              : `${(torrentStatus.speed / 1024).toFixed(0)} kB/s`
+                            : "0 kB/s"}
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
+
+                  {/* Bottom Card (Status) */}
+                  <SvgCardBottom style={styles.torrentDashboardBottomCard}>
+                    <Text style={styles.torrentBentoCardLabel}>STATUS</Text>
+                    <Text
+                      style={[
+                        styles.torrentBentoCardValue,
+                        { color: "#ff4a7d" },
+                      ]}
+                    >
+                      {torrentStatus?.peers && torrentStatus.peers > 0
+                        ? "Streaming"
+                        : "Connecting"}
+                    </Text>
+                  </SvgCardBottom>
+                </View>
+
+                {/* Right Column (Stats: Size, Audio) */}
+                <View style={styles.torrentBentoSideCol}>
+                  {/* Size Card */}
+                  <View style={styles.torrentBentoCard}>
+                    <View style={styles.torrentBentoCardHeader}>
+                      <Database size={14} color="#5580FF" />
+                      <Text style={styles.torrentBentoCardLabel}>SIZE</Text>
+                    </View>
+                    <Text
+                      style={styles.torrentBentoCardValue}
+                      numberOfLines={1}
+                      ellipsizeMode="tail"
+                    >
+                      {extractTorrentSize(selectedSourceQuality) || "N/A"}
+                    </Text>
+                  </View>
+
+                  {/* Audio Card */}
+                  <View style={styles.torrentBentoCard}>
+                    <View style={styles.torrentBentoCardHeader}>
+                      <Volume2 size={14} color="#5580FF" />
+                      <Text style={styles.torrentBentoCardLabel}>AUDIO</Text>
+                    </View>
+                    <Text
+                      style={styles.torrentBentoCardValue}
+                      numberOfLines={1}
+                      ellipsizeMode="tail"
+                    >
+                      {parseAudioLanguages(selectedTorrentHost) || "Multi"}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+            </View>
+
+            {/* 3. Footer: Caption & Cancel Button */}
+            <View style={styles.torrentDashboardFooter}>
+              <Text style={styles.torrentDashboardCaption}>
+                Finding sources and preparing your stream. Please wait a
+                moment...
+              </Text>
+
+              <TouchableOpacity
+                style={styles.torrentDashboardCancelBtn}
+                activeOpacity={0.8}
+                onPress={() => {
+                  setIsTorrentBuffering(false);
+                  setIsOpeningPlayer(false);
+                  torrentSessionIdRef.current++;
+                  if (torrentIntervalRef.current) {
+                    clearInterval(torrentIntervalRef.current);
+                  }
+                  bridge.stopTorrentStream().catch(() => {});
+                }}
+              >
+                <X size={16} color="#ff4a7d" style={{ marginRight: 6 }} />
+                <Text style={styles.torrentDashboardCancelBtnText}>
+                  Cancel Stream
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
-
-        {/* Stats Grid - 2 rows of glass cards */}
-        <View style={{ width: "100%", gap: 8, marginTop: 10, marginBottom: 8 }}>
-          {/* Row 1: Peers | Size | Status */}
-          <View style={{ flexDirection: "row", gap: 8 }}>
-            {/* Box 1: Peers */}
-            <View style={styles.torrentStatBox}>
-              <View style={styles.torrentStatLabelRow}>
-                <Users size={11} color="#8E8D92" strokeWidth={2} />
-                <Text style={styles.torrentStatLabel}>Peers</Text>
-              </View>
-              <Text style={styles.torrentStatValue}>
-                {torrentStatus?.peers && torrentStatus.peers > 0
-                  ? `${torrentStatus.peers}`
-                  : selectedTorrentSeeders > 0
-                    ? `${selectedTorrentSeeders}`
-                    : "0"}
-              </Text>
-            </View>
-
-            {/* Box 2: Size */}
-            <View style={styles.torrentStatBox}>
-              <View style={styles.torrentStatLabelRow}>
-                <Database size={11} color="#8E8D92" strokeWidth={2} />
-                <Text style={styles.torrentStatLabel}>Size</Text>
-              </View>
-              <Text
-                style={styles.torrentStatValue}
-                numberOfLines={1}
-                ellipsizeMode="tail"
-              >
-                {extractTorrentSize(selectedSourceQuality)}
-              </Text>
-            </View>
-
-            {/* Box 3: Status */}
-            <View style={styles.torrentStatBox}>
-              <View style={styles.torrentStatLabelRow}>
-                <Wifi size={11} color="#8E8D92" strokeWidth={2} />
-                <Text style={styles.torrentStatLabel}>Status</Text>
-              </View>
-              <Text
-                style={styles.torrentStatValue}
-                numberOfLines={1}
-                ellipsizeMode="tail"
-              >
-                {torrentStatus?.peers && torrentStatus.peers > 0
-                  ? "Streaming"
-                  : "Resolving"}
-              </Text>
-            </View>
-          </View>
-
-          {/* Row 2: Quality | Audio */}
-          <View style={{ flexDirection: "row", gap: 8 }}>
-            {/* Box 4: Quality */}
-            <View style={styles.torrentStatBox}>
-              <View style={styles.torrentStatLabelRow}>
-                <Monitor size={11} color="#8E8D92" strokeWidth={2} />
-                <Text style={styles.torrentStatLabel}>Quality</Text>
-              </View>
-              <Text
-                style={styles.torrentStatValue}
-                numberOfLines={1}
-                ellipsizeMode="tail"
-              >
-                {extractResolution(selectedSourceQuality)}
-              </Text>
-            </View>
-
-            {/* Box 5: Audio */}
-            <View style={styles.torrentStatBox}>
-              <View style={styles.torrentStatLabelRow}>
-                <Volume2 size={11} color="#8E8D92" strokeWidth={2} />
-                <Text style={styles.torrentStatLabel}>Audio</Text>
-              </View>
-              <Text
-                style={styles.torrentStatValue}
-                numberOfLines={1}
-                ellipsizeMode="tail"
-              >
-                {parseAudioLanguages(selectedTorrentHost)}
-              </Text>
-            </View>
-          </View>
-        </View>
-
-        {/* Helpful tooltip caption to prevent user anxiety */}
-        <Text style={styles.torrentCaption}>
-          First piece download may take a moment to bootstrap DHT peers.
-        </Text>
-
-        {/* Cancel Button - Rose themed glass pill */}
-        <TouchableOpacity
-          style={styles.torrentCancelBtn}
-          onPress={() => {
-            setIsTorrentBuffering(false);
-            setIsOpeningPlayer(false);
-            torrentSessionIdRef.current++;
-            if (torrentIntervalRef.current) {
-              clearInterval(torrentIntervalRef.current);
-            }
-            bridge.stopTorrentStream().catch(() => {});
-          }}
-          activeOpacity={0.8}
-        >
-          <Text style={styles.torrentCancelBtnText}>Cancel Stream</Text>
-        </TouchableOpacity>
-      </CustomModal>
+      </Modal>
 
       {/* Torrent Error Modal */}
       <CustomModal
