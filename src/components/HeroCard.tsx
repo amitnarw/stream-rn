@@ -16,7 +16,6 @@ import { theme } from "../theme";
 interface HeroCardProps {
   item: MediaItem;
   index: number;
-  scrollX: Animated.Value;
   onPress: (item: MediaItem, layout: CardLayout, index: number) => void;
   heroSnap: number;
   heroCardWidth: number;
@@ -27,7 +26,6 @@ interface HeroCardProps {
 export const HeroCard = React.memo(function HeroCard({
   item,
   index,
-  scrollX,
   onPress,
   heroSnap,
   heroCardWidth,
@@ -96,25 +94,7 @@ export const HeroCard = React.memo(function HeroCard({
     // overlay state — no change needed.
   }, [phase, isTarget]);
 
-  const inputRange = [
-    (index - 1) * heroSnap,
-    index * heroSnap,
-    (index + 1) * heroSnap,
-  ];
 
-  const scale = scrollX.interpolate({
-    inputRange,
-    outputRange: [0.85, 1.0, 0.85],
-    extrapolate: "clamp",
-  });
-
-  const fadeOpacity = scrollX.interpolate({
-    inputRange,
-    outputRange: [0.5, 1.0, 0.5],
-    extrapolate: "clamp",
-  });
-
-  const combinedScale = Animated.multiply(scale, pressScale);
 
   function handlePress() {
     viewRef.current?.measure(
@@ -186,8 +166,7 @@ export const HeroCard = React.memo(function HeroCard({
       >
         <Animated.View
           style={{
-            transform: [{ scale: combinedScale }],
-            opacity: fadeOpacity,
+            transform: [{ scale: pressScale }],
             width: heroCardWidth,
             height: heroCardHeight,
             overflow: "visible",
@@ -199,7 +178,7 @@ export const HeroCard = React.memo(function HeroCard({
           <View style={[styles.heroCard, { width: heroCardWidth, height: heroCardHeight }]}>
             {item.posterUrl ? (
               <Image
-                source={{ uri: item.posterUrl }}
+                source={{ uri: item.posterUrl, cache: "force-cache" }}
                 style={styles.heroPosterImg}
                 resizeMode="cover"
               />
@@ -216,13 +195,13 @@ export const HeroCard = React.memo(function HeroCard({
               pointerEvents="none"
             >
               <LinearGradient
-                colors={["transparent", "rgba(0, 0, 0, 0)", "rgba(0, 0, 0, 1)"]}
+                colors={["transparent", "rgba(0, 0, 0, 0.4)", "rgba(0, 0, 0, 0.85)", "rgba(0, 0, 0, 1.0)"]}
                 style={{
                   position: "absolute",
                   left: 0,
                   right: 0,
                   bottom: 0,
-                  height: 150,
+                  height: 220,
                   justifyContent: "flex-end",
                   alignItems: "center",
                   paddingBottom: 24,

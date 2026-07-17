@@ -34,6 +34,7 @@ import * as bridge from "../api/cloudStreamBridge";
 import { useTransition, useTransitionActions } from "../context/TransitionContext";
 import type { CardLayout } from "../context/TransitionContext";
 import { HeroCard } from "../components/HeroCard";
+import { BlurCarousel } from "../components/BlurCarousel";
 import MediaCard from "../components/MediaCard";
 import { ContinueCard } from "../components/ContinueCard";
 import ChannelCard from "../components/ChannelCard";
@@ -230,102 +231,52 @@ function HomeSkeletonScreen({ isLive }: { isLive?: boolean }) {
           </View>
         </View>
 
-        {/* Hero meta skeleton */}
-        <View style={{ alignItems: "center", marginVertical: 20, gap: 10 }}>
-          <SkeletonBox width={50} height={12} borderRadius={6} />
-          <SkeletonBox width={220} height={22} borderRadius={11} />
-          <View style={{ flexDirection: "row", gap: 8, marginTop: 4 }}>
-            <SkeletonBox width={60} height={20} borderRadius={10} />
-            <SkeletonBox width={80} height={20} borderRadius={10} />
-            <SkeletonBox width={55} height={20} borderRadius={10} />
-          </View>
-          {/* Static dots */}
-          <View style={{ flexDirection: "row", gap: 6, marginTop: 8 }}>
-            <View
-              style={{
-                width: 14,
-                height: 6,
-                borderRadius: 3,
-                backgroundColor: "rgba(255, 255, 255, 0.25)",
-              }}
-            />
-            <View
-              style={{
-                width: 6,
-                height: 6,
-                borderRadius: 3,
-                backgroundColor: "rgba(255, 255, 255, 0.08)",
-              }}
-            />
-            <View
-              style={{
-                width: 6,
-                height: 6,
-                borderRadius: 3,
-                backgroundColor: "rgba(255, 255, 255, 0.08)",
-              }}
-            />
-            <View
-              style={{
-                width: 6,
-                height: 6,
-                borderRadius: 3,
-                backgroundColor: "rgba(255, 255, 255, 0.08)",
-              }}
-            />
-            <View
-              style={{
-                width: 6,
-                height: 6,
-                borderRadius: 3,
-                backgroundColor: "rgba(255, 255, 255, 0.08)",
-              }}
-            />
-          </View>
+        {/* Carousel dots skeleton */}
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "center",
+            marginTop: 16,
+            marginBottom: 16,
+            height: 6,
+          }}
+        >
+          <View style={{ width: 14, height: 4, borderRadius: 2, backgroundColor: "rgba(255, 255, 255, 0.25)", marginHorizontal: 3 }} />
+          <View style={{ width: 8, height: 4, borderRadius: 2, backgroundColor: "rgba(255, 255, 255, 0.08)", marginHorizontal: 3 }} />
+          <View style={{ width: 8, height: 4, borderRadius: 2, backgroundColor: "rgba(255, 255, 255, 0.08)", marginHorizontal: 3 }} />
+          <View style={{ width: 8, height: 4, borderRadius: 2, backgroundColor: "rgba(255, 255, 255, 0.08)", marginHorizontal: 3 }} />
+          <View style={{ width: 8, height: 4, borderRadius: 2, backgroundColor: "rgba(255, 255, 255, 0.08)", marginHorizontal: 3 }} />
         </View>
 
         {/* Sections skeleton */}
         <View style={{ paddingHorizontal: 20, marginTop: 10, gap: 28 }}>
-          <View style={{ gap: 12 }}>
-            <SkeletonBox width={130} height={16} borderRadius={8} />
-            <View style={{ flexDirection: "row", gap: 8 }}>
-              <SkeletonBox
-                width={S_CARD_W}
-                height={S_CARD_H}
-                borderRadius={22}
-              />
-              <SkeletonBox
-                width={S_CARD_W}
-                height={S_CARD_H}
-                borderRadius={22}
-              />
-              <SkeletonBox
-                width={S_CARD_W}
-                height={S_CARD_H}
-                borderRadius={22}
-              />
+          {[1, 2, 3].map((sectionIdx) => (
+            <View key={sectionIdx} style={{ gap: 12 }}>
+              {/* Section Header Title */}
+              <SkeletonBox width={sectionIdx === 1 ? 130 : 100} height={16} borderRadius={8} />
+              
+              {/* Horizontal Row of Cards */}
+              <View style={{ flexDirection: "row", gap: 8 }}>
+                {[1, 2, 3].map((cardIdx) => (
+                  <View key={cardIdx} style={{ gap: 6 }}>
+                    <SkeletonBox
+                      width={S_CARD_W}
+                      height={S_CARD_H}
+                      borderRadius={22}
+                    />
+                    <View style={{ alignSelf: "center", marginTop: 2 }}>
+                      <SkeletonBox
+                        width={S_CARD_W * 0.75}
+                        height={10}
+                        borderRadius={5}
+                      />
+                    </View>
+                  </View>
+                ))}
+              </View>
             </View>
-          </View>
-          <View style={{ gap: 12 }}>
-            <SkeletonBox width={100} height={16} borderRadius={8} />
-            <View style={{ flexDirection: "row", gap: 8 }}>
-              <SkeletonBox
-                width={S_CARD_W}
-                height={S_CARD_H}
-                borderRadius={22}
-              />
-              <SkeletonBox
-                width={S_CARD_W}
-                height={S_CARD_H}
-                borderRadius={22}
-              />
-              <SkeletonBox
-                width={S_CARD_W}
-                height={S_CARD_H}
-                borderRadius={22}
-              />
-            </View>
-          </View>
+          ))}
         </View>
       </ScrollView>
     </View>
@@ -595,8 +546,6 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
     } catch (_) {}
     setRefreshing(false);
   }, [activeTab]);
-  const flatListRef = useRef<any>(null);
-  const scrollX = useRef(new Animated.Value(0)).current;
   const scrollY = useRef(new Animated.Value(0)).current;
   // Track whether we have live section data so the focus listener can skip
   // re-fetching when the user returns from a nested screen (SeeAll, etc.).
@@ -627,108 +576,20 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
   const [showSkeleton, setShowSkeleton] = useState(true);
   const skeletonOpacity = useRef(new Animated.Value(1)).current;
 
-  const [initialScrolled, setInitialScrolled] = useState(false);
-
   // Active Hero Declarations (hoisted for scope safety inside hooks)
   const heroSection = sections.find(
     (s) => s.name !== "Continue Watching" && s.items?.length > 0,
   );
-  const heroItems = heroSection?.items?.slice(0, 10) ?? [];
-  const loopItems = useMemo(() => {
-    return heroItems.length > 1 ? [...heroItems, ...heroItems, ...heroItems] : heroItems;
-  }, [heroItems]);
+  const heroItems = useMemo(() => {
+    return heroSection?.items?.slice(0, 10) ?? [];
+  }, [heroSection]);
 
   const hero = heroItems[heroIdx] ?? null;
   const tags = GENRE_SETS[heroIdx % GENRE_SETS.length];
   const heroSectionIdx = sections.indexOf(heroSection as HomeSection);
 
-  // Pre-calculate exact snap offsets to bypass Android padding/snapToInterval bugs
-  const snapOffsets = useMemo(() => {
-    return loopItems.map((_, i) => i * HERO_SNAP);
-  }, [loopItems]);
-
-  // Programmatic scroll alignment to the middle replica on initial load
-  const handleContentSizeChange = useCallback(() => {
-    if (!initialScrolled && heroItems.length > 1) {
-      setInitialScrolled(true);
-      scrollX.setValue(heroItems.length * HERO_SNAP);
-      flatListRef.current?.scrollToOffset({
-        offset: heroItems.length * HERO_SNAP,
-        animated: false,
-      });
-    }
-  }, [initialScrolled, heroItems.length]);
-
-  // Synchronize active hero index and process seamless jumps when momentum settles
-  const handleScrollEnd = useCallback(
-    (event: any) => {
-      const N = heroItems.length;
-      if (N <= 1) return;
-      const offsetX = event.nativeEvent.contentOffset.x;
-      const indexInLoop = Math.max(
-        0,
-        Math.min(Math.round(offsetX / HERO_SNAP), N * 3 - 1),
-      );
-      const indexInOrig = indexInLoop % N;
-      if (indexInOrig !== heroIdxRef.current) {
-        setHeroIdx(indexInOrig);
-      }
-
-      // Seamless boundary jump: reposition the list to the middle replica so
-      // the user can continue swiping in either direction. We do NOT call
-      // scrollX.setValue() here — the Animated.event on onScroll keeps scrollX
-      // in sync automatically. A manual setValue() would create a 1-frame
-      // mismatch between the JS Animated.Value and the native scroll offset,
-      // causing the first/last cards to flash their wrong scale/opacity.
-      if (indexInLoop < N) {
-        flatListRef.current?.scrollToOffset({ offset: (indexInLoop + N) * HERO_SNAP, animated: false });
-      } else if (indexInLoop >= 2 * N) {
-        flatListRef.current?.scrollToOffset({ offset: (indexInLoop - N) * HERO_SNAP, animated: false });
-      }
-    },
-    [heroItems.length],
-  );
-
-  // Handle scroll drag end safely without interrupting momentum
-  const handleScrollEndDrag = useCallback(
-    (event: any) => {
-      const N = heroItems.length;
-      if (N <= 1) return;
-      const offsetX = event.nativeEvent.contentOffset.x;
-      const velocityX = event.nativeEvent.velocity?.x ?? 0;
-      
-      const indexInLoop = Math.max(
-        0,
-        Math.min(Math.round(offsetX / HERO_SNAP), N * 3 - 1),
-      );
-      const indexInOrig = indexInLoop % N;
-      if (indexInOrig !== heroIdxRef.current) {
-        setHeroIdx(indexInOrig);
-      }
-
-      // Only jump when no momentum remains (velocity is 0). Same rule:
-      // no scrollX.setValue() — let onScroll's Animated.event handle it.
-      if (velocityX === 0) {
-        if (indexInLoop < N) {
-          flatListRef.current?.scrollToOffset({ offset: (indexInLoop + N) * HERO_SNAP, animated: false });
-        } else if (indexInLoop >= 2 * N) {
-          flatListRef.current?.scrollToOffset({ offset: (indexInLoop - N) * HERO_SNAP, animated: false });
-        }
-      }
-    },
-    [heroItems.length],
-  );
-
-  // Reset active hero index when sections/tabs change.
-  // We do NOT call scrollX.setValue(0) here — that would synchronously snap
-  // the animation source to 0, invalidating every card scale/opacity
-  // interpolation and the active dot position for 1+ frames before
-  // handleContentSizeChange can re-center the FlatList.
-  // setInitialScrolled(false) is sufficient: handleContentSizeChange fires
-  // after the data change and scrolls to the correct center position.
   useEffect(() => {
     setHeroIdx(0);
-    setInitialScrolled(false);
   }, [sections, activeTab]);
 
   // Double buffering swap triggers
@@ -790,12 +651,20 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
   async function refreshHistoryOnly() {
     try {
       const hist = await bridge.getPlaybackHistory();
+      const filteredHist = (hist || []).filter((h: any) => {
+        const isLive = h.mediaType === "live" || 
+                       h.type === "live" || 
+                       ["cloudplay", "iptv player", "publicsportsiptv", "sports iptv", "pirate iptv", "sony iptv", "japan iptv"].includes(
+                         (h.provider || "").toLowerCase()
+                       );
+        return !isLive;
+      });
       setSections((prevSecs) => {
         const filtered = prevSecs.filter((s) => s.name !== "Continue Watching");
-        if (hist && hist.length > 0) {
+        if (filteredHist && filteredHist.length > 0) {
           const cwSection = {
             name: "Continue Watching",
-            items: hist.map((h: any) => ({
+            items: filteredHist.map((h: any) => ({
               provider: h.provider || "Cinemeta",
               url: h.detailUrl || (h.mediaType + "/" + h.imdbId),
               title: h.videoTitle,
@@ -1111,7 +980,8 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
       }
 
       return (
-        <View style={{ paddingBottom: 40, position: "relative", zIndex: 10 }}>
+        <Reanimated.View entering={FadeIn.duration(400)} style={{ flex: 1 }}>
+          <View style={{ paddingBottom: 40, position: "relative", zIndex: 10 }}>
           {showCategoryDropdown && (
             <Pressable
               style={{
@@ -1295,24 +1165,29 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
               ))}
             </View>
           )}
-        </View>
+          </View>
+        </Reanimated.View>
       );
     }
 
     const displaySections = sections.filter((_: HomeSection, i: number) => i !== heroSectionIdx);
 
-    return displaySections.map((section: HomeSection, idx: number) => (
-      <SectionRow
-        key={section.name + idx}
-        section={section}
-        navigation={navigation}
-        goDetail={goDetail}
-        onDeleteHistoryItem={handleDeleteHistoryItem}
-        isLiveTab={false}
-        savedUrls={savedUrls}
-        onToggleSave={handleToggleSaveChannel}
-      />
-    ));
+    return (
+      <Reanimated.View entering={FadeIn.duration(400)}>
+        {displaySections.map((section: HomeSection, idx: number) => (
+          <SectionRow
+            key={section.name + idx}
+            section={section}
+            navigation={navigation}
+            goDetail={goDetail}
+            onDeleteHistoryItem={handleDeleteHistoryItem}
+            isLiveTab={false}
+            savedUrls={savedUrls}
+            onToggleSave={handleToggleSaveChannel}
+          />
+        ))}
+      </Reanimated.View>
+    );
   }, [
     sections,
     sectionsLoading,
@@ -1575,150 +1450,29 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
                         />
                       </View>
                     ) : (
-                      <Animated.FlatList
-                        ref={flatListRef}
-                        // No forced key here. The old key={`hero-list-${activeTab}`}
-                        // forced a full FlatList remount on every tab press, tearing
-                        // down all items and guaranteed a flash. Data-driven updates
-                        // (loopItems changes) + initialScrolled reset are sufficient.
-                        data={loopItems}
-                        keyExtractor={(_: any, i: number) => String(i)}
-                        horizontal
-                        showsHorizontalScrollIndicator={false}
-                        snapToOffsets={snapOffsets}
-                        decelerationRate="fast"
-                        disableIntervalMomentum={true}
-                        style={{ overflow: "visible" }}
-                        ListHeaderComponent={
-                          <View style={{ width: HERO_OFFSET }} />
-                        }
-                        ListFooterComponent={
-                          <View style={{ width: HERO_OFFSET }} />
-                        }
-                        getItemLayout={(_, index) => ({
-                          length: HERO_SNAP,
-                          offset: HERO_SNAP * index,
-                          index,
-                        })}
-                        contentContainerStyle={{
-                          paddingVertical: 10,
-                          overflow: "visible",
-                        }}
-                        onScroll={Animated.event(
-                          [{ nativeEvent: { contentOffset: { x: scrollX } } }],
-                          { useNativeDriver: true },
-                        )}
-                        scrollEventThrottle={16}
-                        onContentSizeChange={handleContentSizeChange}
-                        onMomentumScrollEnd={handleScrollEnd}
-                        onScrollEndDrag={handleScrollEndDrag}
-                        renderItem={({
-                          item,
-                          index,
-                        }: {
-                          item: MediaItem;
-                          index: number;
-                        }) => (
-                          <HeroCard
-                            item={item}
-                            index={index}
-                            scrollX={scrollX}
-                            onPress={goDetail}
-                            heroSnap={HERO_SNAP}
-                            heroCardWidth={HERO_CARD_WIDTH}
-                            heroCardHeight={HERO_CARD_HEIGHT}
-                            genreSets={GENRE_SETS}
-                          />
-                        )}
-                      />
-                    )}
-
-                    {/* Premium Fluid-Elastic Dots Pagination */}
-                    {!sectionsLoading && heroItems.length > 0 && (
-                      <View
-                        style={[
-                          styles.heroMeta,
-                          { paddingTop: 16, paddingBottom: 16 },
-                        ]}
-                      >
-                        <View
-                          style={{
-                            flexDirection: "row",
-                            alignItems: "center",
-                            position: "relative",
-                            height: 4,
-                          }}
-                        >
-                          {/* Static Base Dots - Pill Shaped and Tighter Spacing */}
-                          {heroItems.map((_, i) => (
-                            <View
-                              key={i}
-                              style={{
-                                width: 8,
-                                height: 4,
-                                borderRadius: 2,
-                                backgroundColor: "rgba(255, 255, 255, 0.2)",
-                                marginHorizontal: 3, // Spacing reduced from 5 to 3
-                              }}
+                      <Reanimated.View entering={FadeIn.duration(400)}>
+                        <BlurCarousel
+                          data={heroItems}
+                          itemWidth={HERO_SNAP}
+                          cardWidth={HERO_CARD_WIDTH}
+                          cardHeight={HERO_CARD_HEIGHT}
+                          borderRadius={28}
+                          spacing={10}
+                          horizontalSpacing={HERO_OFFSET}
+                          onIndexChange={setHeroIdx}
+                          renderItem={({ item, index }) => (
+                            <HeroCard
+                              item={item}
+                              index={index}
+                              onPress={goDetail}
+                              heroSnap={HERO_SNAP}
+                              heroCardWidth={HERO_CARD_WIDTH}
+                              heroCardHeight={HERO_CARD_HEIGHT}
+                              genreSets={GENRE_SETS}
                             />
-                          ))}
-
-                          {/* Active Sliding Morphing Dot */}
-                          {(() => {
-                            const dotTranslateInputRange: number[] = [];
-                            const dotTranslateOutputRange: number[] = [];
-                            const dotScaleXInputRange: number[] = [];
-                            const dotScaleXOutputRange: number[] = [];
-
-                            const N = heroItems.length;
-                            const totalItems = loopItems.length;
-
-                            for (let k = 0; k < totalItems; k++) {
-                              const origIndex = k % N;
-
-                              // 14 = 8 width + 6 margins (3 left, 3 right)
-                              dotTranslateInputRange.push(k * HERO_SNAP);
-                              dotTranslateOutputRange.push(origIndex * 14);
-
-                              dotScaleXInputRange.push(k * HERO_SNAP);
-                              dotScaleXOutputRange.push(1);
-                              if (k < totalItems - 1) {
-                                dotScaleXInputRange.push((k + 0.5) * HERO_SNAP);
-                                dotScaleXOutputRange.push(2.0); // stretch to double width halfway
-                              }
-                            }
-
-                            const dotScaleX = scrollX.interpolate({
-                              inputRange: dotScaleXInputRange,
-                              outputRange: dotScaleXOutputRange,
-                              extrapolate: "clamp",
-                            });
-
-                            const activeTranslateX = scrollX.interpolate({
-                              inputRange: dotTranslateInputRange,
-                              outputRange: dotTranslateOutputRange,
-                              extrapolate: "clamp",
-                            });
-
-                            return (
-                              <Animated.View
-                                style={{
-                                  position: "absolute",
-                                  left: 0, // perfect alignment for wider dots
-                                  width: 14, // wider base active dot
-                                  height: 4,
-                                  borderRadius: 2,
-                                  backgroundColor: theme.colors.accent,
-                                  transform: [
-                                    { translateX: activeTranslateX },
-                                    { scaleX: dotScaleX },
-                                  ],
-                                }}
-                              />
-                            );
-                          })()}
-                        </View>
-                      </View>
+                          )}
+                        />
+                      </Reanimated.View>
                     )}
                   </>
                 )}

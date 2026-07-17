@@ -95,7 +95,6 @@ import {
 } from "../utils/detailHelpers";
 import { styles } from "./DetailScreen.styles";
 import MeshGradient from "../components/MeshGradient";
-import { Canvas, Circle as SkiaCircle, BlurMask } from "@shopify/react-native-skia";
 
 function getHighQualityImageUrl(
   url: string | null | undefined,
@@ -2797,63 +2796,17 @@ export default function DetailScreen() {
                   </SvgCardTop>
 
                   {/* Center Progress Orb Container */}
+                  {/* Center Progress Orb Container */}
                   <View style={styles.torrentBentoOrbWrapper}>
-                    {/* 1. Real Soft Gaussian Blur Neon Glow Backdrop (Skia driven) */}
-                    <View
-                      style={{
-                        position: "absolute",
-                        width: 172,
-                        height: 172,
-                        top: -30,
-                        left: -30,
-                      }}
-                      pointerEvents="none"
-                    >
-                      <Canvas style={StyleSheet.absoluteFillObject}>
-                        <SkiaCircle cx={86} cy={86} r={46} color={theme.colors.accent}>
-                          <BlurMask blur={24} style="normal" />
-                        </SkiaCircle>
-                      </Canvas>
-                    </View>
-
-                    {/* Main Glowing Circle */}
-                    <View
-                      style={[
-                        styles.torrentBentoOrbCard,
-                        {
-                          overflow: "hidden",
-                        },
+                    <MeshGradient
+                      width={118}
+                      height={118}
+                      colors={[
+                        theme.colors.accent,
+                        theme.colors.accentLight,
                       ]}
+                      speed={1}
                     >
-                      {/* Skia MeshGradient — fluid aurora background */}
-                      <MeshGradient
-                        width={112}
-                        height={112}
-                        colors={[
-                          theme.colors.accent,
-                          theme.colors.accentLight,
-                          theme.colors.lightGlass.backdropDim,
-                          theme.colors.accentGlow,
-                        ]}
-                        speed={2}
-                        style={[
-                          StyleSheet.absoluteFillObject,
-                          { borderRadius: 56 },
-                        ]}
-                      />
-
-                      {/* 3. Glossy Glass 3D Highlight Reflection Overlay */}
-                      <LinearGradient
-                        colors={[
-                          "rgba(255, 255, 255, 0.22)",
-                          "rgba(255, 255, 255, 0.0)",
-                        ]}
-                        start={{ x: 0, y: 0 }}
-                        end={{ x: 0.8, y: 0.8 }}
-                        style={StyleSheet.absoluteFillObject}
-                        pointerEvents="none"
-                      />
-
                       {/* Stats Inside Orb */}
                       <View style={styles.torrentBentoOrbTextContainer}>
                         <Text style={styles.torrentBentoOrbPercent}>
@@ -2866,15 +2819,36 @@ export default function DetailScreen() {
                           ).toFixed(0)}
                           %
                         </Text>
-                        <Text style={styles.torrentBentoOrbSpeed}>
-                          {torrentStatus?.speed
-                            ? torrentStatus.speed >= 1024 * 1024
-                              ? `${(torrentStatus.speed / (1024 * 1024)).toFixed(1)} MB/s`
-                              : `${(torrentStatus.speed / 1024).toFixed(0)} kB/s`
-                            : "0 kB/s"}
-                        </Text>
+                        {/* Speed indicator inside a premium white pill */}
+                        <View
+                          style={{
+                            backgroundColor: "#ffffff",
+                            borderRadius: 12,
+                            paddingHorizontal: 8,
+                            paddingVertical: 2.5,
+                            marginTop: 5,
+                            alignItems: "center",
+                            justifyContent: "center",
+                          }}
+                        >
+                          <Text
+                            style={[
+                              styles.torrentBentoOrbSpeed,
+                              {
+                                color: "#000000",
+                                marginTop: 0,
+                              },
+                            ]}
+                          >
+                            {torrentStatus?.speed
+                              ? torrentStatus.speed >= 1024 * 1024
+                                ? `${(torrentStatus.speed / (1024 * 1024)).toFixed(1)} MB/s`
+                                : `${(torrentStatus.speed / 1024).toFixed(0)} kB/s`
+                              : "0 kB/s"}
+                          </Text>
+                        </View>
                       </View>
-                    </View>
+                    </MeshGradient>
                   </View>
 
                   {/* Bottom Card (Status) */}
