@@ -1,5 +1,5 @@
-import { StyleSheet, Dimensions } from 'react-native';
-import { theme } from '../theme';
+import { StyleSheet, Dimensions } from "react-native";
+import { theme } from "../theme";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
@@ -1544,9 +1544,7 @@ export const styles = StyleSheet.create({
   torrentDashboardBadge: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "rgba(0, 71, 255, 0.08)",
-    borderWidth: 1,
-    borderColor: "rgba(0, 71, 255, 0.22)",
+    backgroundColor: "rgba(0, 71, 255, 0.22)",
     paddingHorizontal: 12,
     paddingVertical: 5,
     borderRadius: 100,
@@ -1579,25 +1577,16 @@ export const styles = StyleSheet.create({
     lineHeight: 26,
     letterSpacing: 0.2,
   },
-  torrentDashboardHeaderCard: {
-    width: "100%",
-    marginBottom: -50,
-    zIndex: 30,
-  },
-  torrentDashboardBottomCard: {
-    width: "100%",
-    marginTop: -50,
-    zIndex: 30,
-  },
   torrentBentoGrid: {
     width: "100%",
     gap: 12,
   },
   torrentBentoMiddleRow: {
     flexDirection: "row",
-    justifyContent: "space-between",
+    justifyContent: "center",
     alignItems: "center",
     width: "100%",
+    gap: 12,
     zIndex: 5,
   },
   torrentBentoSideCol: {
@@ -1605,18 +1594,20 @@ export const styles = StyleSheet.create({
     gap: 12,
   },
   torrentBentoCenterCol: {
-    width: "40%",
-    alignItems: "center",
+    width: "36%",
+    alignItems: "stretch",
     justifyContent: "center",
     position: "relative",
     zIndex: 20,
   },
   torrentBentoOrbWrapper: {
-    width: 136,
-    height: 136,
+    width: 118,
+    height: 12,
     alignItems: "center",
     justifyContent: "center",
-    zIndex: 10,
+    zIndex: 50,
+    position: "relative",
+    alignSelf: "center",
   },
   torrentBentoOrbCard: {
     width: 112,
@@ -1654,6 +1645,7 @@ export const styles = StyleSheet.create({
     marginTop: 2,
   },
   torrentBentoCard: {
+    width: "100%",
     backgroundColor: "rgba(20, 18, 24, 0.65)",
     borderWidth: 1,
     borderColor: "rgba(255, 255, 255, 0.08)",
@@ -1661,6 +1653,12 @@ export const styles = StyleSheet.create({
     padding: 10,
     height: 110,
     justifyContent: "center",
+    alignItems: "center",
+    overflow: "hidden",
+  },
+  torrentBentoCornerCard: {
+    height: 96,
+    padding: 8,
   },
   torrentBentoCardHeader: {
     flexDirection: "row",
@@ -1678,6 +1676,12 @@ export const styles = StyleSheet.create({
     color: "#E5E2E3",
     fontSize: 13,
     fontWeight: "800",
+  },
+  torrentBentoCardValueCentered: {
+    color: "#E5E2E3",
+    fontSize: 12,
+    fontWeight: "500",
+    textAlign: "center",
   },
   torrentDashboardHeaderOutside: {
     width: "100%",

@@ -68,13 +68,6 @@ import {
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as favoritesApi from "../api/favorites";
 import { LinearGradient } from "expo-linear-gradient";
-import Svg, {
-  Circle,
-  Defs,
-  LinearGradient as SvgGradient,
-  Stop,
-  Path,
-} from "react-native-svg";
 import MaskedView from "@react-native-masked-view/masked-view";
 import { theme } from "../theme";
 import type { EpisodeItem, VideoSource, PluginProvider } from "../types/plugin";
@@ -96,620 +89,23 @@ import {
 import { styles } from "./DetailScreen.styles";
 import MeshGradient from "../components/MeshGradient";
 
-function getHighQualityImageUrl(
-  url: string | null | undefined,
-): string | undefined {
-  if (!url) return undefined;
-
-  // 1. Metahub images - upgrade medium/small to large
-  if (url.includes("images.metahub.space")) {
-    return url.replace("/medium/", "/large/").replace("/small/", "/large/");
-  }
-
-  // 2. TMDB images - upgrade any size (e.g. w500, w300_and_h450_bestv2) to w1280
-  if (url.includes("image.tmdb.org/t/p/")) {
-    return url.replace(/\/t\/p\/[^/]+\//, "/t/p/w1280/");
-  }
-
-  // 3. IMDb / Amazon images - remove cropping and upgrade size
-  if (
-    url.includes("media-amazon.com/images/") ||
-    url.includes("m.media-amazon.com/")
-  ) {
-    const index = url.indexOf("._V1_");
-    if (index !== -1) {
-      return url.substring(0, index) + "._V1_SX1080_.jpg";
-    }
-  }
-
-  // 4. YTS images - upgrade from medium to large cover
-  if (url.includes("yts.mx/assets/images/movies/")) {
-    return url.replace("medium-cover.jpg", "large-cover.jpg");
-  }
-
-  return url;
-}
-
-/** Returns true if the raw error string looks like an ISP/network-level block */
-function isIspBlock(err: string | undefined): boolean {
-  if (!err) return false;
-  const e = err.toLowerCase();
-  return (
-    e.includes("unresolvedaddress") ||
-    e.includes("unknownhost") ||
-    e.includes("dns blocked") ||
-    e.includes("isp block") ||
-    e.includes("sockettimeoutexception") ||
-    e.includes("connect") ||
-    e.includes("timeout")
-  );
-}
-
-function cleanErrorMessage(err: string | undefined): string {
-  if (!err) return "";
-  const e = err.toLowerCase();
-  if (
-    e.includes("sockettimeoutexception") ||
-    e.includes("timeout") ||
-    e.includes("connect")
-  ) {
-    return "Blocked or unreachable";
-  }
-  if (
-    e.includes("illegalargumentexception") ||
-    e.includes("json") ||
-    e.includes("nullpointer")
-  ) {
-    return "Server responded incorrectly";
-  }
-  if (
-    e.includes("unresolvedaddress") ||
-    e.includes("unknownhost") ||
-    e.includes("dns")
-  ) {
-    return "Blocked by your network";
-  }
-  return "Failed to load links";
-}
-
-function cleanTorrentError(err: string | undefined): string {
-  if (!err) return "Torrent failed to start.";
-  const e = err.toLowerCase();
-  if (
-    e.includes("metadata resolution timed out") ||
-    e.includes("no peers found") ||
-    e.includes("bad magnet")
-  ) {
-    return "No seeders found\u002c this torrent link may be dead. Try a different source.";
-  }
-  if (e.includes("failed to add torrent handle")) {
-    return "Could not start the torrent download. Try again.";
-  }
-  if (e.includes("no files found")) {
-    return "Torrent has no playable video files.";
-  }
-  if (e.includes("network") || e.includes("connection")) {
-    return "Network error while starting torrent. Check your connection.";
-  }
-  return "Torrent failed to start. Try a different source.";
-}
-
-/**
- * Maps a wide range of language names / abbreviations to short display codes.
- * Torrentio / Stremio expose audio languages only inside the release title
- * string — there is no structured API field — so we parse the filename.
- */
+import DetailsSkeleton from "../components/DetailsSkeleton";
+import TorrentAccordion from "../components/TorrentAccordion";
+import {
+  getHighQualityImageUrl,
+  isIspBlock,
+  cleanErrorMessage,
+  cleanTorrentError,
+  getQualityBadgeBg,
+  getDomain,
+  getProtocolLabel,
+  getCleanHostName,
+  extractResolutionTag,
+} from "../utils/detailUtils";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 const HERO_HEIGHT = SCREEN_HEIGHT * 0.5; // 50% for hero, overlaps with sheet
 const EASE_OUT = Easing.bezier(0.25, 1, 0.5, 1);
-
-function getQualityBadgeBg(quality: string) {
-  const q = quality.toLowerCase();
-  if (q.includes("4k") || q.includes("2160")) return "#ff4a7d";
-  if (q.includes("1080")) return "#0047FF";
-  if (q.includes("720")) return "#2ecc71";
-  if (q.includes("480") || q.includes("360")) return "#f39c12";
-  return "rgba(255, 255, 255, 0.08)";
-}
-
-function getDomain(url: string) {
-  try {
-    const domain = url.match(
-      /^(?:https?:\/\/)?(?:[^@\n]+@)?(?:www\.)?([^:\/\n?]+)/im,
-    );
-    return domain ? domain[1] : "";
-  } catch {
-    return "";
-  }
-}
-
-function getProtocolLabel(type: string, url: string) {
-  const t = type.toLowerCase();
-  if (t === "hls" || url.includes(".m3u8")) return "M3U8";
-  if (t === "torrent" || url.startsWith("magnet:")) return "TORRENT";
-  if (t === "dash" || url.includes(".mpd")) return "DASH";
-  return "DIRECT";
-}
-
-function getCleanHostName(s: VideoSource) {
-  const quality = s.quality || "";
-  const host = s.host || "";
-  let baseName = host || quality || "Direct";
-
-  const separators = [/ • /, / · /, / - /, / \| /];
-  for (const sep of separators) {
-    if (sep.test(baseName)) {
-      const parts = baseName.split(sep);
-      const nonResolutionPart = parts.find(
-        (p: string) => !/(?:2160|1080|720|480|360|4k|hd|sd)/i.test(p),
-      );
-      if (nonResolutionPart) {
-        baseName = nonResolutionPart.trim();
-        break;
-      }
-    }
-  }
-
-  baseName = baseName
-    .replace(/\[?\d+(?:\.\d+)?\s*(?:GB|MB|kb|gigabytes|megabytes)\]?/gi, "")
-    .trim();
-  baseName = baseName
-    .replace(
-      /\[(?:bluray|hdr|dv|dolby|hevc|x265|x264|h264|h265|ddp\d|aac|atmos|dts|web-dl|webrip|hdrip|brrip|hdtv|internal)[^\]]*\]/gi,
-      "",
-    )
-    .trim();
-  baseName = baseName
-    .replace(
-      /\b(?:2160p|1080p|720p|480p|360p|4k|2160|1080|720|480|360)\b/gi,
-      "",
-    )
-    .trim();
-  baseName = baseName.replace(/\s+/g, " ").trim();
-
-  return baseName || "Direct";
-}
-
-function extractResolutionTag(s: VideoSource) {
-  const textToSearch = `${s.quality} ${s.host || ""}`.toLowerCase();
-  if (textToSearch.includes("4k") || textToSearch.includes("2160"))
-    return "2160p";
-  if (textToSearch.includes("1080")) return "1080p";
-  if (textToSearch.includes("720")) return "720p";
-  if (textToSearch.includes("480")) return "480p";
-  if (textToSearch.includes("360")) return "360p";
-  const match = textToSearch.match(/(\d+)(p|k|fps)/);
-  return match ? `${match[1]}p` : "Auto";
-}
-
-/**
- * Self-contained torrent/magnet accordion. Owning the expand/collapse state here
- * means toggling it re-renders ONLY this small component — never the parent
- * DetailScreen (which renders the 100+ row source list, provider tabs, hero and
- * background blurs). That is what makes expand/collapse instant, mirroring the
- * player's fast accordion. `key` on the parent usage resets it per episode/detail.
- */
-function TorrentAccordion({
-  torrentSources,
-  renderRow,
-  alwaysExpanded = false,
-}: {
-  torrentSources: any[];
-  renderRow: (source: any, idx: number) => React.ReactNode;
-  alwaysExpanded?: boolean;
-}) {
-  const [accordionHeight, setAccordionHeight] = useState(0);
-  const [torrentExpanded, setTorrentExpanded] = useState(alwaysExpanded);
-  const accordionExpandShared = useSharedValue(0);
-
-  const [selectedAudio, setSelectedAudio] = useState("All Audios");
-  const [selectedSort, setSelectedSort] = useState("Highest Seeders");
-  const [showSortDropdown, setShowSortDropdown] = useState(false);
-  const [renderLimit, setRenderLimit] = useState(15);
-
-  useEffect(() => {
-    setRenderLimit(15);
-    const timer = setTimeout(() => {
-      setRenderLimit(100);
-    }, 120);
-    return () => clearTimeout(timer);
-  }, [torrentSources, selectedAudio, selectedSort]);
-
-  useEffect(() => {
-    if (alwaysExpanded) {
-      setTorrentExpanded(true);
-    }
-  }, [alwaysExpanded]);
-
-  useEffect(() => {
-    accordionExpandShared.value = withTiming(torrentExpanded ? 1 : 0, {
-      duration: 250,
-      easing: Easing.bezier(0.25, 1, 0.5, 1),
-    });
-  }, [torrentExpanded]);
-
-  const accordionAnimatedStyle = useAnimatedStyle(() => ({
-    height: accordionExpandShared.value * accordionHeight,
-    opacity: accordionExpandShared.value,
-    overflow: "hidden",
-  }));
-
-  const audioOptions = useMemo(() => {
-    const set = new Set<string>();
-    torrentSources.forEach((s: any) => {
-      parseAudioLanguages(s.host || "")
-        .split(",")
-        .map((x: string) => x.trim())
-        .forEach((l: string) => {
-          if (l && l !== "—") set.add(l);
-        });
-    });
-    return ["All Audios", ...Array.from(set).sort()];
-  }, [torrentSources]);
-
-  const parseSizeInMB = (host: string): number => {
-    const sizeMatch = host.match(/💾\s*([\d.]+)\s*([MGB]+)/i);
-    if (!sizeMatch) return 0;
-    const val = parseFloat(sizeMatch[1]);
-    const unit = sizeMatch[2].toUpperCase();
-    if (unit.includes("G")) return val * 1024;
-    return val;
-  };
-
-  const visibleSources = useMemo(() => {
-    // 1. Filter by audio language
-    let filtered = torrentSources;
-    if (selectedAudio !== "All Audios") {
-      filtered = torrentSources.filter((s: any) =>
-        parseAudioLanguages(s.host || "")
-          .split(",")
-          .map((x: string) => x.trim())
-          .includes(selectedAudio),
-      );
-    }
-
-    // 2. Sort the filtered sources
-    const sorted = [...filtered];
-    if (selectedSort === "Highest Seeders") {
-      sorted.sort(
-        (a, b) => ((b as any).seeders ?? 0) - ((a as any).seeders ?? 0),
-      );
-    } else if (selectedSort === "Largest Size") {
-      sorted.sort(
-        (a, b) => parseSizeInMB(b.host || "") - parseSizeInMB(a.host || ""),
-      );
-    } else if (selectedSort === "Smallest Size") {
-      sorted.sort(
-        (a, b) => parseSizeInMB(a.host || "") - parseSizeInMB(b.host || ""),
-      );
-    }
-
-    return sorted;
-  }, [torrentSources, selectedAudio, selectedSort]);
-
-  if (torrentSources.length === 0) return null;
-
-  const renderContent = () => {
-    return (
-      <View style={{ width: "100%" }}>
-        {/* Single horizontal row containing scrollable audio filters on left, and sort dropdown on right */}
-        <View
-          style={{
-            flexDirection: "row",
-            alignItems: "center",
-            justifyContent: "space-between",
-            marginTop: 12,
-            marginBottom: 10,
-            paddingHorizontal: 16,
-            zIndex: 9999,
-          }}
-        >
-          {/* Horizontal Audio Filter Pills (takes remaining space on left) */}
-          {audioOptions.length > 1 ? (
-            <View style={{ flex: 1, marginRight: 8, height: 26 }}>
-              <MaskedView
-                style={{ width: "100%", height: "100%" }}
-                maskElement={
-                  <LinearGradient
-                    colors={["transparent", "black", "black", "transparent"]}
-                    locations={[0, 0.08, 0.92, 1]}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 0 }}
-                    style={StyleSheet.absoluteFillObject}
-                  />
-                }
-              >
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={{ gap: 6, paddingHorizontal: 12 }}
-                >
-                  {audioOptions.map((lang) => {
-                    const isActive = selectedAudio === lang;
-                    return (
-                      <TouchableOpacity
-                        key={lang}
-                        style={[
-                          styles.langFilterChip,
-                          isActive && styles.langFilterChipActive,
-                          {
-                            paddingHorizontal: 10,
-                            paddingVertical: 4,
-                            borderRadius: 12,
-                          },
-                        ]}
-                        onPress={() => setSelectedAudio(lang)}
-                        activeOpacity={0.7}
-                      >
-                        <Text
-                          style={[
-                            styles.langFilterText,
-                            isActive && styles.langFilterTextActive,
-                            { fontSize: 10 },
-                          ]}
-                        >
-                          {lang === "All Audios" ? "All" : lang}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </ScrollView>
-              </MaskedView>
-            </View>
-          ) : null}
-
-          {/* Sort Dropdown on Right */}
-          <View style={{ position: "relative", zIndex: 99999 }}>
-            <TouchableOpacity
-              style={[
-                styles.seasonSelector,
-                {
-                  minWidth: 95,
-                  paddingVertical: 4,
-                  paddingHorizontal: 8,
-                  borderRadius: 12,
-                  height: 28,
-                  marginTop: 0,
-                },
-              ]}
-              activeOpacity={0.7}
-              onPress={() => setShowSortDropdown((v) => !v)}
-            >
-              <Text style={[styles.seasonText, { fontSize: 10 }]}>
-                {selectedSort === "Highest Seeders"
-                  ? "Seeders"
-                  : selectedSort === "Largest Size"
-                    ? "Size 💾"
-                    : "Size 💾 Min"}
-              </Text>
-              <Text style={[styles.seasonIcon, { fontSize: 8, marginLeft: 4 }]}>
-                ▼
-              </Text>
-            </TouchableOpacity>
-
-            {showSortDropdown && (
-              <View
-                style={[
-                  styles.floatingDropdown,
-                  {
-                    position: "absolute",
-                    top: 32,
-                    right: 0,
-                    width: 140,
-                    zIndex: 999999,
-                  },
-                ]}
-              >
-                <LinearGradient
-                  colors={["#1c1c22", "#0f0f12"]}
-                  style={StyleSheet.absoluteFillObject}
-                />
-                {[
-                  { label: "Seeders", value: "Highest Seeders" },
-                  { label: "Size (Max)", value: "Largest Size" },
-                  { label: "Size (Min)", value: "Smallest Size" },
-                ].map((opt) => (
-                  <TouchableOpacity
-                    key={opt.value}
-                    style={[
-                      styles.dropdownItem,
-                      selectedSort === opt.value && styles.dropdownItemSelected,
-                      { paddingVertical: 8, paddingHorizontal: 12 },
-                    ]}
-                    onPress={() => {
-                      setSelectedSort(opt.value);
-                      setShowSortDropdown(false);
-                    }}
-                  >
-                    <Text style={[styles.seasonText, { fontSize: 11 }]}>
-                      {opt.label}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            )}
-          </View>
-        </View>
-
-        {visibleSources
-          .slice(0, renderLimit)
-          .map((source, idx) => renderRow(source, idx))}
-        {visibleSources.length > renderLimit && (
-          <Text
-            style={{
-              color: "rgba(255,255,255,0.3)",
-              textAlign: "center",
-              marginVertical: 14,
-              fontSize: 10,
-              fontWeight: "600",
-              letterSpacing: 0.5,
-            }}
-          >
-            SHOWING TOP {renderLimit} OF {visibleSources.length} LINKS
-          </Text>
-        )}
-      </View>
-    );
-  };
-
-  if (alwaysExpanded) {
-    return renderContent();
-  }
-
-  return (
-    <>
-      <TouchableOpacity
-        onPress={() => setTorrentExpanded((v) => !v)}
-        style={[
-          styles.accordionHeader,
-          torrentExpanded && styles.accordionHeaderActive,
-        ]}
-        activeOpacity={0.8}
-      >
-        <Download
-          size={18}
-          color={theme.colors.rose}
-          strokeWidth={2}
-          style={{ marginRight: 10 }}
-        />
-        <Text style={styles.accordionTitle}>
-          Torrent & Magnet Links ({torrentSources.length} found)
-        </Text>
-        {torrentExpanded ? (
-          <ChevronUp size={18} color="#a0a0a5" strokeWidth={2} />
-        ) : (
-          <ChevronDown size={18} color="#a0a0a5" strokeWidth={2} />
-        )}
-      </TouchableOpacity>
-
-      <Animated.View style={accordionAnimatedStyle}>
-        <View
-          onLayout={(e) => {
-            const { height } = e.nativeEvent.layout;
-            if (height > 0 && height !== accordionHeight) {
-              setAccordionHeight(height);
-            }
-          }}
-          style={{ width: "100%", position: "absolute", top: 0 }}
-        >
-          {renderContent()}
-        </View>
-      </Animated.View>
-    </>
-  );
-}
-
-// Custom Socket Cards for the Bento Grid Dashboard
-const SvgCardTop = ({
-  children,
-  style,
-}: {
-  children: React.ReactNode;
-  style?: any;
-}) => {
-  const [width, setWidth] = useState(0);
-  const H = 110;
-  const R = 58;
-
-  const path = useMemo(() => {
-    if (width === 0) return "";
-    return `M 0,20 Q 0,0 20,0 H ${width - 20} Q ${width},0 ${width},20 V ${H - 20} Q ${width},${H} ${width - 20},${H} H ${width / 2 + R} A ${R},${R} 0 0,0 ${width / 2 - R},${H} H 20 Q 0,${H} 0,${H - 20} Z`;
-  }, [width]);
-
-  return (
-    <View
-      style={[{ height: H, width: "100%", position: "relative" }, style]}
-      onLayout={(e) => setWidth(e.nativeEvent.layout.width)}
-    >
-      {width > 0 && (
-        <Svg style={StyleSheet.absoluteFillObject}>
-          <Defs>
-            <SvgGradient id="topCardGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-              <Stop offset="0%" stopColor="rgba(30, 27, 36, 0.72)" />
-              <Stop offset="100%" stopColor="rgba(15, 13, 18, 0.72)" />
-            </SvgGradient>
-          </Defs>
-          <Path
-            d={path}
-            fill="url(#topCardGrad)"
-            stroke="rgba(255, 255, 255, 0.08)"
-            strokeWidth={1}
-          />
-        </Svg>
-      )}
-      <View
-        style={[
-          StyleSheet.absoluteFillObject,
-          {
-            paddingHorizontal: 10,
-            paddingTop: 14,
-            paddingBottom: 0,
-            justifyContent: "flex-start",
-            alignItems: "center",
-          },
-        ]}
-      >
-        {children}
-      </View>
-    </View>
-  );
-};
-
-const SvgCardBottom = ({
-  children,
-  style,
-}: {
-  children: React.ReactNode;
-  style?: any;
-}) => {
-  const [width, setWidth] = useState(0);
-  const H = 110;
-  const R = 58;
-
-  const path = useMemo(() => {
-    if (width === 0) return "";
-    return `M 0,20 Q 0,0 20,0 H ${width / 2 - R} A ${R},${R} 0 0,0 ${width / 2 + R},0 H ${width - 20} Q ${width},0 ${width},20 V ${H - 20} Q ${width},${H} ${width - 20},${H} H 20 Q 0,${H} 0,${H - 20} Z`;
-  }, [width]);
-
-  return (
-    <View
-      style={[{ height: H, width: "100%", position: "relative" }, style]}
-      onLayout={(e) => setWidth(e.nativeEvent.layout.width)}
-    >
-      {width > 0 && (
-        <Svg style={StyleSheet.absoluteFillObject}>
-          <Defs>
-            <SvgGradient id="botCardGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-              <Stop offset="0%" stopColor="rgba(30, 27, 36, 0.72)" />
-              <Stop offset="100%" stopColor="rgba(15, 13, 18, 0.72)" />
-            </SvgGradient>
-          </Defs>
-          <Path
-            d={path}
-            fill="url(#botCardGrad)"
-            stroke="rgba(255, 255, 255, 0.08)"
-            strokeWidth={1}
-          />
-        </Svg>
-      )}
-      <View
-        style={[
-          StyleSheet.absoluteFillObject,
-          {
-            paddingHorizontal: 10,
-            paddingTop: 0,
-            paddingBottom: 14,
-            justifyContent: "flex-end",
-            alignItems: "center",
-          },
-        ]}
-      >
-        {children}
-      </View>
-    </View>
-  );
-};
 
 export default function DetailScreen() {
   const [blurTarget, setBlurTarget] = useState<any>(null);
@@ -872,6 +268,11 @@ export default function DetailScreen() {
   const [showSourcePicker, setShowSourcePicker] = useState(false);
   const [selectedSourceIndex, setSelectedSourceIndex] = useState(0);
   const [isTorrentBuffering, setIsTorrentBuffering] = useState(false);
+  const pendingTorrentRef = useRef<{
+    source: VideoSource;
+    title: string;
+    subUrl: string;
+  } | null>(null);
 
   const [torrentStatus, setTorrentStatus] =
     useState<bridge.TorrentStatus | null>(null);
@@ -887,6 +288,153 @@ export default function DetailScreen() {
   const torrentIntervalRef = useRef<any>(null);
   const torrentSessionIdRef = useRef<number>(0);
   const resolveTimeoutRef = useRef<any>(null);
+
+  const triggerTorrentStream = async (
+    source: VideoSource,
+    title: string,
+    subUrl: string,
+  ) => {
+    const sessionId = torrentSessionIdRef.current;
+    const sourceSeeders = (source as any).seeders ?? 0;
+
+    try {
+      const info = await bridge.startTorrentStream(source.url);
+      if (sessionId !== torrentSessionIdRef.current) return;
+
+      if (torrentIntervalRef.current) {
+        clearInterval(torrentIntervalRef.current);
+      }
+
+      let consecutiveFalseCount = 0;
+      const MAX_FALSE_READINGS = 3;
+      const POLLING_TIMEOUT_MS = 120_000;
+      const pollStartTime = Date.now();
+
+      const intervalId = setInterval(async () => {
+        try {
+          if (sessionId !== torrentSessionIdRef.current) {
+            clearInterval(intervalId);
+            return;
+          }
+
+          const status = await bridge.getTorrentStatus();
+
+          if (sessionId !== torrentSessionIdRef.current) {
+            clearInterval(intervalId);
+            return;
+          }
+
+          setTorrentStatus(status);
+          if (!status.active) {
+            consecutiveFalseCount++;
+            if (consecutiveFalseCount >= MAX_FALSE_READINGS) {
+              clearInterval(intervalId);
+              setIsTorrentBuffering(false);
+              setIsOpeningPlayer(false);
+              bridge.stopTorrentStream().catch(() => {});
+              setTorrentErrorModal({
+                visible: true,
+                message: "Torrent stream connection timed out or went inactive.",
+              });
+            }
+            return;
+          }
+
+          consecutiveFalseCount = 0;
+
+          // Check overall polling timeout (120s from first poll)
+          if (Date.now() - pollStartTime > POLLING_TIMEOUT_MS) {
+            clearInterval(intervalId);
+            setIsTorrentBuffering(false);
+            setIsOpeningPlayer(false);
+            bridge.stopTorrentStream().catch(() => {});
+            setTorrentErrorModal({
+              visible: true,
+              message:
+                "Torrent is taking too long to buffer. The torrent may have few active seeders. Try a different source.",
+            });
+            return;
+          }
+
+          // 1.5% represents full indexing download (moov atom / header container tables)
+          if (status.progress >= 1.5 && status.active) {
+            clearInterval(intervalId);
+            setIsTorrentBuffering(false);
+
+            // Check if external player mode is enabled
+            try {
+              const mode = await AsyncStorage.getItem("@sozo_player_mode");
+              if (mode === "external") {
+                closeSourcePicker(true); // Keep torrent active for VLC / external players!
+                bridge.playInExternalPlayer(
+                  info.streamUrl,
+                  null,
+                  title,
+                  source.headers ? JSON.stringify(source.headers) : null,
+                );
+                return;
+              }
+            } catch (e) {
+              console.warn("Failed to read player mode setting:", e);
+            }
+
+            // Play local HTTP range server stream URL via Kotlin player!
+            closeSourcePicker(true); // Keep torrent active so Kotlin player can read from local http server!
+            setIsOpeningPlayer(false);
+            const playHeaders = {
+              ...(source.headers || {}),
+              __originalMagnetUrl: source.url,
+            };
+
+            const currentEp = displayedEpisodes.find(
+              (_, i) => activeEpisodeIndex === i,
+            );
+
+            bridge.playStream(
+              info.streamUrl,
+              playHeaders,
+              detail?.title || "",
+              subUrl,
+              sources.map((s) => ({
+                quality: s.quality,
+                url: s.url,
+                type: s.type,
+                headers: s.headers,
+                provider: s.provider || source.provider,
+                host: s.host,
+              })),
+              subtitles,
+              allEpisodes ? JSON.stringify(allEpisodes) : "[]",
+              activeEpisodeIndex ?? -1,
+              detail?.imdbId || "",
+              detail?.isSerial ? "series" : "movie",
+              detail?.posterUrl || "",
+              currentEp?.season || 1,
+              currentEp?.episode || 1,
+              currentEp?.label || "",
+              detail?.logoUrl || "",
+              providerName,
+              detail?.url || item?.url || "",
+              true,
+            );
+          }
+        } catch (err) {
+          console.warn("[ZunoPlugin] Error polling torrent status:", err);
+        }
+      }, 500);
+
+      torrentIntervalRef.current = intervalId;
+    } catch (err: any) {
+      if (sessionId !== torrentSessionIdRef.current) return;
+      setIsTorrentBuffering(false);
+      setIsOpeningPlayer(false);
+      setTorrentErrorModal({
+        visible: true,
+        message: cleanTorrentError(err.message),
+      });
+    }
+  };
+
   const streamedSourcesRef = useRef<VideoSource[]>([]);
   const streamedFlushRef = useRef<any>(null);
 
@@ -1757,7 +1305,6 @@ export default function DetailScreen() {
           const sourceSeeders = (source as any).seeders ?? 0;
           try {
             const sessionId = ++torrentSessionIdRef.current;
-            setIsTorrentBuffering(true);
             setTorrentStatus({ progress: 0, speed: 0, peers: 0, active: true });
             setSelectedTorrentSeeders(sourceSeeders);
             setSelectedSourceQuality(source.quality);
@@ -1765,146 +1312,12 @@ export default function DetailScreen() {
             setSelectedTorrentTitle(title);
             setSelectedTorrentHost((source as any).host || "");
 
-            bridge
-              .startTorrentStream(source.url)
-              .then((info) => {
-                if (sessionId !== torrentSessionIdRef.current) return;
-
-                if (torrentIntervalRef.current) {
-                  clearInterval(torrentIntervalRef.current);
-                }
-
-                let consecutiveFalseCount = 0;
-                const MAX_FALSE_READINGS = 3;
-                const POLLING_TIMEOUT_MS = 120_000;
-                const pollStartTime = Date.now();
-
-                const intervalId = setInterval(async () => {
-                  try {
-                    if (sessionId !== torrentSessionIdRef.current) {
-                      clearInterval(intervalId);
-                      return;
-                    }
-
-                    const status = await bridge.getTorrentStatus();
-
-                    if (sessionId !== torrentSessionIdRef.current) {
-                      clearInterval(intervalId);
-                      return;
-                    }
-
-                    setTorrentStatus(status);
-                    if (!status.active) {
-                      consecutiveFalseCount++;
-                      if (consecutiveFalseCount >= MAX_FALSE_READINGS) {
-                        clearInterval(intervalId);
-                        setIsTorrentBuffering(false);
-                        setIsOpeningPlayer(false);
-                        bridge.stopTorrentStream().catch(() => {});
-                        setTorrentErrorModal({
-                          visible: true,
-                          message:
-                            "Torrent stream connection timed out or went inactive.",
-                        });
-                      }
-                      return;
-                    }
-
-                    consecutiveFalseCount = 0;
-
-                    // Check overall polling timeout (120s from first poll)
-                    if (Date.now() - pollStartTime > POLLING_TIMEOUT_MS) {
-                      clearInterval(intervalId);
-                      setIsTorrentBuffering(false);
-                      setIsOpeningPlayer(false);
-                      bridge.stopTorrentStream().catch(() => {});
-                      setTorrentErrorModal({
-                        visible: true,
-                        message:
-                          "Torrent is taking too long to buffer. The torrent may have few active seeders. Try a different source.",
-                      });
-                      return;
-                    }
-
-                    // 1.5% represents full indexing download (moov atom / header container tables)
-                    if (status.progress >= 1.5 && status.active) {
-                      clearInterval(intervalId);
-                      setIsTorrentBuffering(false);
-
-                      // Check if external player mode is enabled
-                      try {
-                        const mode =
-                          await AsyncStorage.getItem("@sozo_player_mode");
-                        if (mode === "external") {
-                          closeSourcePicker(true); // Keep torrent active for VLC / external players!
-                          bridge.playInExternalPlayer(
-                            info.streamUrl,
-                            null,
-                            title,
-                            source.headers
-                              ? JSON.stringify(source.headers)
-                              : null,
-                          );
-                          return;
-                        }
-                      } catch (e) {
-                        console.warn("Failed to read player mode setting:", e);
-                      }
-
-                      // Play local HTTP range server stream URL via Kotlin player!
-                      closeSourcePicker(true); // Keep torrent active so Kotlin player can read from local http server!
-                      setIsOpeningPlayer(false);
-                      const playHeaders = {
-                        ...(source.headers || {}),
-                        __originalMagnetUrl: source.url,
-                      };
-                      bridge.playStream(
-                        info.streamUrl,
-                        playHeaders,
-                        detail?.title || "",
-                        subUrl,
-                        sources.map((s) => ({
-                          quality: s.quality,
-                          url: s.url,
-                          type: s.type,
-                          headers: s.headers,
-                          provider: s.provider || source.provider,
-                          host: s.host,
-                        })),
-                        subtitles,
-                        allEpisodes ? JSON.stringify(allEpisodes) : "[]",
-                        activeEpisodeIndex ?? -1,
-                        detail?.imdbId || "",
-                        detail?.isSerial ? "series" : "movie",
-                        detail?.posterUrl || "",
-                        currentEp?.season || 1,
-                        currentEp?.episode || 1,
-                        currentEp?.label || "",
-                        detail?.logoUrl || "",
-                        providerName,
-                        detail?.url || item?.url || "",
-                        true,
-                      );
-                    }
-                  } catch (err) {
-                    console.warn(
-                      "[ZunoPlugin] Error polling torrent status:",
-                      err,
-                    );
-                  }
-                }, 500);
-
-                torrentIntervalRef.current = intervalId;
-              })
-              .catch((err) => {
-                if (sessionId !== torrentSessionIdRef.current) return;
-                setIsTorrentBuffering(false);
-                setIsOpeningPlayer(false);
-                setTorrentErrorModal({
-                  visible: true,
-                  message: cleanTorrentError(err.message),
-                });
-              });
+            pendingTorrentRef.current = {
+              source,
+              title,
+              subUrl,
+            };
+            setIsTorrentBuffering(true);
           } catch (e: any) {
             setIsTorrentBuffering(false);
             setIsOpeningPlayer(false);
@@ -2700,6 +2113,13 @@ export default function DetailScreen() {
         transparent={true}
         animationType="fade"
         statusBarTranslucent={true}
+        onShow={() => {
+          if (pendingTorrentRef.current) {
+            const { source, title, subUrl } = pendingTorrentRef.current;
+            pendingTorrentRef.current = null;
+            triggerTorrentStream(source, title, subUrl);
+          }
+        }}
         onRequestClose={() => {
           setIsTorrentBuffering(false);
           setIsOpeningPlayer(false);
@@ -2731,7 +2151,6 @@ export default function DetailScreen() {
             {/* Header outside bento cards to show the full long release name without truncation */}
             <View style={styles.torrentDashboardHeaderOutside}>
               <View style={styles.torrentDashboardBadge}>
-                <View style={styles.torrentDashboardBadgeDot} />
                 <Text style={styles.torrentDashboardBadgeText}>
                   TORRENT ENGINE
                 </Text>
@@ -2747,53 +2166,82 @@ export default function DetailScreen() {
             <View style={styles.torrentBentoGrid}>
               {/* Row: Left Column | Center Progress Socket Column | Right Column */}
               <View style={styles.torrentBentoMiddleRow}>
-                {/* Left Column (Stats: Peers, Quality) */}
+                {/* Left Column (Stats: Protocol, Quality) */}
                 <View style={styles.torrentBentoSideCol}>
-                  {/* Peers Card */}
-                  <View style={styles.torrentBentoCard}>
-                    <View style={styles.torrentBentoCardHeader}>
-                      <Users size={14} color="#5580FF" />
-                      <Text style={styles.torrentBentoCardLabel}>PEERS</Text>
-                    </View>
-                    <Text style={styles.torrentBentoCardValue}>
-                      {torrentStatus?.peers && torrentStatus.peers > 0
-                        ? `${torrentStatus.peers}`
-                        : selectedTorrentSeeders > 0
-                          ? `${selectedTorrentSeeders}`
-                          : "0"}
+                  {/* Protocol Card */}
+                  <View style={[styles.torrentBentoCard, styles.torrentBentoCornerCard]}>
+                    <LinearGradient
+                      colors={[theme.colors.accent, theme.colors.accentLight]}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 1 }}
+                      style={StyleSheet.absoluteFillObject}
+                    />
+                    <Activity
+                      size={18}
+                      color="#ffffff"
+                      style={{ marginBottom: 6 }}
+                    />
+                    <Text
+                      style={[
+                        styles.torrentBentoCardValueCentered,
+                        { color: "#ffffff" },
+                      ]}
+                      numberOfLines={1}
+                      ellipsizeMode="tail"
+                    >
+                      {getProtocolLabel(
+                        sources[selectedSourceIndex]?.type || "",
+                        sources[selectedSourceIndex]?.url || "",
+                      ) || "Direct"}
                     </Text>
                   </View>
 
                   {/* Quality Card */}
-                  <View style={styles.torrentBentoCard}>
-                    <View style={styles.torrentBentoCardHeader}>
-                      <Monitor size={14} color="#5580FF" />
-                      <Text style={styles.torrentBentoCardLabel}>QUALITY</Text>
-                    </View>
+                  <View style={[styles.torrentBentoCard, styles.torrentBentoCornerCard]}>
+                    <LinearGradient
+                      colors={[theme.colors.accent, theme.colors.accentLight]}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 1 }}
+                      style={StyleSheet.absoluteFillObject}
+                    />
+                    <Monitor
+                      size={18}
+                      color="#ffffff"
+                      style={{ marginBottom: 6 }}
+                    />
                     <Text
-                      style={styles.torrentBentoCardValue}
+                      style={[
+                        styles.torrentBentoCardValueCentered,
+                        { color: "#ffffff" },
+                      ]}
                       numberOfLines={1}
                       ellipsizeMode="tail"
                     >
-                      {extractResolution(selectedSourceQuality) || "N/A"}
+                      {extractResolution(selectedSourceQuality)
+                        ? `${extractResolution(selectedSourceQuality)} Quality`
+                        : "N/A Quality"}
                     </Text>
                   </View>
                 </View>
 
                 {/* Center Column: The Orb socketed between SvgCardTop and SvgCardBottom */}
                 <View style={styles.torrentBentoCenterCol}>
-                  {/* Top Card (Symmetric Socket Card) */}
-                  <SvgCardTop style={styles.torrentDashboardHeaderCard}>
-                    <Text style={styles.torrentBentoCardLabel}>ENGINE</Text>
+                  {/* Top Card (Normal Bento Card) */}
+                  <View
+                    style={[
+                      styles.torrentBentoCard,
+                      { justifyContent: "flex-start", paddingTop: 16 },
+                    ]}
+                  >
                     <Text
                       style={[
-                        styles.torrentBentoCardValue,
+                        styles.torrentBentoCardValueCentered,
                         { color: "#5580FF" },
                       ]}
                     >
-                      ACTIVE
+                      Engine Active
                     </Text>
-                  </SvgCardTop>
+                  </View>
 
                   {/* Center Progress Orb Container */}
                   {/* Center Progress Orb Container */}
@@ -2801,10 +2249,7 @@ export default function DetailScreen() {
                     <MeshGradient
                       width={118}
                       height={118}
-                      colors={[
-                        theme.colors.accent,
-                        theme.colors.accentLight,
-                      ]}
+                      colors={[theme.colors.accent, theme.colors.accentLight]}
                       speed={1}
                     >
                       {/* Stats Inside Orb */}
@@ -2851,51 +2296,78 @@ export default function DetailScreen() {
                     </MeshGradient>
                   </View>
 
-                  {/* Bottom Card (Status) */}
-                  <SvgCardBottom style={styles.torrentDashboardBottomCard}>
-                    <Text style={styles.torrentBentoCardLabel}>STATUS</Text>
+                  {/* Bottom Card (Normal Bento Card) */}
+                  <View
+                    style={[
+                      styles.torrentBentoCard,
+                      { justifyContent: "flex-end", paddingBottom: 16 },
+                    ]}
+                  >
                     <Text
                       style={[
-                        styles.torrentBentoCardValue,
+                        styles.torrentBentoCardValueCentered,
                         { color: "#ff4a7d" },
                       ]}
                     >
                       {torrentStatus?.peers && torrentStatus.peers > 0
                         ? "Streaming"
-                        : "Connecting"}
+                        : "Connecting..."}
                     </Text>
-                  </SvgCardBottom>
+                  </View>
                 </View>
 
                 {/* Right Column (Stats: Size, Audio) */}
                 <View style={styles.torrentBentoSideCol}>
                   {/* Size Card */}
-                  <View style={styles.torrentBentoCard}>
-                    <View style={styles.torrentBentoCardHeader}>
-                      <Database size={14} color="#5580FF" />
-                      <Text style={styles.torrentBentoCardLabel}>SIZE</Text>
-                    </View>
+                  <View style={[styles.torrentBentoCard, styles.torrentBentoCornerCard]}>
+                    <LinearGradient
+                      colors={[theme.colors.accent, theme.colors.accentLight]}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 1 }}
+                      style={StyleSheet.absoluteFillObject}
+                    />
+                    <Database
+                      size={18}
+                      color="#ffffff"
+                      style={{ marginBottom: 6 }}
+                    />
                     <Text
-                      style={styles.torrentBentoCardValue}
+                      style={[
+                        styles.torrentBentoCardValueCentered,
+                        { color: "#ffffff" },
+                      ]}
                       numberOfLines={1}
                       ellipsizeMode="tail"
                     >
-                      {extractTorrentSize(selectedSourceQuality) || "N/A"}
+                      {extractTorrentSize(selectedSourceQuality) || "N/A Size"}
                     </Text>
                   </View>
 
                   {/* Audio Card */}
-                  <View style={styles.torrentBentoCard}>
-                    <View style={styles.torrentBentoCardHeader}>
-                      <Volume2 size={14} color="#5580FF" />
-                      <Text style={styles.torrentBentoCardLabel}>AUDIO</Text>
-                    </View>
+                  <View style={[styles.torrentBentoCard, styles.torrentBentoCornerCard]}>
+                    <LinearGradient
+                      colors={[theme.colors.accent, theme.colors.accentLight]}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 1 }}
+                      style={StyleSheet.absoluteFillObject}
+                    />
+                    <Volume2
+                      size={18}
+                      color="#ffffff"
+                      style={{ marginBottom: 6 }}
+                    />
                     <Text
-                      style={styles.torrentBentoCardValue}
+                      style={[
+                        styles.torrentBentoCardValueCentered,
+                        { color: "#ffffff" },
+                      ]}
                       numberOfLines={1}
                       ellipsizeMode="tail"
                     >
-                      {parseAudioLanguages(selectedTorrentHost) || "Multi"}
+                      {!parseAudioLanguages(selectedTorrentHost) ||
+                      parseAudioLanguages(selectedTorrentHost) === "—"
+                        ? "-"
+                        : parseAudioLanguages(selectedTorrentHost)}
                     </Text>
                   </View>
                 </View>
@@ -3507,84 +2979,6 @@ export default function DetailScreen() {
           sources={playerConfig.sources}
         />
       )}
-    </View>
-  );
-}
-
-// ── Details Skeleton Loading Component ──────────────────────────────────────────
-function DetailsSkeleton() {
-  const pulseValue = useSharedValue(0);
-
-  useEffect(() => {
-    pulseValue.value = withRepeat(
-      withSequence(
-        withTiming(1, { duration: 800 }),
-        withTiming(0, { duration: 800 }),
-      ),
-      -1,
-      true,
-    );
-  }, []);
-
-  const animatedStyle = useAnimatedStyle(() => {
-    const backgroundColor = interpolateColor(
-      pulseValue.value,
-      [0, 1],
-      ["rgba(255,255,255,0.035)", "rgba(255,255,255,0.095)"],
-    );
-    return {
-      backgroundColor,
-    };
-  });
-
-  return (
-    <View style={styles.skeletonContainer}>
-      {/* Title skeleton */}
-      <Animated.View style={[styles.skeletonTitle, animatedStyle]} />
-
-      {/* Season Pill skeleton */}
-      <Animated.View style={[styles.skeletonSeason, animatedStyle]} />
-
-      {/* Tags row skeleton */}
-      <View style={styles.skeletonTagsRow}>
-        <Animated.View style={[styles.skeletonTag, animatedStyle]} />
-        <Animated.View
-          style={[styles.skeletonTag, { width: 60 }, animatedStyle]}
-        />
-        <Animated.View
-          style={[styles.skeletonTag, { width: 50 }, animatedStyle]}
-        />
-      </View>
-
-      {/* Description lines skeleton */}
-      <Animated.View
-        style={[styles.skeletonText, { width: "100%" }, animatedStyle]}
-      />
-      <Animated.View
-        style={[styles.skeletonText, { width: "90%" }, animatedStyle]}
-      />
-      <Animated.View
-        style={[
-          styles.skeletonText,
-          { width: "55%", marginBottom: 32 },
-          animatedStyle,
-        ]}
-      />
-
-      {/* Episode Header skeleton */}
-      <Animated.View style={[styles.skeletonHeader, animatedStyle]} />
-
-      {/* Episode rows skeleton */}
-      {[1, 2, 3].map((i) => (
-        <View key={i} style={styles.skeletonRow}>
-          <Animated.View style={[styles.skeletonThumb, animatedStyle]} />
-          <View style={styles.skeletonMetaWrap}>
-            <Animated.View style={[styles.skeletonMeta, animatedStyle]} />
-            <Animated.View style={[styles.skeletonLine, animatedStyle]} />
-            <Animated.View style={[styles.skeletonDescLine, animatedStyle]} />
-          </View>
-        </View>
-      ))}
     </View>
   );
 }
