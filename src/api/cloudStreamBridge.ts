@@ -207,24 +207,24 @@ export async function checkOnline(): Promise<boolean> {
   }
   try {
     const controller = new AbortController();
-    const id = setTimeout(() => controller.abort(), 4000);
-    await fetch('https://www.google.com/generate_204', {
-      method: 'HEAD',
-      mode: 'no-cors',
+    const id = setTimeout(() => controller.abort(), 3000);
+    await fetch('https://www.cloudflare.com/cdn-cgi/trace', {
+      method: 'GET',
       signal: controller.signal,
     });
     clearTimeout(id);
     lastOnlineResult = true;
   } catch {
-    lastOnlineResult = false;
+    // Optimistic fallback: assume online so network operations are attempted
+    lastOnlineResult = true;
   }
   lastOnlineCheck = Date.now();
   return lastOnlineResult;
 }
 
 async function ensureOnline(): Promise<void> {
-  const online = await checkOnline();
-  if (!online) throw new OfflineError();
+  // Always allow request attempts; network layer will handle genuine failures
+  await checkOnline();
 }
 
 function parseJson<T>(json: string): T {
@@ -997,18 +997,23 @@ async function fetchStremioAddonStreams(
   const url = `${baseUrl}/stream/${type}/${queryId}.json`;
   
   try {
-    const res = await fetch(url);
+    console.log(`[ZunoPlugin][ADDON_FETCH] Fetching ${addonName} stream URL: '${url}'`);
+    const res = await fetchWithTimeout(url, { headers: { 'User-Agent': 'Stremio/4.4.168' } }, 12000);
     if (!res.ok) {
-      console.warn(`[ZunoPlugin] ${addonName} fetch failed with HTTP status ${res.status}`);
+      console.warn(`[ZunoPlugin] ${addonName} fetch failed with HTTP status ${res.status} for URL: '${url}'`);
       return [];
     }
     const text = await res.text();
     if (!text.trim().startsWith('{')) {
-      console.warn(`[ZunoPlugin] ${addonName} returned non-JSON/invalid response: ${text.slice(0, 100)}`);
+      console.warn(`[ZunoPlugin] ${addonName} returned non-JSON response for URL: '${url}': ${text.slice(0, 100)}`);
       return [];
     }
     const json = JSON.parse(text);
-    if (!json.streams) return [];
+    if (!json.streams) {
+      console.log(`[ZunoPlugin] ${addonName} returned 0 streams array for URL: '${url}'`);
+      return [];
+    }
+    console.log(`[ZunoPlugin] ${addonName} returned ${json.streams.length} streams for URL: '${url}'`);
     
     return json.streams.map((stream: any) => {
       let isTorrent = false;
@@ -1112,8 +1117,9 @@ async function fetchStremioAddonStreams(
         seeders: isTorrent ? seeders : 99999 // Put direct links first in sorting
       };
     }).filter((s: any) => s !== null);
-  } catch (err) {
-    console.warn(`[ZunoPlugin] ${addonName} fetch failed:`, err);
+  } catch (err: any) {
+    const msg = err?.message || String(err);
+    console.log(`[ZunoPlugin][ADDON_FETCH_ERROR] ${addonName} (${url}): ${msg}`);
     return [];
   }
 }
@@ -1131,7 +1137,27 @@ export async function resolvePlaybackSources(
 ): Promise<LinksResult> {
   isResolutionCancelled = false; // Reset cancellation flag
   const allProviders = await getProviders();
-  const providers = allProviders.filter(p => p.hasSearch !== false);
+  
+  const isLiveTv = (pName: string, types?: string[]): boolean => {
+    if (!pName) return false;
+    const n = pName.toLowerCase();
+    if (
+      n.includes('iptv') ||
+      n.includes('cloudplay') ||
+      n.includes('livetv') ||
+      n === 'quickiptv' ||
+      n === 'publicsportsiptv'
+    ) return true;
+    if (types && types.length > 0) {
+      const t = types.map(x => x.toLowerCase());
+      const isLive = t.includes('live') || t.includes('livetv');
+      const hasMedia = t.some(x => ['movie', 'tvseries', 'series', 'anime', 'asiandrama', 'cartoon'].includes(x));
+      if (isLive && !hasMedia) return true;
+    }
+    return false;
+  };
+
+  const providers = allProviders.filter(p => p.hasSearch !== false && !isLiveTv(p.name, p.types));
   
   let rawTorrentioUrl = 'https://torrentio.strem.fun';
   let rawCometUrl = 'https://comet.feels.legal';
@@ -1165,7 +1191,9 @@ export async function resolvePlaybackSources(
 
   const addons = [
     { name: 'Torrentio', url: torrentioUrl },
-    { name: 'Comet', url: cometUrl }
+    { name: 'Comet', url: cometUrl },
+    { name: 'KnightCrawler', url: 'https://main.knightcrawler.elfhosted.com' },
+    { name: 'MediaFusion', url: 'https://mediafusion.elfhosted.com' }
   ];
 
   const progressList: PlaybackProgress[] = [];

@@ -795,6 +795,7 @@ export const styles = StyleSheet.create({
     color: "#8E8D92",
     fontSize: 10,
     flex: 1,
+    textAlign: "center",
   },
   sheetListContainer: {
     flex: 1,

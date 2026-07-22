@@ -1,4 +1,4 @@
-import React, { useRef } from "react";
+import React, { useRef, useState } from "react";
 import {
   View,
   Text,
@@ -35,6 +35,7 @@ export const ContinueCard = React.memo(function ContinueCard({
   const scale = useRef(new Animated.Value(1)).current;
   const pct = Math.min(Math.max((item.position / item.duration) * 100, 0), 100);
   const cardWidth = width ?? CW_CARD_W;
+  const [imageError, setImageError] = useState(false);
 
   function handlePress() {
     viewRef.current?.measure(
@@ -87,14 +88,17 @@ export const ContinueCard = React.memo(function ContinueCard({
         <Animated.View style={{ transform: [{ scale }] }}>
           {/* Overflow hidden container to wrap image + progress bar together */}
           <View style={[styles.cardInnerContainer, { width: cardWidth, height: cardWidth * 1.5 }]}>
-            {item.posterUrl ? (
+            {item.posterUrl && !imageError ? (
               <Image
                 source={{ uri: item.posterUrl }}
                 style={styles.cwCardImg}
                 resizeMode="cover"
+                onError={() => setImageError(true)}
               />
             ) : (
-              <View style={[styles.cwCardImg, styles.cardFallback]} />
+              <View style={[styles.cwCardImg, styles.cardFallback]}>
+                <Text style={styles.placeholderLogo}>Z</Text>
+              </View>
             )}
 
             {/* Custom delete from history button */}
@@ -146,7 +150,15 @@ const styles = StyleSheet.create({
     height: "100%",
     backgroundColor: theme.colors.placeholder,
   },
-  cardFallback: { flex: 1, backgroundColor: theme.colors.placeholder },
+  cardFallback: { flex: 1, backgroundColor: theme.colors.placeholder, alignItems: 'center', justifyContent: 'center' },
+  placeholderLogo: {
+    color: '#5580FF',
+    fontSize: 28,
+    fontWeight: '900',
+    letterSpacing: -1,
+    opacity: 0.7,
+  },
+
   deleteBtn: {
     position: "absolute",
     top: 8,

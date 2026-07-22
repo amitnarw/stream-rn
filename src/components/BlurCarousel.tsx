@@ -181,11 +181,13 @@ export const BlurCarousel = <ItemT,>({
   borderRadius,
   onIndexChange,
 }: BlurCarouselProps<ItemT>) => {
-  const scrollX = useSharedValue<number>(0);
+  const N = data.length;
+  const initialOffset = N > 1 ? N * itemWidth : 0;
+
+  const scrollX = useSharedValue<number>(initialOffset);
   const activeIndex = useSharedValue<number>(0);
   const flatListRef = React.useRef<any>(null);
 
-  const N = data.length;
   const loopData = N > 1 ? [...data, ...data, ...data] : data;
 
   const [initialScrolled, setInitialScrolled] = React.useState(false);
@@ -193,12 +195,14 @@ export const BlurCarousel = <ItemT,>({
   const dataKey = React.useMemo(() => data.map((d: any) => d.url || d.id || "").join(","), [data]);
 
   React.useEffect(() => {
+    scrollX.value = N > 1 ? N * itemWidth : 0;
     setInitialScrolled(false);
-  }, [dataKey]);
+  }, [dataKey, N, itemWidth]);
 
   const handleContentSizeChange = React.useCallback(() => {
     if (!initialScrolled && N > 1 && flatListRef.current) {
       setInitialScrolled(true);
+      scrollX.value = N * itemWidth;
       flatListRef.current.scrollToOffset({
         offset: N * itemWidth,
         animated: false,
@@ -256,7 +260,13 @@ export const BlurCarousel = <ItemT,>({
       <Animated.FlatList
         ref={flatListRef}
         data={loopData}
-        contentOffset={{ x: N > 1 ? N * itemWidth : 0, y: 0 }}
+        contentOffset={{ x: initialOffset, y: 0 }}
+        getItemLayout={(_, index) => ({
+          length: itemWidth,
+          offset: itemWidth * index,
+          index,
+        })}
+        initialScrollIndex={N > 1 ? N : 0}
         showsHorizontalScrollIndicator={false}
         onScroll={onScroll}
         scrollEventThrottle={16}

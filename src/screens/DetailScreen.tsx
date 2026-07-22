@@ -289,7 +289,7 @@ export default function DetailScreen() {
   const torrentSessionIdRef = useRef<number>(0);
   const resolveTimeoutRef = useRef<any>(null);
 
-  const triggerTorrentStream = async (
+  const triggerTorrentStream = (
     source: VideoSource,
     title: string,
     subUrl: string,
@@ -297,142 +297,171 @@ export default function DetailScreen() {
     const sessionId = torrentSessionIdRef.current;
     const sourceSeeders = (source as any).seeders ?? 0;
 
-    try {
-      const info = await bridge.startTorrentStream(source.url);
-      if (sessionId !== torrentSessionIdRef.current) return;
+    setSelectedTorrentSeeders(sourceSeeders);
+    setSelectedSourceQuality(source.quality);
+    setSelectedSourceProvider(source.provider ?? "");
+    setSelectedTorrentTitle(title);
+    setSelectedTorrentHost((source as any).host || "");
+    setTorrentStatus({ progress: 0, speed: 0, peers: 0, active: true });
 
-      if (torrentIntervalRef.current) {
-        clearInterval(torrentIntervalRef.current);
-      }
+    let streamInfoResult: {
+      streamUrl: string;
+      fileName: string;
+      fileSize: number;
+    } | null = null;
+    let streamStartError: any = null;
 
-      let consecutiveFalseCount = 0;
-      const MAX_FALSE_READINGS = 3;
-      const POLLING_TIMEOUT_MS = 120_000;
-      const pollStartTime = Date.now();
+    // Launch native startTorrentStream asynchronously in background
+    bridge
+      .startTorrentStream(source.url)
+      .then((info) => {
+        streamInfoResult = info;
+      })
+      .catch((err) => {
+        streamStartError = err;
+      });
 
-      const intervalId = setInterval(async () => {
-        try {
-          if (sessionId !== torrentSessionIdRef.current) {
-            clearInterval(intervalId);
-            return;
-          }
+    if (torrentIntervalRef.current) {
+      clearInterval(torrentIntervalRef.current);
+    }
 
-          const status = await bridge.getTorrentStatus();
+    let consecutiveFalseCount = 0;
+    const MAX_FALSE_READINGS = 5;
+    const POLLING_TIMEOUT_MS = 120_000;
+    const pollStartTime = Date.now();
 
-          if (sessionId !== torrentSessionIdRef.current) {
-            clearInterval(intervalId);
-            return;
-          }
+    // Start 400ms polling loop IMMEDIATELY while native engine fetches metadata
+    const intervalId = setInterval(async () => {
+      try {
+        if (sessionId !== torrentSessionIdRef.current) {
+          clearInterval(intervalId);
+          return;
+        }
 
+        if (streamStartError) {
+          clearInterval(intervalId);
+          setIsTorrentBuffering(false);
+          setIsOpeningPlayer(false);
+          setTorrentErrorModal({
+            visible: true,
+            message: cleanTorrentError(
+              streamStartError.message || String(streamStartError),
+            ),
+          });
+          return;
+        }
+
+        const status = await bridge.getTorrentStatus();
+
+        if (sessionId !== torrentSessionIdRef.current) {
+          clearInterval(intervalId);
+          return;
+        }
+
+        if (status) {
           setTorrentStatus(status);
-          if (!status.active) {
-            consecutiveFalseCount++;
-            if (consecutiveFalseCount >= MAX_FALSE_READINGS) {
-              clearInterval(intervalId);
-              setIsTorrentBuffering(false);
-              setIsOpeningPlayer(false);
-              bridge.stopTorrentStream().catch(() => {});
-              setTorrentErrorModal({
-                visible: true,
-                message: "Torrent stream connection timed out or went inactive.",
-              });
-            }
-            return;
-          }
+        }
 
-          consecutiveFalseCount = 0;
-
-          // Check overall polling timeout (120s from first poll)
-          if (Date.now() - pollStartTime > POLLING_TIMEOUT_MS) {
+        if (!status || !status.active) {
+          consecutiveFalseCount++;
+          if (consecutiveFalseCount >= MAX_FALSE_READINGS) {
             clearInterval(intervalId);
             setIsTorrentBuffering(false);
             setIsOpeningPlayer(false);
             bridge.stopTorrentStream().catch(() => {});
             setTorrentErrorModal({
               visible: true,
-              message:
-                "Torrent is taking too long to buffer. The torrent may have few active seeders. Try a different source.",
+              message: "Torrent stream connection timed out or went inactive.",
             });
-            return;
           }
-
-          // 1.5% represents full indexing download (moov atom / header container tables)
-          if (status.progress >= 1.5 && status.active) {
-            clearInterval(intervalId);
-            setIsTorrentBuffering(false);
-
-            // Check if external player mode is enabled
-            try {
-              const mode = await AsyncStorage.getItem("@sozo_player_mode");
-              if (mode === "external") {
-                closeSourcePicker(true); // Keep torrent active for VLC / external players!
-                bridge.playInExternalPlayer(
-                  info.streamUrl,
-                  null,
-                  title,
-                  source.headers ? JSON.stringify(source.headers) : null,
-                );
-                return;
-              }
-            } catch (e) {
-              console.warn("Failed to read player mode setting:", e);
-            }
-
-            // Play local HTTP range server stream URL via Kotlin player!
-            closeSourcePicker(true); // Keep torrent active so Kotlin player can read from local http server!
-            setIsOpeningPlayer(false);
-            const playHeaders = {
-              ...(source.headers || {}),
-              __originalMagnetUrl: source.url,
-            };
-
-            const currentEp = displayedEpisodes.find(
-              (_, i) => activeEpisodeIndex === i,
-            );
-
-            bridge.playStream(
-              info.streamUrl,
-              playHeaders,
-              detail?.title || "",
-              subUrl,
-              sources.map((s) => ({
-                quality: s.quality,
-                url: s.url,
-                type: s.type,
-                headers: s.headers,
-                provider: s.provider || source.provider,
-                host: s.host,
-              })),
-              subtitles,
-              allEpisodes ? JSON.stringify(allEpisodes) : "[]",
-              activeEpisodeIndex ?? -1,
-              detail?.imdbId || "",
-              detail?.isSerial ? "series" : "movie",
-              detail?.posterUrl || "",
-              currentEp?.season || 1,
-              currentEp?.episode || 1,
-              currentEp?.label || "",
-              detail?.logoUrl || "",
-              providerName,
-              detail?.url || item?.url || "",
-              true,
-            );
-          }
-        } catch (err) {
-          console.warn("[ZunoPlugin] Error polling torrent status:", err);
+          return;
         }
-      }, 500);
 
-      torrentIntervalRef.current = intervalId;
-    } catch (err: any) {
-      if (sessionId !== torrentSessionIdRef.current) return;
-      setIsTorrentBuffering(false);
-      setIsOpeningPlayer(false);
-      setTorrentErrorModal({
-        visible: true,
-        message: cleanTorrentError(err.message),
-      });
-    }
+        consecutiveFalseCount = 0;
+
+        // Check overall polling timeout (120s)
+        if (Date.now() - pollStartTime > POLLING_TIMEOUT_MS) {
+          clearInterval(intervalId);
+          setIsTorrentBuffering(false);
+          setIsOpeningPlayer(false);
+          bridge.stopTorrentStream().catch(() => {});
+          setTorrentErrorModal({
+            visible: true,
+            message:
+              "Torrent is taking too long to buffer. The torrent may have few active seeders. Try a different source.",
+          });
+          return;
+        }
+
+        // When native startStream promise has resolved AND status progress >= 1.5%, launch player!
+        if (streamInfoResult && status.progress >= 1.5 && status.active) {
+          clearInterval(intervalId);
+          setIsTorrentBuffering(false);
+          const info = streamInfoResult;
+
+          // Check if external player mode is enabled
+          try {
+            const mode = await AsyncStorage.getItem("@sozo_player_mode");
+            if (mode === "external") {
+              closeSourcePicker(true);
+              bridge.playInExternalPlayer(
+                info.streamUrl,
+                null,
+                title,
+                source.headers ? JSON.stringify(source.headers) : null,
+              );
+              return;
+            }
+          } catch (e) {
+            console.warn("Failed to read player mode setting:", e);
+          }
+
+          // Play via Kotlin player
+          closeSourcePicker(true);
+          setIsOpeningPlayer(false);
+          const playHeaders = {
+            ...(source.headers || {}),
+            __originalMagnetUrl: source.url,
+          };
+
+          const currentEp = displayedEpisodes.find(
+            (_, i) => activeEpisodeIndex === i,
+          );
+
+          bridge.playStream(
+            info.streamUrl,
+            playHeaders,
+            detail?.title || "",
+            subUrl,
+            sources.map((s) => ({
+              quality: s.quality,
+              url: s.url,
+              type: s.type,
+              headers: s.headers,
+              provider: s.provider || source.provider,
+              host: s.host,
+            })),
+            subtitles,
+            allEpisodes ? JSON.stringify(allEpisodes) : "[]",
+            activeEpisodeIndex ?? -1,
+            detail?.imdbId || "",
+            detail?.isSerial ? "series" : "movie",
+            detail?.posterUrl || "",
+            currentEp?.season || 1,
+            currentEp?.episode || 1,
+            currentEp?.label || "",
+            detail?.logoUrl || "",
+            providerName,
+            detail?.url || item?.url || "",
+            true,
+          );
+        }
+      } catch (err) {
+        console.warn("[ZunoPlugin] Error polling torrent status:", err);
+      }
+    }, 400);
+
+    torrentIntervalRef.current = intervalId;
   };
 
   const streamedSourcesRef = useRef<VideoSource[]>([]);
@@ -584,20 +613,87 @@ export default function DetailScreen() {
     })),
   );
   const [activeProviderTab, setActiveProviderTab] = useState("All");
+  const [selectedPluginTypeFilter, setSelectedPluginTypeFilter] = useState<
+    "all" | "torrent" | "direct"
+  >("all");
+  const [showPluginTypeDropdown, setShowPluginTypeDropdown] = useState(false);
+
+  const isLiveTvProvider = useCallback(
+    (name: string, providerObj?: PluginProvider): boolean => {
+      if (!name) return false;
+      const n = name.toLowerCase();
+      if (
+        n.includes("iptv") ||
+        n.includes("livetv") ||
+        n === "quickiptv" ||
+        n === "publicsportsiptv"
+      ) {
+        return true;
+      }
+      const targetObj =
+        providerObj || allProviders.find((p) => p.name.toLowerCase() === n);
+      if (targetObj && targetObj.types && targetObj.types.length > 0) {
+        const types = targetObj.types.map((t) => t.toLowerCase());
+        const isLive = types.includes("live") || types.includes("livetv");
+        const hasMedia = types.some((t) =>
+          [
+            "movie",
+            "tvseries",
+            "series",
+            "anime",
+            "asiandrama",
+            "cartoon",
+            "documentary",
+          ].includes(t),
+        );
+        if (isLive && !hasMedia) return true;
+      }
+      return false;
+    },
+    [allProviders],
+  );
+
+  const getProviderProtocolCategory = useCallback(
+    (
+      pName: string,
+      sourcesList: VideoSource[],
+    ): "torrent" | "direct" | "both" => {
+      const pSources = sourcesList.filter(
+        (s) => (s.provider ?? "").toLowerCase() === pName.toLowerCase(),
+      );
+      if (pSources.length > 0) {
+        const hasTorrent = pSources.some(
+          (s) => s.type === "torrent" || s.url.startsWith("magnet:"),
+        );
+        const hasDirect = pSources.some(
+          (s) => s.type !== "torrent" && !s.url.startsWith("magnet:"),
+        );
+        if (hasTorrent && hasDirect) return "both";
+        if (hasTorrent) return "torrent";
+        return "direct";
+      }
+
+      const lower = pName.toLowerCase();
+      if (lower.includes("yts")) return "torrent";
+      return "both";
+    },
+    [],
+  );
 
   useEffect(() => {
     async function loadProviders() {
       try {
         const provs = await bridge.getProviders();
         if (provs && provs.length > 0) {
-          setAllProviders(provs);
+          const filtered = provs.filter((p) => !isLiveTvProvider(p.name, p));
+          setAllProviders(filtered);
         }
       } catch (e) {
         console.warn("Failed to load providers for tabs:", e);
       }
     }
     loadProviders();
-  }, []);
+  }, [isLiveTvProvider]);
 
   const skeletonOpacity = useSharedValue(0.3);
   useEffect(() => {
@@ -766,38 +862,71 @@ export default function DetailScreen() {
 
   const providerTabs = useMemo(() => {
     let list: string[] = ["All"];
-    if (providerName === "Cinemeta") {
-      if (resolvingProgress.length > 0) {
-        // Always show All + all providers, regardless of resolving state.
-        // This keeps tabs stable — they don't disappear when resolving ends.
-        list.push(...resolvingProgress.map((p) => p.providerName));
-      } else {
-        // Fallback to allProviders (loaded at mount)
-        allProviders.forEach((p) => {
-          list.push(p.name);
-        });
-      }
-    } else {
-      list.push(providerName);
-    }
 
-    // Dynamic addition: ALWAYS ensure any provider that actually has sources in our state
-    // is present in the tabs list (helps with cached data loads).
-    sources.forEach((s) => {
-      if (s.provider) {
-        const exists = list.some(
-          (p) => p.toLowerCase() === s.provider!.toLowerCase(),
-        );
-        if (!exists) {
-          list.push(s.provider);
+    if (isResolving) {
+      // Initial load / Searching / Refreshing: Show all non-Live TV plugins for live progress
+      if (providerName === "Cinemeta") {
+        if (resolvingProgress.length > 0) {
+          resolvingProgress.forEach((p) => {
+            if (!isLiveTvProvider(p.providerName)) {
+              list.push(p.providerName);
+            }
+          });
+        } else {
+          allProviders.forEach((p) => {
+            if (!isLiveTvProvider(p.name, p)) {
+              list.push(p.name);
+            }
+          });
+        }
+      } else {
+        if (!isLiveTvProvider(providerName)) {
+          list.push(providerName);
         }
       }
-    });
 
-    if (!list.includes("VidSrcMe")) list.push("VidSrcMe");
-    if (!list.includes("VsEmbed")) list.push("VsEmbed");
+      sources.forEach((s) => {
+        if (s.provider && !isLiveTvProvider(s.provider)) {
+          const exists = list.some(
+            (p) => p.toLowerCase() === s.provider!.toLowerCase(),
+          );
+          if (!exists) {
+            list.push(s.provider);
+          }
+        }
+      });
 
-    // Stable canonical sorting to prevent dynamic sequence changes
+      if (!list.includes("VidSrcMe") && !isLiveTvProvider("VidSrcMe"))
+        list.push("VidSrcMe");
+      if (!list.includes("VsEmbed") && !isLiveTvProvider("VsEmbed"))
+        list.push("VsEmbed");
+    } else {
+      // Cached / Done: ONLY show plugins for which we actually HAVE sources!
+      const activeProvidersWithData = new Set<string>();
+      sources.forEach((s) => {
+        if (s.provider && !isLiveTvProvider(s.provider)) {
+          activeProvidersWithData.add(s.provider);
+        }
+      });
+      list.push(...Array.from(activeProvidersWithData));
+    }
+
+    // Filter tabs by Protocol Dropdown if selected
+    if (selectedPluginTypeFilter === "torrent") {
+      list = list.filter((tab) => {
+        if (tab === "All") return true;
+        const cat = getProviderProtocolCategory(tab, sources);
+        return cat === "torrent" || cat === "both";
+      });
+    } else if (selectedPluginTypeFilter === "direct") {
+      list = list.filter((tab) => {
+        if (tab === "All") return true;
+        const cat = getProviderProtocolCategory(tab, sources);
+        return cat === "direct" || cat === "both";
+      });
+    }
+
+    // Stable canonical sorting
     const canonical = [
       "all",
       ...allProviders.map((p) => p.name.toLowerCase()),
@@ -814,13 +943,35 @@ export default function DetailScreen() {
     });
 
     return list;
-  }, [allProviders, providerName, resolvingProgress, sources]);
+  }, [
+    isResolving,
+    resolvingProgress,
+    allProviders,
+    providerName,
+    sources,
+    isLiveTvProvider,
+    getProviderProtocolCategory,
+    selectedPluginTypeFilter,
+  ]);
 
   const filteredSources = useMemo(() => {
+    // 1. Protocol type filter (All, Torrent, Direct)
+    let baseSources = sources;
+    if (selectedPluginTypeFilter === "torrent") {
+      baseSources = sources.filter(
+        (s) => s.type === "torrent" || s.url.startsWith("magnet:"),
+      );
+    } else if (selectedPluginTypeFilter === "direct") {
+      baseSources = sources.filter(
+        (s) => s.type !== "torrent" && !s.url.startsWith("magnet:"),
+      );
+    }
+
+    // 2. Provider tab filter
     const list =
       activeProviderTab.toLowerCase() === "all"
-        ? sources
-        : sources.filter(
+        ? baseSources
+        : baseSources.filter(
             (s) =>
               (s.provider ?? "").toLowerCase() ===
               activeProviderTab.toLowerCase(),
@@ -917,7 +1068,7 @@ export default function DetailScreen() {
       }
       return 0;
     });
-  }, [sources, activeProviderTab]);
+  }, [sources, activeProviderTab, selectedPluginTypeFilter]);
 
   // If the active tab disappears from the list (e.g. provider had no sources),
   // fall back to 'All' so the user doesn't see a blank filtered view
@@ -1137,12 +1288,6 @@ export default function DetailScreen() {
             mappedProvider = "VidSrcMe";
           } else if (src.url.includes("vsembed.su")) {
             mappedProvider = "VsEmbed";
-          } else if (
-            src.url.includes("vidsrc") ||
-            src.url.includes("vidvault") ||
-            src.url.includes("vidrock")
-          ) {
-            return null;
           }
           return {
             ...src,
@@ -1177,11 +1322,6 @@ export default function DetailScreen() {
             },
             (newSource) => {
               if (!showSourcePickerRef.current) return;
-              if (
-                newSource.provider === "Tamilblasters" &&
-                !newSource.url.startsWith("magnet:")
-              )
-                return;
               const mapped = mapSourceProvider(newSource);
               if (!mapped) return;
               if (streamedSourcesRef.current.some((s) => s.url === mapped.url))
@@ -1191,7 +1331,7 @@ export default function DetailScreen() {
                 streamedFlushRef.current = setTimeout(() => {
                   streamedFlushRef.current = null;
                   flushStreamedSources();
-                }, 120);
+                }, 350);
               }
             },
             () => {
@@ -1218,12 +1358,7 @@ export default function DetailScreen() {
             const merged = new Map(prev.map((s) => [s.url, s]));
             (result.sources ?? []).forEach((s) => {
               const mapped = mapSourceProvider(s);
-              if (
-                mapped &&
-                (mapped.provider !== "Tamilblasters" ||
-                  mapped.url.startsWith("magnet:")) &&
-                !merged.has(mapped.url)
-              ) {
+              if (mapped && !merged.has(mapped.url)) {
                 merged.set(mapped.url, mapped);
               }
             });
@@ -1248,6 +1383,7 @@ export default function DetailScreen() {
     if (activeEpisodeIndex === null) return;
     const ep = displayedEpisodes[activeEpisodeIndex];
     if (ep) {
+      bridge.clearLinksCache();
       playEpisode(ep, activeEpisodeIndex);
     }
   }, [activeEpisodeIndex, displayedEpisodes, playEpisode]);
@@ -1312,12 +1448,8 @@ export default function DetailScreen() {
             setSelectedTorrentTitle(title);
             setSelectedTorrentHost((source as any).host || "");
 
-            pendingTorrentRef.current = {
-              source,
-              title,
-              subUrl,
-            };
             setIsTorrentBuffering(true);
+            triggerTorrentStream(source, title, subUrl);
           } catch (e: any) {
             setIsTorrentBuffering(false);
             setIsOpeningPlayer(false);
@@ -2113,13 +2245,6 @@ export default function DetailScreen() {
         transparent={true}
         animationType="fade"
         statusBarTranslucent={true}
-        onShow={() => {
-          if (pendingTorrentRef.current) {
-            const { source, title, subUrl } = pendingTorrentRef.current;
-            pendingTorrentRef.current = null;
-            triggerTorrentStream(source, title, subUrl);
-          }
-        }}
         onRequestClose={() => {
           setIsTorrentBuffering(false);
           setIsOpeningPlayer(false);
@@ -2166,17 +2291,25 @@ export default function DetailScreen() {
             <View style={styles.torrentBentoGrid}>
               {/* Row: Left Column | Center Progress Socket Column | Right Column */}
               <View style={styles.torrentBentoMiddleRow}>
-                {/* Left Column (Stats: Protocol, Quality) */}
+                {/* Left Column (Stats: Seeders/Peers, Quality) */}
                 <View style={styles.torrentBentoSideCol}>
-                  {/* Protocol Card */}
-                  <View style={[styles.torrentBentoCard, styles.torrentBentoCornerCard]}>
+                  {/* Seeders / Peers Card */}
+                  <View
+                    style={[
+                      styles.torrentBentoCard,
+                      styles.torrentBentoCornerCard,
+                    ]}
+                  >
                     <LinearGradient
-                      colors={[theme.colors.accent, theme.colors.accentLight]}
+                      colors={[
+                        "rgba(0, 71, 255, 0.35)",
+                        "rgba(85, 128, 255, 0.12)",
+                      ]}
                       start={{ x: 0, y: 0 }}
                       end={{ x: 1, y: 1 }}
                       style={StyleSheet.absoluteFillObject}
                     />
-                    <Activity
+                    <Users
                       size={18}
                       color="#ffffff"
                       style={{ marginBottom: 6 }}
@@ -2189,17 +2322,26 @@ export default function DetailScreen() {
                       numberOfLines={1}
                       ellipsizeMode="tail"
                     >
-                      {getProtocolLabel(
-                        sources[selectedSourceIndex]?.type || "",
-                        sources[selectedSourceIndex]?.url || "",
-                      ) || "Direct"}
+                      {selectedTorrentSeeders > 0
+                        ? `${selectedTorrentSeeders} Seeders`
+                        : torrentStatus?.peers && torrentStatus.peers > 0
+                          ? `${torrentStatus.peers} Peers`
+                          : "0 Seeders"}
                     </Text>
                   </View>
 
                   {/* Quality Card */}
-                  <View style={[styles.torrentBentoCard, styles.torrentBentoCornerCard]}>
+                  <View
+                    style={[
+                      styles.torrentBentoCard,
+                      styles.torrentBentoCornerCard,
+                    ]}
+                  >
                     <LinearGradient
-                      colors={[theme.colors.accent, theme.colors.accentLight]}
+                      colors={[
+                        "rgba(0, 71, 255, 0.35)",
+                        "rgba(85, 128, 255, 0.12)",
+                      ]}
                       start={{ x: 0, y: 0 }}
                       end={{ x: 1, y: 1 }}
                       style={StyleSheet.absoluteFillObject}
@@ -2319,9 +2461,17 @@ export default function DetailScreen() {
                 {/* Right Column (Stats: Size, Audio) */}
                 <View style={styles.torrentBentoSideCol}>
                   {/* Size Card */}
-                  <View style={[styles.torrentBentoCard, styles.torrentBentoCornerCard]}>
+                  <View
+                    style={[
+                      styles.torrentBentoCard,
+                      styles.torrentBentoCornerCard,
+                    ]}
+                  >
                     <LinearGradient
-                      colors={[theme.colors.accent, theme.colors.accentLight]}
+                      colors={[
+                        "rgba(0, 71, 255, 0.35)",
+                        "rgba(85, 128, 255, 0.12)",
+                      ]}
                       start={{ x: 0, y: 0 }}
                       end={{ x: 1, y: 1 }}
                       style={StyleSheet.absoluteFillObject}
@@ -2344,9 +2494,17 @@ export default function DetailScreen() {
                   </View>
 
                   {/* Audio Card */}
-                  <View style={[styles.torrentBentoCard, styles.torrentBentoCornerCard]}>
+                  <View
+                    style={[
+                      styles.torrentBentoCard,
+                      styles.torrentBentoCornerCard,
+                    ]}
+                  >
                     <LinearGradient
-                      colors={[theme.colors.accent, theme.colors.accentLight]}
+                      colors={[
+                        "rgba(0, 71, 255, 0.35)",
+                        "rgba(85, 128, 255, 0.12)",
+                      ]}
                       start={{ x: 0, y: 0 }}
                       end={{ x: 1, y: 1 }}
                       style={StyleSheet.absoluteFillObject}
@@ -2483,108 +2641,221 @@ export default function DetailScreen() {
                 <X size={20} color="#ffffff" strokeWidth={2} />
               </TouchableOpacity>
             </View>
-            {/* Dynamic Provider Tabs scroll view */}
-            {providerTabs.length > 1 && (
-              <View style={styles.tabsContainer}>
-                <MaskedView
-                  style={styles.tabsMaskedView}
-                  maskElement={
-                    <LinearGradient
-                      colors={["transparent", "black", "black", "transparent"]}
-                      locations={[0, 0.08, 0.92, 1]}
-                      start={{ x: 0, y: 0 }}
-                      end={{ x: 1, y: 0 }}
-                      style={StyleSheet.absoluteFillObject}
-                    />
-                  }
-                >
-                  <ScrollView
-                    horizontal
-                    showsHorizontalScrollIndicator={false}
-                    contentContainerStyle={styles.tabsScrollContent}
+            {/* Dynamic Provider Tabs scroll view on left & Protocol Dropdown on right */}
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                justifyContent: "space-between",
+                paddingHorizontal: 5,
+                marginTop: 4,
+                marginBottom: 8,
+                zIndex: 9999,
+              }}
+            >
+              {providerTabs.length > 0 && (
+                <View style={{ flex: 1, marginRight: 8, height: 36 }}>
+                  <MaskedView
+                    style={styles.tabsMaskedView}
+                    maskElement={
+                      <LinearGradient
+                        colors={[
+                          "transparent",
+                          "black",
+                          "black",
+                          "transparent",
+                        ]}
+                        locations={[0, 0.08, 0.92, 1]}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 0 }}
+                        style={StyleSheet.absoluteFillObject}
+                      />
+                    }
                   >
-                    {providerTabs.map((tab) => {
-                      const isActive = activeProviderTab === tab;
+                    <ScrollView
+                      horizontal
+                      showsHorizontalScrollIndicator={false}
+                      contentContainerStyle={styles.tabsScrollContent}
+                    >
+                      {providerTabs.map((tab) => {
+                        const isActive = activeProviderTab === tab;
 
-                      // Calculate tab status decorations
-                      const prog = resolvingProgress.find(
-                        (p) => p.providerName === tab,
-                      );
-                      let tabLabel = tab;
-                      const tabSubLabel = cleanErrorMessage(prog?.errorReason);
-                      const isSearching =
-                        (tab === "All" && isResolving) ||
-                        prog?.status === "searching";
+                        // Calculate tab status decorations
+                        const prog = resolvingProgress.find(
+                          (p) => p.providerName === tab,
+                        );
+                        let tabLabel = tab;
+                        const isSearching =
+                          (tab === "All" && isResolving) ||
+                          prog?.status === "searching";
 
-                      const tabSourcesCount = sources.filter(
-                        (s) =>
-                          (s.provider ?? "").toLowerCase() ===
-                          tab.toLowerCase(),
-                      ).length;
-                      if (tab === "All") {
-                        tabLabel =
-                          sources.length > 0
-                            ? `All (${sources.length})`
-                            : "All";
-                      } else if (prog) {
-                        if (prog.status === "searching") {
+                        const tabSourcesCount = sources.filter(
+                          (s) =>
+                            (s.provider ?? "").toLowerCase() ===
+                            tab.toLowerCase(),
+                        ).length;
+                        if (tab === "All") {
+                          tabLabel =
+                            sources.length > 0
+                              ? `All (${sources.length})`
+                              : "All";
+                        } else if (prog) {
+                          if (prog.status === "searching") {
+                            tabLabel =
+                              tabSourcesCount > 0
+                                ? `${tab} (${tabSourcesCount})`
+                                : tab;
+                          } else if (prog.status === "found") {
+                            tabLabel = `${tab} (${tabSourcesCount})`;
+                          } else if (prog.status === "none") {
+                            tabLabel = `${tab} (0)`;
+                          } else if (prog.status === "error") {
+                            tabLabel =
+                              tabSourcesCount > 0
+                                ? `${tab} (${tabSourcesCount})`
+                                : `${tab} ⚠`;
+                          }
+                        } else {
+                          // Static tabs (like VidSrcMe, VsEmbed) or direct/custom provider calls which don't have progress tracking.
                           tabLabel =
                             tabSourcesCount > 0
                               ? `${tab} (${tabSourcesCount})`
-                              : tab;
-                        } else if (prog.status === "found") {
-                          tabLabel = `${tab} (${tabSourcesCount})`;
-                        } else if (prog.status === "none") {
-                          tabLabel = `${tab} (0)`;
-                        } else if (prog.status === "error") {
-                          tabLabel =
-                            tabSourcesCount > 0
-                              ? `${tab} (${tabSourcesCount})`
-                              : `${tab} ⚠`;
+                              : isResolving
+                                ? tab
+                                : `${tab} (0)`;
                         }
-                      } else {
-                        // Static tabs (like VidSrcMe, VsEmbed) or direct/custom provider calls which don't have progress tracking.
-                        tabLabel =
-                          tabSourcesCount > 0
-                            ? `${tab} (${tabSourcesCount})`
-                            : isResolving
-                              ? tab
-                              : `${tab} (0)`;
-                      }
 
-                      return (
+                        return (
+                          <TouchableOpacity
+                            key={tab}
+                            style={[
+                              styles.tabButton,
+                              isActive && styles.tabButtonActive,
+                              { flexDirection: "row", alignItems: "center" },
+                            ]}
+                            onPress={() => setActiveProviderTab(tab)}
+                            activeOpacity={0.7}
+                          >
+                            {isSearching && (
+                              <ActivityIndicator
+                                size="small"
+                                color={isActive ? "#ffffff" : "#0047FF"}
+                                style={{ marginRight: 6 }}
+                              />
+                            )}
+                            <Text
+                              style={[
+                                styles.tabText,
+                                isActive && styles.tabTextActive,
+                              ]}
+                            >
+                              {tabLabel}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </ScrollView>
+                  </MaskedView>
+                </View>
+              )}
+
+              {/* Protocol Filter Dropdown on Right */}
+              <View style={{ position: "relative", zIndex: 99999 }}>
+                <TouchableOpacity
+                  style={[
+                    styles.seasonSelector,
+                    {
+                      minWidth: 78,
+                      paddingVertical: 4,
+                      paddingHorizontal: 8,
+                      borderRadius: 12,
+                      height: 28,
+                      marginTop: 0,
+                    },
+                  ]}
+                  activeOpacity={0.7}
+                  onPress={() => setShowPluginTypeDropdown((v) => !v)}
+                >
+                  <Text style={[styles.seasonText, { fontSize: 10 }]}>
+                    {selectedPluginTypeFilter === "all"
+                      ? "All"
+                      : selectedPluginTypeFilter === "torrent"
+                        ? "Torrent"
+                        : "Direct"}
+                  </Text>
+                  <Text
+                    style={[styles.seasonIcon, { fontSize: 8, marginLeft: 4 }]}
+                  >
+                    ▼
+                  </Text>
+                </TouchableOpacity>
+
+                {showPluginTypeDropdown && (
+                  <>
+                    <Pressable
+                      style={{
+                        position: "absolute",
+                        top: -1000,
+                        left: -1000,
+                        right: -1000,
+                        bottom: -1000,
+                        zIndex: 99998,
+                      }}
+                      onPress={() => setShowPluginTypeDropdown(false)}
+                    />
+                    <Animated.View
+                      entering={FadeIn.duration(120)}
+                      exiting={FadeOut.duration(100)}
+                      style={[
+                        styles.floatingDropdown,
+                        {
+                          position: "absolute",
+                          top: 32,
+                          right: 0,
+                          width: 110,
+                          zIndex: 999999,
+                        },
+                      ]}
+                    >
+                      <LinearGradient
+                        colors={["#1c1c22", "#0f0f12"]}
+                        style={StyleSheet.absoluteFillObject}
+                      />
+                      {[
+                        { label: "All", value: "all" },
+                        { label: "Torrent", value: "torrent" },
+                        { label: "Direct", value: "direct" },
+                      ].map((opt) => (
                         <TouchableOpacity
-                          key={tab}
+                          key={opt.value}
                           style={[
-                            styles.tabButton,
-                            isActive && styles.tabButtonActive,
-                            { flexDirection: "row", alignItems: "center" },
+                            styles.dropdownItem,
+                            selectedPluginTypeFilter === opt.value &&
+                              styles.dropdownItemSelected,
+                            { paddingVertical: 8, paddingHorizontal: 12 },
                           ]}
-                          onPress={() => setActiveProviderTab(tab)}
-                          activeOpacity={0.7}
+                          onPress={() => {
+                            setSelectedPluginTypeFilter(opt.value as any);
+                            setShowPluginTypeDropdown(false);
+                          }}
                         >
-                          {isSearching && (
-                            <ActivityIndicator
-                              size="small"
-                              color={isActive ? "#ffffff" : "#0047FF"}
-                              style={{ marginRight: 6 }}
-                            />
-                          )}
                           <Text
                             style={[
-                              styles.tabText,
-                              isActive && styles.tabTextActive,
+                              styles.dropdownItemText,
+                              selectedPluginTypeFilter === opt.value &&
+                                styles.dropdownItemTextSelected,
+                              { fontSize: 11 },
                             ]}
                           >
-                            {tabLabel}
+                            {opt.label}
                           </Text>
                         </TouchableOpacity>
-                      );
-                    })}
-                  </ScrollView>
-                </MaskedView>
+                      ))}
+                    </Animated.View>
+                  </>
+                )}
               </View>
-            )}
+            </View>
 
             {/* Always show source list when sources exist, even while still resolving */}
             <View style={{ flex: 1 }}>

@@ -184,44 +184,56 @@ class CloudStreamPluginHost(val appContext: ReactApplicationContext) {
                         }
                         .dns(object : okhttp3.Dns {
                             private val dohClient = okhttp3.OkHttpClient.Builder()
-                                .connectTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
-                                .readTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
+                                .connectTimeout(2, java.util.concurrent.TimeUnit.SECONDS)
+                                .readTimeout(2, java.util.concurrent.TimeUnit.SECONDS)
                                 .build()
 
                             private fun resolveViaDoH(hostname: String): List<java.net.InetAddress>? {
-                                return try {
-                                    val request = okhttp3.Request.Builder()
-                                        .url("https://1.1.1.1/dns-query?name=${hostname}&type=A")
-                                        .header("Accept", "application/dns-json")
-                                        .build()
-                                    val response = dohClient.newCall(request).execute()
-                                    if (!response.isSuccessful) return null
-                                    val body = response.body?.string() ?: return null
-                                    val json = org.json.JSONObject(body)
-                                    val answers = json.optJSONArray("Answer") ?: return null
-                                    val addresses = mutableListOf<java.net.InetAddress>()
-                                    for (i in 0 until answers.length()) {
-                                        val answer = answers.getJSONObject(i)
-                                        val type = answer.optInt("type", 0)
-                                        val data = answer.optString("data", "")
-                                        // type 1 = A record (IPv4), type 28 = AAAA (IPv6)
-                                        if ((type == 1 || type == 28) && data.isNotBlank()) {
-                                            try {
-                                                addresses.add(java.net.InetAddress.getByName(data))
-                                            } catch (_: Exception) {}
+                                val dohUrls = listOf(
+                                    "https://dns.google/resolve?name=${hostname}&type=A",
+                                    "https://1.1.1.1/dns-query?name=${hostname}&type=A"
+                                )
+                                for (apiUrl in dohUrls) {
+                                    try {
+                                        val request = okhttp3.Request.Builder()
+                                            .url(apiUrl)
+                                            .header("Accept", "application/dns-json")
+                                            .build()
+                                        val response = dohClient.newCall(request).execute()
+                                        if (!response.isSuccessful) continue
+                                        val body = response.body?.string() ?: continue
+                                        val json = org.json.JSONObject(body)
+                                        val answers = json.optJSONArray("Answer") ?: continue
+                                        val addresses = mutableListOf<java.net.InetAddress>()
+                                        for (i in 0 until answers.length()) {
+                                            val answer = answers.getJSONObject(i)
+                                            val type = answer.optInt("type", 0)
+                                            val data = answer.optString("data", "")
+                                            if ((type == 1 || type == 28) && data.isNotBlank()) {
+                                                try {
+                                                    addresses.add(java.net.InetAddress.getByName(data))
+                                                } catch (_: Exception) {}
+                                            }
                                         }
+                                        if (addresses.isNotEmpty()) return addresses
+                                    } catch (e: Exception) {
+                                        Log.w(TAG, "DoH lookup failed for $hostname via $apiUrl: ${e.message}")
                                     }
-                                    if (addresses.isEmpty()) null else addresses
-                                } catch (e: Exception) {
-                                    Log.w(TAG, "DoH lookup failed for $hostname: ${e.message}")
-                                    null
                                 }
+                                return null
                             }
 
                             override fun lookup(hostname: String): List<java.net.InetAddress> {
                                 if (hostname == "localhost" || hostname == "127.0.0.1" || hostname.endsWith(".local")) {
                                     return okhttp3.Dns.SYSTEM.lookup(hostname)
                                 }
+                                try {
+                                    val sysResult = okhttp3.Dns.SYSTEM.lookup(hostname)
+                                    if (sysResult.isNotEmpty()) {
+                                        return sysResult
+                                    }
+                                } catch (_: Exception) {}
+
                                 resolveViaDoH(hostname)?.let { return it }
                                 return okhttp3.Dns.SYSTEM.lookup(hostname)
                             }
@@ -411,47 +423,6 @@ class CloudStreamPluginHost(val appContext: ReactApplicationContext) {
                 Log.e(TAG, "Failed to load plugin asset $fileName", e)
             }
         }
-        Thread {
-            try {
-                Thread.sleep(3000)
-                Log.i("ZunoPlugin", "=== LIVE TV DIAGNOSTICS ===")
-                val tvProviders = listOf("CloudPlay", "IPTV Player", "PublicSportsIPTV", "Sports IPTV", "Pirate IPTV", "Sony IPTV", "Japan IPTV")
-                for (name in tvProviders) {
-                    val api = apiByName(name)
-                    if (api == null) {
-                        Log.e("ZunoPlugin", "Provider not found: $name")
-                        continue
-                    }
-                    Log.i("ZunoPlugin", "Diagnosing provider: $name")
-                    Log.i("ZunoPlugin", " - mainUrl: ${api.mainUrl}")
-                    Log.i("ZunoPlugin", " - mainPage size: ${api.mainPage.size}")
-                    for (mp in api.mainPage) {
-                        try {
-                            Log.i("ZunoPlugin", " - Calling getMainPage for page '${mp.name}'...")
-                            val resp = kotlinx.coroutines.runBlocking {
-                                api.getMainPage(1, com.lagradost.cloudstream3.MainPageRequest(mp.name, mp.data, false))
-                            }
-                            if (resp == null) {
-                                Log.w("ZunoPlugin", "   -> returned null response")
-                            } else {
-                                Log.i("ZunoPlugin", "   -> success! items sections count: ${resp.items.size}")
-                                for (sec in resp.items) {
-                                    Log.i("ZunoPlugin", "     * Section: '${sec.name}' | items count: ${sec.list.size}")
-                                    if (sec.list.isNotEmpty()) {
-                                        Log.i("ZunoPlugin", "       first item: name='${sec.list[0].name}', url='${sec.list[0].url}'")
-                                    }
-                                }
-                            }
-                        } catch (t: Throwable) {
-                            Log.e("ZunoPlugin", "   -> FAILED: ${t.javaClass.name}: ${t.message}", t)
-                        }
-                    }
-                }
-                Log.i("ZunoPlugin", "==============================")
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to run Live TV diagnostics", e)
-            }
-        }.start()
         return allProviders
     }
 
@@ -469,7 +440,11 @@ class CloudStreamPluginHost(val appContext: ReactApplicationContext) {
     }
 
     private fun apiByName(name: String): MainAPI? {
-        return APIHolder.allProviders.firstOrNull { it.name == name }
+        val clean = name.replace(" ", "").replace("-", "").replace("_", "").lowercase()
+        return APIHolder.allProviders.firstOrNull { p ->
+            p.name.equals(name, ignoreCase = true) ||
+            p.name.replace(" ", "").replace("-", "").replace("_", "").lowercase() == clean
+        }
     }
 
     private fun cardJson(r: SearchResponse, apiName: String?) = JSONObject().apply {
@@ -498,6 +473,7 @@ class CloudStreamPluginHost(val appContext: ReactApplicationContext) {
                 put("url", api.mainPage.firstOrNull()?.data ?: "")
                 put("hasMainPage", true)
                 put("hasSearch", hasSearchOverride(api))
+                put("types", JSONArray(api.supportedTypes.map { it.name }))
             })
         }
         return arr.toString()
@@ -542,12 +518,25 @@ class CloudStreamPluginHost(val appContext: ReactApplicationContext) {
     }
 
     suspend fun searchJson(providerName: String, query: String): String {
-        val api = apiByName(providerName) ?: return """{"items":[]}"""
+        Log.i(TAG, "[searchJson] START provider='$providerName', query='$query'")
+        val api = apiByName(providerName) ?: run {
+            val available = APIHolder.allProviders.map { it.name }
+            Log.e(TAG, "[searchJson] FAILED: provider '$providerName' not found among registered providers: $available")
+            return JSONObject().apply {
+                put("items", JSONArray())
+                put("error", "Provider '$providerName' not found")
+            }.toString()
+        }
         val items = JSONArray()
         var error: String? = null
-        val results = try { api.search(query) } catch (t: Throwable) {
+        val results = try {
+            Log.i(TAG, "[searchJson] Calling ${api.name}.search('$query')...")
+            val res = api.search(query)
+            Log.i(TAG, "[searchJson] ${api.name}.search returned ${res?.size ?: 0} items")
+            res
+        } catch (t: Throwable) {
             val msg = "${t.javaClass.simpleName}: ${t.message}"
-            Log.e(TAG, "search ${api.name}: $msg")
+            Log.e(TAG, "[searchJson] EXCEPTION ${api.name}.search: $msg", t)
             error = msg
             null
         } ?: emptyList()

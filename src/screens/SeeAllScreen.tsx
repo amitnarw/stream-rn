@@ -14,6 +14,7 @@ import { BlurView } from 'expo-blur';
 import type { MediaItem } from '../types/plugin';
 import MediaCard from '../components/MediaCard';
 import { ContinueCard } from '../components/ContinueCard';
+import QuickScrollFab from '../components/QuickScrollFab';
 import * as bridge from '../api/cloudStreamBridge';
 import { useTransition, useTransitionActions } from '../context/TransitionContext';
 import type { CardLayout } from '../context/TransitionContext';
@@ -34,6 +35,7 @@ export default function SeeAllScreen({ route, navigation }: Props) {
   const [isReady, setIsReady] = useState(false);
   const insets = useSafeAreaInsets();
   const scrollY = useRef(new Animated.Value(0)).current;
+  const flatListRef = useRef<any>(null);
 
   // Local state to support live item deletion
   const [dataItems, setDataItems] = useState<any[]>(items);
@@ -60,6 +62,14 @@ export default function SeeAllScreen({ route, navigation }: Props) {
         setDataItems(prev => prev.filter(x => x.imdbId !== id));
       }
     } catch (_) {}
+  };
+
+  const handleScrollToTop = () => {
+    flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
+  };
+
+  const handleScrollToBottom = () => {
+    flatListRef.current?.scrollToEnd({ animated: true });
   };
 
   const scrollThreshold = 80;
@@ -132,6 +142,7 @@ export default function SeeAllScreen({ route, navigation }: Props) {
         </View>
       ) : (
         <Animated.FlatList
+          ref={flatListRef}
           data={dataItems}
           keyExtractor={(item, i) => item.url || String(i)}
           contentContainerStyle={[
@@ -167,6 +178,16 @@ export default function SeeAllScreen({ route, navigation }: Props) {
               <Text style={styles.emptyText}>No items found in this section.</Text>
             </View>
           }
+        />
+      )}
+
+      {/* Quick Scroll To Top / Bottom FAB */}
+      {dataItems.length > 0 && (
+        <QuickScrollFab
+          onScrollToTop={handleScrollToTop}
+          onScrollToBottom={handleScrollToBottom}
+          bottomOffset={40}
+          rightOffset={20}
         />
       )}
 

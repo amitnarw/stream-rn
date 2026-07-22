@@ -38,6 +38,7 @@ import { BlurCarousel } from "../components/BlurCarousel";
 import MediaCard from "../components/MediaCard";
 import { ContinueCard } from "../components/ContinueCard";
 import ChannelCard from "../components/ChannelCard";
+import QuickScrollFab from "../components/QuickScrollFab";
 
 import { theme } from "../theme";
 
@@ -171,7 +172,7 @@ function HomeSkeletonScreen({ isLive }: { isLive?: boolean }) {
       <View style={[styles.root, { backgroundColor: theme.colors.background }]}>
         <View
           style={{
-            paddingTop: insets.top + 110,
+            paddingTop: insets.top + 125,
             paddingHorizontal: 20,
             gap: 16,
           }}
@@ -397,6 +398,7 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
   heroIdxRef.current = heroIdx;
 
   const lastLoadRequestRef = useRef<{ category: string; provider: string } | null>(null);
+  const liveTVFlatListRef = useRef<any>(null);
 
   const [allProviders, setAllProviders] = useState<PluginProvider[]>([
     { id: "CloudPlay", name: "CloudPlay", url: "", hasMainPage: true, hasSearch: false },
@@ -921,8 +923,14 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
       const isLive = loadingCategory === "LiveTV" || CATEGORY_TABS[activeTab] === "LiveTV";
       if (isLive) {
         return (
-          <View style={{ paddingHorizontal: 20, marginTop: 24, gap: 16 }}>
-            {[1, 2, 3, 4].map((rowIdx) => (
+          <View
+            style={{
+              paddingTop: insets.top + 125,
+              paddingHorizontal: 20,
+              gap: 16,
+            }}
+          >
+            {[1, 2, 3, 4, 5].map((rowIdx) => (
               <View key={rowIdx} style={{ flexDirection: "row", gap: 8 }}>
                 <SkeletonBox width={S_CARD_W} height={S_CARD_W} borderRadius={20} />
                 <SkeletonBox width={S_CARD_W} height={S_CARD_W} borderRadius={20} />
@@ -981,191 +989,190 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
 
       return (
         <Reanimated.View entering={FadeIn.duration(400)} style={{ flex: 1 }}>
-          <View style={{ paddingBottom: 40, position: "relative", zIndex: 10 }}>
-          {showCategoryDropdown && (
-            <Pressable
-              style={{
-                position: "absolute",
-                top: -SCREEN_HEIGHT,
-                bottom: -SCREEN_HEIGHT,
-                left: -SCREEN_HEIGHT,
-                right: -SCREEN_HEIGHT,
-                zIndex: 90,
-              }}
-              onPress={() => setShowCategoryDropdown(false)}
-            />
-          )}
-
-          <View style={styles.liveTVControlRow}>
-            <View style={styles.liveTVSearchContainer}>
-              <TextInput
-                style={styles.liveTVSearchInput}
-                placeholder="Search channels..."
-                placeholderTextColor="#8E8D92"
-                value={liveTVSearchQuery}
-                onChangeText={setLiveTVSearchQuery}
+          <Animated.FlatList
+            ref={liveTVFlatListRef}
+            key="liveTV_grid_virtualized"
+            data={filtered}
+            keyExtractor={(item, idx) => item.url + String(idx)}
+            numColumns={3}
+            showsVerticalScrollIndicator={false}
+            scrollEnabled={!showCategoryDropdown}
+            initialNumToRender={18}
+            maxToRenderPerBatch={18}
+            windowSize={5}
+            contentContainerStyle={{
+              paddingTop: insets.top + 110,
+              paddingBottom: 110,
+            }}
+            columnWrapperStyle={{
+              paddingHorizontal: 20,
+              gap: 8,
+              marginBottom: 8,
+            }}
+            style={{ flex: 1 }}
+            onScroll={Animated.event(
+              [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+              { useNativeDriver: true }
+            )}
+            scrollEventThrottle={16}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={onRefresh}
+                tintColor="transparent"
+                colors={["transparent"]}
+                progressBackgroundColor="transparent"
+                progressViewOffset={insets.top + 115}
               />
-            </View>
-            
-            <TouchableOpacity
-              style={styles.liveTVDropdown}
-              onPress={() => setShowCategoryDropdown(!showCategoryDropdown)}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.liveTVDropdownText} numberOfLines={1}>
-                {selectedCategory === "All" ? "All Categories" : selectedCategory}
-              </Text>
-              <Text style={{ color: "#8E8D92", fontSize: 10, marginLeft: 6 }}>▼</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.liveTVRefreshButton}
-              onPress={() => loadSections(true, "LiveTV", activeLiveTVProvider, true)}
-              disabled={sectionsLoading}
-              activeOpacity={0.75}
-            >
-              {sectionsLoading ? (
-                <ActivityIndicator size="small" color="#ffffff" />
-              ) : (
-                <RotateCw size={16} color="#ffffff" />
-              )}
-            </TouchableOpacity>
-          </View>
-
-          {/* Floating Modern Dropdown */}
-          {showCategoryDropdown && (
-            <Reanimated.View
-              entering={FadeIn.duration(200)}
-              exiting={FadeOut.duration(150)}
-              style={[styles.floatingDropdown, { top: 60, right: 68, zIndex: 100 }]}
-            >
-              <LinearGradient
-                colors={["#1c1c22", "#0f0f12"]}
-                style={StyleSheet.absoluteFillObject}
-              />
-              <ScrollView
-                nestedScrollEnabled={true}
-                showsVerticalScrollIndicator={true}
-                style={{ maxHeight: 280 }}
-              >
-                <TouchableOpacity
-                  style={[
-                    styles.dropdownItem,
-                    selectedCategory === "All" && styles.dropdownItemSelected,
-                  ]}
-                  onPress={() => {
-                    setSelectedCategory("All");
-                    setShowCategoryDropdown(false);
-                  }}
-                >
-                  <View style={styles.dropdownItemLeft}>
-                    <View
-                      style={[
-                        styles.seasonNumberBox,
-                        selectedCategory === "All" && styles.seasonNumberBoxSelected,
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          styles.seasonNumberText,
-                          selectedCategory === "All" && styles.seasonNumberTextSelected,
-                          { fontSize: 10 }
-                        ]}
-                      >
-                        ALL
-                      </Text>
-                    </View>
-                    <Text
-                      style={[
-                        styles.dropdownItemText,
-                        selectedCategory === "All" && styles.dropdownItemTextSelected,
-                      ]}
-                    >
-                      All Categories
-                    </Text>
+            }
+            ListHeaderComponent={
+              <View style={{ paddingBottom: 16, zIndex: 10 }}>
+                <View style={styles.liveTVControlRow}>
+                  <View style={styles.liveTVSearchContainer}>
+                    <TextInput
+                      style={styles.liveTVSearchInput}
+                      placeholder="Search channels..."
+                      placeholderTextColor="#8E8D92"
+                      value={liveTVSearchQuery}
+                      onChangeText={setLiveTVSearchQuery}
+                    />
                   </View>
-                  {selectedCategory === "All" && (
-                    <Text style={styles.checkmark}>✓</Text>
-                  )}
-                </TouchableOpacity>
-
-                {categoriesList.map((cat) => (
+                  
                   <TouchableOpacity
-                    key={cat}
+                    style={styles.liveTVDropdown}
+                    onPress={() => setShowCategoryDropdown(!showCategoryDropdown)}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.liveTVDropdownText} numberOfLines={1}>
+                      {selectedCategory === "All" ? "All Categories" : selectedCategory}
+                    </Text>
+                    <Text style={{ color: "#8E8D92", fontSize: 10, marginLeft: 6 }}>▼</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={styles.liveTVRefreshButton}
+                    onPress={() => loadSections(true, "LiveTV", activeLiveTVProvider, true)}
+                    disabled={sectionsLoading}
+                    activeOpacity={0.75}
+                  >
+                    {sectionsLoading ? (
+                      <ActivityIndicator size="small" color="#ffffff" />
+                    ) : (
+                      <RotateCw size={16} color="#ffffff" />
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </View>
+            }
+            renderItem={({ item }) => (
+              <ChannelCard
+                item={item}
+                onPress={(i) =>
+                  goDetail(i, {
+                    x: 0,
+                    y: 0,
+                    width: S_CARD_W,
+                    height: S_CARD_W,
+                    borderRadius: 22,
+                  })
+                }
+                isSaved={savedUrls.has(item.url)}
+                onToggleSave={handleToggleSaveChannel}
+                width={S_CARD_W}
+              />
+            )}
+            ListEmptyComponent={
+              <View style={{ alignItems: "center", marginTop: 40, paddingHorizontal: 20 }}>
+                <Text style={{ color: "#8E8D92", fontSize: 13, textAlign: "center" }}>
+                  No channels match your search or filter.
+                </Text>
+              </View>
+            }
+          />
+
+          {/* Category Dropdown rendered ABOVE the FlatList to avoid clipping */}
+          {showCategoryDropdown && (
+            <>
+              <Pressable
+                style={{
+                  position: 'absolute',
+                  top: 0, bottom: 0, left: 0, right: 0,
+                  zIndex: 90,
+                }}
+                onPress={() => setShowCategoryDropdown(false)}
+              />
+              <Reanimated.View
+                entering={FadeIn.duration(200)}
+                exiting={FadeOut.duration(150)}
+                style={[
+                  styles.floatingDropdown,
+                  {
+                    position: 'absolute',
+                    top: insets.top + 155,
+                    right: 68,
+                    zIndex: 999,
+                    elevation: 20,
+                  },
+                ]}
+              >
+                <LinearGradient
+                  colors={["#1c1c22", "#0f0f12"]}
+                  style={StyleSheet.absoluteFillObject}
+                />
+                <ScrollView
+                  nestedScrollEnabled={true}
+                  showsVerticalScrollIndicator={true}
+                  style={{ maxHeight: 280 }}
+                >
+                  <TouchableOpacity
                     style={[
                       styles.dropdownItem,
-                      selectedCategory === cat && styles.dropdownItemSelected,
+                      selectedCategory === "All" && styles.dropdownItemSelected,
                     ]}
                     onPress={() => {
-                      setSelectedCategory(cat);
+                      setSelectedCategory("All");
                       setShowCategoryDropdown(false);
                     }}
                   >
                     <View style={styles.dropdownItemLeft}>
-                      <View
-                        style={[
-                          styles.seasonNumberBox,
-                          selectedCategory === cat && styles.seasonNumberBoxSelected,
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            styles.seasonNumberText,
-                            selectedCategory === cat && styles.seasonNumberTextSelected,
-                            { fontSize: 10 }
-                          ]}
-                        >
-                          {cat.substring(0, 2).toUpperCase()}
-                        </Text>
+                      <View style={[styles.seasonNumberBox, selectedCategory === "All" && styles.seasonNumberBoxSelected]}>
+                        <Text style={[styles.seasonNumberText, selectedCategory === "All" && styles.seasonNumberTextSelected, { fontSize: 10 }]}>ALL</Text>
                       </View>
-                      <Text
-                        style={[
-                          styles.dropdownItemText,
-                          selectedCategory === cat && styles.dropdownItemTextSelected,
-                        ]}
-                        numberOfLines={1}
-                      >
-                        {cat}
-                      </Text>
+                      <Text style={[styles.dropdownItemText, selectedCategory === "All" && styles.dropdownItemTextSelected]}>All Categories</Text>
                     </View>
-                    {selectedCategory === cat && (
-                      <Text style={styles.checkmark}>✓</Text>
-                    )}
+                    {selectedCategory === "All" && <Text style={styles.checkmark}>✓</Text>}
                   </TouchableOpacity>
-                ))}
-              </ScrollView>
-            </Reanimated.View>
+                  {categoriesList.map((cat) => (
+                    <TouchableOpacity
+                      key={cat}
+                      style={[styles.dropdownItem, selectedCategory === cat && styles.dropdownItemSelected]}
+                      onPress={() => {
+                        setSelectedCategory(cat);
+                        setShowCategoryDropdown(false);
+                      }}
+                    >
+                      <View style={styles.dropdownItemLeft}>
+                        <View style={[styles.seasonNumberBox, selectedCategory === cat && styles.seasonNumberBoxSelected]}>
+                          <Text style={[styles.seasonNumberText, selectedCategory === cat && styles.seasonNumberTextSelected, { fontSize: 10 }]}>{cat.substring(0, 2).toUpperCase()}</Text>
+                        </View>
+                        <Text style={[styles.dropdownItemText, selectedCategory === cat && styles.dropdownItemTextSelected]} numberOfLines={1}>{cat}</Text>
+                      </View>
+                      {selectedCategory === cat && <Text style={styles.checkmark}>✓</Text>}
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </Reanimated.View>
+            </>
           )}
 
-          {filtered.length === 0 ? (
-            <View style={{ alignItems: "center", marginTop: 40, paddingHorizontal: 20 }}>
-              <Text style={{ color: "#8E8D92", fontSize: 13, textAlign: "center" }}>
-                No channels match your search or filter.
-              </Text>
-            </View>
-          ) : (
-            <View style={styles.gridContainer}>
-              {filtered.map((item, idx) => (
-                <ChannelCard
-                  key={item.url + idx}
-                  item={item}
-                  onPress={(i) =>
-                    goDetail(i, {
-                      x: 0,
-                      y: 0,
-                      width: S_CARD_W,
-                      height: S_CARD_W,
-                      borderRadius: 22,
-                    })
-                  }
-                  isSaved={savedUrls.has(item.url)}
-                  onToggleSave={handleToggleSaveChannel}
-                  width={S_CARD_W}
-                />
-              ))}
-            </View>
+          {filtered.length > 0 && (
+            <QuickScrollFab
+              onScrollToTop={() => liveTVFlatListRef.current?.scrollToOffset({ offset: 0, animated: true })}
+              onScrollToBottom={() => liveTVFlatListRef.current?.scrollToEnd({ animated: true })}
+              bottomOffset={105}
+              rightOffset={20}
+            />
           )}
-          </View>
         </Reanimated.View>
       );
     }
@@ -1413,6 +1420,8 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
                 </TouchableOpacity>
               </BlurView>
             </ScrollView>
+          ) : CATEGORY_TABS[activeTab] === "LiveTV" ? (
+            renderedSections
           ) : (
             <Animated.ScrollView
               scrollEnabled={!showCategoryDropdown}
@@ -1423,12 +1432,12 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
                   tintColor="transparent"
                   colors={["transparent"]}
                   progressBackgroundColor="transparent"
-                  progressViewOffset={insets.top + (CATEGORY_TABS[activeTab] === "LiveTV" ? 115 : 65)}
+                  progressViewOffset={insets.top + 65}
                 />
               }
               showsVerticalScrollIndicator={false}
               contentContainerStyle={{
-                paddingTop: insets.top + (CATEGORY_TABS[activeTab] === "LiveTV" ? 110 : 60),
+                paddingTop: insets.top + 60,
                 paddingBottom: 110,
                 flexGrow: 1,
               }}
@@ -1439,49 +1448,43 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
               )}
               scrollEventThrottle={16}
             >
-                {CATEGORY_TABS[activeTab] !== "LiveTV" && (
-                  <>
-                    {sectionsLoading || heroItems.length === 0 ? (
-                      <View style={{ alignItems: "center", marginTop: 16 }}>
-                        <SkeletonBox
-                          width={HERO_CARD_WIDTH}
-                          height={HERO_CARD_HEIGHT}
-                          borderRadius={18}
-                        />
-                      </View>
-                    ) : (
-                      <Reanimated.View entering={FadeIn.duration(400)}>
-                        <BlurCarousel
-                          data={heroItems}
-                          itemWidth={HERO_SNAP}
-                          cardWidth={HERO_CARD_WIDTH}
-                          cardHeight={HERO_CARD_HEIGHT}
-                          borderRadius={28}
-                          spacing={10}
-                          horizontalSpacing={HERO_OFFSET}
-                          onIndexChange={setHeroIdx}
-                          renderItem={({ item, index }) => (
-                            <HeroCard
-                              item={item}
-                              index={index}
-                              onPress={goDetail}
-                              heroSnap={HERO_SNAP}
-                              heroCardWidth={HERO_CARD_WIDTH}
-                              heroCardHeight={HERO_CARD_HEIGHT}
-                              genreSets={GENRE_SETS}
-                            />
-                          )}
-                        />
-                      </Reanimated.View>
+              {sectionsLoading || heroItems.length === 0 ? (
+                <View style={{ alignItems: "center", marginTop: 16 }}>
+                  <SkeletonBox
+                    width={HERO_CARD_WIDTH}
+                    height={HERO_CARD_HEIGHT}
+                    borderRadius={18}
+                  />
+                </View>
+              ) : (
+                <Reanimated.View entering={FadeIn.duration(400)}>
+                  <BlurCarousel
+                    data={heroItems}
+                    itemWidth={HERO_SNAP}
+                    cardWidth={HERO_CARD_WIDTH}
+                    cardHeight={HERO_CARD_HEIGHT}
+                    borderRadius={28}
+                    spacing={10}
+                    horizontalSpacing={HERO_OFFSET}
+                    onIndexChange={setHeroIdx}
+                    renderItem={({ item, index }) => (
+                      <HeroCard
+                        item={item}
+                        index={index}
+                        onPress={goDetail}
+                        heroSnap={HERO_SNAP}
+                        heroCardWidth={HERO_CARD_WIDTH}
+                        heroCardHeight={HERO_CARD_HEIGHT}
+                        genreSets={GENRE_SETS}
+                      />
                     )}
-                  </>
-                )}
+                  />
+                </Reanimated.View>
+              )}
 
-                {/* Main empty state card removed */}
-
-                {/* Section rows (skip the hero source section) */}
-                {renderedSections}
-              </Animated.ScrollView>
+              {/* Section rows (skip the hero source section) */}
+              {renderedSections}
+            </Animated.ScrollView>
           )}
         </Animated.View>
       </View>

@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -14,8 +14,9 @@ import { BlurView, BlurTargetView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Heart, ArrowLeft } from 'lucide-react-native';
 import type { MediaItem } from '../types/plugin';
-import { getFavorites } from '../api/favorites';
+import { getFavorites, subscribeFavorites, removeFavorite } from '../api/favorites';
 import MediaCard from '../components/MediaCard';
+import QuickScrollFab from '../components/QuickScrollFab';
 import { theme } from '../theme';
 import { useTransition, useTransitionActions, CardLayout } from '../context/TransitionContext';
 
@@ -23,14 +24,16 @@ const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 interface Props {
   navigation: any;
+  isFocused?: boolean;
 }
 
-export default function FavoritesScreen({ navigation }: Props) {
+export default function FavoritesScreen({ navigation, isFocused }: Props) {
   const insets = useSafeAreaInsets();
   const { phase } = useTransition();
   const { setGlobalBlurTarget, openFromCard } = useTransitionActions();
   const [favorites, setFavorites] = useState<MediaItem[]>([]);
   const [blurTarget, setBlurTarget] = useState<any>(null);
+  const flatListRef = useRef<any>(null);
   const blurTargetRef = useRef<any>(null);
   const setBlurTargetRef = useCallback((val: any) => {
     if (val !== blurTargetRef.current) {
@@ -42,21 +45,49 @@ export default function FavoritesScreen({ navigation }: Props) {
   
   const scrollY = useRef(new Animated.Value(0)).current;
 
-  // Reload favorites whenever screen comes into focus
+  const loadFavorites = useCallback(async () => {
+    const list = await getFavorites();
+    setFavorites(list);
+  }, []);
+
+  // Reload when tab focus changes (isFocused prop) or on mount
+  useEffect(() => {
+    if (isFocused !== false) {
+      loadFavorites();
+    }
+  }, [isFocused, loadFavorites]);
+
+  // Reload favorites whenever screen comes into focus via navigation stack
   useFocusEffect(
     useCallback(() => {
-      async function loadFavorites() {
-        const list = await getFavorites();
-        setFavorites(list);
-      }
       loadFavorites();
       setGlobalBlurTarget(blurTargetRef.current);
-    }, [setGlobalBlurTarget])
+    }, [loadFavorites, setGlobalBlurTarget])
   );
+
+  // Subscribe to real-time favorites updates across the app
+  useEffect(() => {
+    const unsubscribe = subscribeFavorites((updatedList) => {
+      setFavorites(updatedList);
+    });
+    return unsubscribe;
+  }, []);
 
   function onMediaPress(item: MediaItem, layout: CardLayout) {
     openFromCard(item, layout);
   }
+
+  const handleDeleteFavorite = useCallback(async (item: MediaItem) => {
+    await removeFavorite(item.url);
+  }, []);
+
+  const handleScrollToTop = useCallback(() => {
+    flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
+  }, []);
+
+  const handleScrollToBottom = useCallback(() => {
+    flatListRef.current?.scrollToEnd({ animated: true });
+  }, []);
 
   const scrollThreshold = 40;
   const headerBgOpacity = scrollY.interpolate({
@@ -77,6 +108,7 @@ export default function FavoritesScreen({ navigation }: Props) {
       <BlurTargetView ref={setBlurTargetRef as any} style={StyleSheet.absoluteFillObject}>
         {/* We use FlatList inside the BlurTargetView so it can be blurred by the header bar */}
         <Animated.FlatList
+          ref={flatListRef}
           data={favorites}
           keyExtractor={(item) => item.url}
           contentContainerStyle={[
@@ -93,7 +125,11 @@ export default function FavoritesScreen({ navigation }: Props) {
           )}
           scrollEventThrottle={16}
           renderItem={({ item }) => (
-            <MediaCard item={item} onPress={onMediaPress} />
+            <MediaCard
+              item={item}
+              onPress={onMediaPress}
+              onDelete={handleDeleteFavorite}
+            />
           )}
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
@@ -102,24 +138,19 @@ export default function FavoritesScreen({ navigation }: Props) {
               </View>
               <Text style={styles.emptyTitle}>Your Favorites is Empty</Text>
               <Text style={styles.emptyText}>
-                Tap the heart icon in the top right corner of any movie or show detail page to add it to your favorites.
+                Tap the heart icon on any movie or show detail page to add it to your collection.
               </Text>
             </View>
           }
         />
       </BlurTargetView>
 
-      {/* Floating Custom Header Bar (Capsule Blur design matching DetailScreen) */}
+      {/* Floating Capsule Header */}
       <Animated.View style={[
         styles.headerBar,
         {
           top: Math.max(insets.top - 4, 8),
           shadowOpacity: headerBgOpacity,
-          elevation: scrollY.interpolate({
-            inputRange: [0, scrollThreshold],
-            outputRange: [0, 4],
-            extrapolate: 'clamp',
-          }),
         }
       ]}>
         {/* Animated Background blur capsule */}
@@ -135,26 +166,38 @@ export default function FavoritesScreen({ navigation }: Props) {
             intensity={100} 
             tint="dark" 
             style={StyleSheet.absoluteFillObject}
-            blurTarget={{ current: blurTarget }}
-            blurMethod="dimezisBlurView"
           />
           <View style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(15, 15, 20, 0.38)' }]} />
         </Animated.View>
         
-        {navigation.canGoBack() ? (
-          <TouchableOpacity style={styles.navButton} onPress={() => navigation.goBack()}>
-            <BlurView intensity={35} tint="dark" style={styles.navButtonBlur}>
-              <ArrowLeft size={20} color="#fff" strokeWidth={2} />
-            </BlurView>
-          </TouchableOpacity>
-        ) : (
-          <View style={styles.headerSpacer} />
-        )}
+        <TouchableOpacity 
+          style={styles.navButton} 
+          onPress={() => {
+            if (navigation.canGoBack()) {
+              navigation.goBack();
+            }
+          }}
+          activeOpacity={0.7}
+        >
+          <BlurView intensity={40} tint="dark" style={styles.navButtonBlur}>
+            <Heart size={18} color={theme.colors.rose} fill={theme.colors.rose} />
+          </BlurView>
+        </TouchableOpacity>
         
         <Text style={styles.headerTitle}>Favorites</Text>
         
         <View style={styles.headerSpacer} />
       </Animated.View>
+
+      {/* Quick Scroll To Top / Bottom FAB */}
+      {favorites.length > 0 && (
+        <QuickScrollFab
+          onScrollToTop={handleScrollToTop}
+          onScrollToBottom={handleScrollToBottom}
+          bottomOffset={100}
+          rightOffset={20}
+        />
+      )}
 
       {/* Premium Edge Fades */}
       <LinearGradient

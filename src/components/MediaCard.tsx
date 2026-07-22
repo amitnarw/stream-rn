@@ -1,4 +1,4 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import {
   Pressable,
   Image,
@@ -7,7 +7,9 @@ import {
   StyleSheet,
   Dimensions,
   Animated,
+  TouchableOpacity,
 } from 'react-native';
+import { X } from 'lucide-react-native';
 import type { MediaItem } from '../types/plugin';
 
 const { width } = Dimensions.get('window');
@@ -19,16 +21,18 @@ import { useTransition } from '../context/TransitionContext';
 interface Props {
   item: MediaItem;
   onPress: (item: MediaItem, layout: CardLayout) => void;
+  onDelete?: (item: MediaItem) => void;
   width?: number;
   style?: any;
 }
 
-export default function MediaCard({ item, onPress, width: propWidth, style }: Props) {
+export default function MediaCard({ item, onPress, onDelete, width: propWidth, style }: Props) {
   const viewRef = useRef<any>(null);
   const scale = useRef(new Animated.Value(1)).current;
 
   const cardWidth = propWidth || CARD_WIDTH;
   const cardHeight = cardWidth * 1.5;
+  const [imageError, setImageError] = useState(false);
 
   const { phase, item: activeItem } = useTransition();
   const wasTargetRef = useRef(false);
@@ -113,16 +117,32 @@ export default function MediaCard({ item, onPress, width: propWidth, style }: Pr
           scale transform — prevents layout reflow / size-correction flash. */}
       <View ref={viewRef}>
         <Animated.View style={{ transform: [{ scale }] }}>
-          {item.posterUrl ? (
+          {item.posterUrl && !imageError ? (
             <Image
               source={{ uri: item.posterUrl, cache: 'force-cache' }}
               style={[styles.poster, { width: cardWidth, height: cardHeight }]}
               resizeMode="cover"
+              onError={() => setImageError(true)}
             />
           ) : (
             <View style={[styles.poster, styles.placeholder, { width: cardWidth, height: cardHeight }]}>
-              <Text style={styles.placeholderText}>?</Text>
+              <Text style={styles.placeholderLogo}>Z</Text>
             </View>
+          )}
+
+          {/* Delete button option */}
+          {onDelete && (
+            <TouchableOpacity
+              style={styles.deleteBtn}
+              onPress={(e) => {
+                e.stopPropagation();
+                onDelete(item);
+              }}
+              activeOpacity={0.75}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <X size={12} color="#ffffff" strokeWidth={2.5} />
+            </TouchableOpacity>
           )}
         </Animated.View>
       </View>
@@ -150,9 +170,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  placeholderText: {
-    color: '#8e8e93',
-    fontSize: 32,
+  placeholderLogo: {
+    color: '#5580FF',
+    fontSize: 28,
+    fontWeight: '900',
+    letterSpacing: -1,
+    opacity: 0.7,
   },
   title: {
     color: 'rgba(229, 226, 227, 0.8)',
@@ -162,5 +185,20 @@ const styles = StyleSheet.create({
     paddingHorizontal: 2,
     lineHeight: 15,
     textAlign: 'center',
+  },
+  deleteBtn: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: 'rgba(15, 15, 20, 0.75)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.25)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 25,
+    elevation: 5,
   },
 });

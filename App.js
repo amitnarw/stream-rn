@@ -11,7 +11,7 @@ import SettingsScreen from './src/screens/SettingsScreen';
 import FavoritesScreen from './src/screens/FavoritesScreen';
 import SeeAllScreen from './src/screens/SeeAllScreen';
 import { TransitionProvider, useTransition } from './src/context/TransitionContext';
-import { getFavorites } from './src/api/favorites';
+import { getFavorites, subscribeFavorites } from './src/api/favorites';
 import DetailScreen from './src/screens/DetailScreen';
 import { theme } from './src/theme';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -32,51 +32,85 @@ const RootStack = createNativeStackNavigator();
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
 
-function TabIcon({ Icon, focused, badgeCount }) {
+function TabIcon({ Icon, focused, badgeCount, onPress }) {
+  const scaleAnim = useRef(new Animated.Value(focused ? 1.08 : 0.92)).current;
+  const opacityAnim = useRef(new Animated.Value(focused ? 1 : 0.5)).current;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.spring(scaleAnim, {
+        toValue: focused ? 1.08 : 0.92,
+        useNativeDriver: true,
+        friction: 8,
+        tension: 120,
+      }),
+      Animated.timing(opacityAnim, {
+        toValue: focused ? 1 : 0.5,
+        duration: 180,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [focused]);
+
   return (
-    <View style={tabStyles.iconWrap}>
-      <Icon
-        size={focused ? 20 : 22}
-        color={focused ? '#ffffff' : 'rgba(255, 255, 255, 0.4)'}
-        fill={focused && (Icon === Heart || Icon === Home) ? '#ffffff' : 'transparent'}
-        strokeWidth={focused ? 2.5 : 2}
-      />
-      {badgeCount !== undefined && badgeCount > 0 && (
-        <View style={tabStyles.badge}>
-          <Text style={tabStyles.badgeText}>{badgeCount}</Text>
-        </View>
-      )}
-    </View>
+    <TouchableOpacity style={tabStyles.tabButton} onPress={onPress} activeOpacity={0.8}>
+      <Animated.View style={[tabStyles.iconWrap, { transform: [{ scale: scaleAnim }], opacity: opacityAnim }]}>
+        <Icon
+          size={20}
+          color="#ffffff"
+          fill={focused && (Icon === Heart || Icon === Home) ? '#ffffff' : 'transparent'}
+          strokeWidth={focused ? 2.5 : 2}
+        />
+        {badgeCount !== undefined && badgeCount > 0 && (
+          <View style={tabStyles.badge}>
+            <Text style={tabStyles.badgeText}>{badgeCount}</Text>
+          </View>
+        )}
+      </Animated.View>
+    </TouchableOpacity>
   );
 }
-
-
 
 function TabNavigator({ navigation }) {
   const { globalBlurTarget } = useTransition();
   const [activeTab, setActiveTab] = useState(0);
   const [favCount, setFavCount] = useState(0);
-  const scrollX = useRef(new Animated.Value(0)).current;
-  const pagerRef = useRef(null);
+  const indicatorAnim = useRef(new Animated.Value(0)).current;
 
-  // Sync scroll position to active tab index
-  const onScroll = Animated.event(
-    [{ nativeEvent: { contentOffset: { x: scrollX } } }],
-    {
-      useNativeDriver: true,
-      listener: (event) => {
-        const offsetX = event.nativeEvent.contentOffset.x;
-        const index = Math.round(offsetX / SCREEN_WIDTH);
-        if (index !== activeTab && index >= 0 && index < 4) {
-          setActiveTab(index);
-        }
-      }
-    }
-  );
+  // Separate native opacity animated values for each screen to enable butter-smooth crossfading
+  const fadeAnim0 = useRef(new Animated.Value(1)).current;
+  const fadeAnim1 = useRef(new Animated.Value(0)).current;
+  const fadeAnim2 = useRef(new Animated.Value(0)).current;
+  const fadeAnim3 = useRef(new Animated.Value(0)).current;
+
+  const fadeAnims = [fadeAnim0, fadeAnim1, fadeAnim2, fadeAnim3];
 
   const handleTabPress = (index) => {
+    if (index === activeTab) return;
+    const prevTab = activeTab;
     setActiveTab(index);
-    pagerRef.current?.scrollTo({ x: index * SCREEN_WIDTH, animated: true });
+
+    // Spring slide active tab pill indicator on native thread
+    Animated.spring(indicatorAnim, {
+      toValue: index,
+      useNativeDriver: true,
+      friction: 8,
+      tension: 80,
+    }).start();
+
+    // Crossfade screen opacity smoothly on native thread
+    Animated.parallel([
+      Animated.timing(fadeAnims[prevTab], {
+        toValue: 0,
+        duration: 180,
+        useNativeDriver: true,
+      }),
+      Animated.timing(fadeAnims[index], {
+        toValue: 1,
+        duration: 220,
+        useNativeDriver: true,
+      }),
+    ]).start();
   };
 
   useEffect(() => {
@@ -89,42 +123,46 @@ function TabNavigator({ navigation }) {
       } catch (_) {}
     }
     updateFavCount();
-    const interval = setInterval(updateFavCount, 1500);
-    return () => clearInterval(interval);
+    const unsubscribe = subscribeFavorites((updatedList) => {
+      setFavCount(updatedList.length);
+    });
+    return unsubscribe;
   }, []);
 
-  const badgeTranslateX = scrollX.interpolate({
-    inputRange: [0, SCREEN_WIDTH * 3],
-    outputRange: [0, BUTTON_WIDTH * 3],
-    extrapolate: 'clamp',
+  const badgeTranslateX = indicatorAnim.interpolate({
+    inputRange: [0, 1, 2, 3],
+    outputRange: [0, BUTTON_WIDTH, BUTTON_WIDTH * 2, BUTTON_WIDTH * 3],
   });
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.colors.background }}>
-      <Animated.ScrollView
-        ref={pagerRef}
-        horizontal
-        pagingEnabled
-        scrollEnabled={false}
-        showsHorizontalScrollIndicator={false}
-        onScroll={onScroll}
-        scrollEventThrottle={16}
-        style={{ flex: 1 }}
-        contentContainerStyle={{ width: SCREEN_WIDTH * 4 }}
-      >
-        <View style={{ width: SCREEN_WIDTH, height: '100%' }}>
+      {/* Screen Views (Butter-smooth native crossfade) */}
+      <View style={{ flex: 1 }}>
+        <Animated.View 
+          style={[StyleSheet.absoluteFillObject, { opacity: fadeAnim0 }]}
+          pointerEvents={activeTab === 0 ? 'auto' : 'none'}
+        >
           <HomeScreen navigation={navigation} />
-        </View>
-        <View style={{ width: SCREEN_WIDTH, height: '100%' }}>
+        </Animated.View>
+        <Animated.View 
+          style={[StyleSheet.absoluteFillObject, { opacity: fadeAnim1 }]}
+          pointerEvents={activeTab === 1 ? 'auto' : 'none'}
+        >
           <SearchScreen navigation={navigation} />
-        </View>
-        <View style={{ width: SCREEN_WIDTH, height: '100%' }}>
-          <FavoritesScreen navigation={navigation} />
-        </View>
-        <View style={{ width: SCREEN_WIDTH, height: '100%' }}>
+        </Animated.View>
+        <Animated.View 
+          style={[StyleSheet.absoluteFillObject, { opacity: fadeAnim2 }]}
+          pointerEvents={activeTab === 2 ? 'auto' : 'none'}
+        >
+          <FavoritesScreen navigation={navigation} isFocused={activeTab === 2} />
+        </Animated.View>
+        <Animated.View 
+          style={[StyleSheet.absoluteFillObject, { opacity: fadeAnim3 }]}
+          pointerEvents={activeTab === 3 ? 'auto' : 'none'}
+        >
           <SettingsScreen navigation={navigation} />
-        </View>
-      </Animated.ScrollView>
+        </Animated.View>
+      </View>
 
       {/* Floating Bottom Navigation Bar */}
       <View style={tabStyles.tabBarContainer}>
@@ -162,18 +200,10 @@ function TabNavigator({ navigation }) {
 
         {/* Tab Items */}
         <View style={tabStyles.tabBarInner}>
-          <TouchableOpacity style={tabStyles.tabButton} onPress={() => handleTabPress(0)} activeOpacity={0.7}>
-            <TabIcon Icon={Home} focused={activeTab === 0} />
-          </TouchableOpacity>
-          <TouchableOpacity style={tabStyles.tabButton} onPress={() => handleTabPress(1)} activeOpacity={0.7}>
-            <TabIcon Icon={Search} focused={activeTab === 1} />
-          </TouchableOpacity>
-          <TouchableOpacity style={tabStyles.tabButton} onPress={() => handleTabPress(2)} activeOpacity={0.7}>
-            <TabIcon Icon={Heart} focused={activeTab === 2} badgeCount={favCount} />
-          </TouchableOpacity>
-          <TouchableOpacity style={tabStyles.tabButton} onPress={() => handleTabPress(3)} activeOpacity={0.7}>
-            <TabIcon Icon={Settings} focused={activeTab === 3} />
-          </TouchableOpacity>
+          <TabIcon Icon={Home} focused={activeTab === 0} onPress={() => handleTabPress(0)} />
+          <TabIcon Icon={Search} focused={activeTab === 1} onPress={() => handleTabPress(1)} />
+          <TabIcon Icon={Heart} focused={activeTab === 2} badgeCount={favCount} onPress={() => handleTabPress(2)} />
+          <TabIcon Icon={Settings} focused={activeTab === 3} onPress={() => handleTabPress(3)} />
         </View>
       </View>
     </View>

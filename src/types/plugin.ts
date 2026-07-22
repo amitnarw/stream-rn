@@ -4,6 +4,7 @@ export interface PluginProvider {
   url?: string;
   hasMainPage?: boolean;
   hasSearch?: boolean;
+  types?: string[];
 }
 
 export interface MediaItem {

@@ -1,4 +1,4 @@
-import React, { useRef, useEffect } from "react";
+import React, { useRef, useEffect, useState } from "react";
 import {
   View,
   Text,
@@ -28,6 +28,7 @@ export const SmallCard = React.memo(function SmallCard({
 }: SmallCardProps) {
   const viewRef = useRef<any>(null);
   const scale = useRef(new Animated.Value(1)).current;
+  const [imageError, setImageError] = useState(false);
 
   const { phase, item: activeItem } = useTransition();
   const wasTargetRef = useRef(false);
@@ -104,14 +105,17 @@ export const SmallCard = React.memo(function SmallCard({
     >
       <View ref={viewRef}>
         <Animated.View style={{ transform: [{ scale }] }}>
-          {item.posterUrl ? (
+          {item.posterUrl && !imageError ? (
             <Image
               source={{ uri: item.posterUrl }}
               style={styles.smallCardImg}
               resizeMode="cover"
+              onError={() => setImageError(true)}
             />
           ) : (
-            <View style={[styles.smallCardImg, styles.cardFallback]} />
+            <View style={[styles.smallCardImg, styles.cardFallback]}>
+              <Text style={styles.placeholderLogo}>Z</Text>
+            </View>
           )}
         </Animated.View>
       </View>
@@ -129,7 +133,14 @@ const styles = StyleSheet.create({
     borderRadius: 18, // increased to 18
     backgroundColor: theme.colors.placeholder,
   },
-  cardFallback: { backgroundColor: theme.colors.placeholder },
+  cardFallback: { backgroundColor: theme.colors.placeholder, alignItems: 'center', justifyContent: 'center' },
+  placeholderLogo: {
+    color: '#5580FF',
+    fontSize: 24,
+    fontWeight: '900',
+    letterSpacing: -1,
+    opacity: 0.7,
+  },
   cardTitle: {
     color: "rgba(255, 255, 255, 0.7)",
     fontSize: 11,

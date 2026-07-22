@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   Pressable,
   Image,
@@ -28,6 +28,7 @@ const ChannelCard = React.memo(function ChannelCard({ item, onPress, isSaved, on
   const scale = useRef(new Animated.Value(1)).current;
   const cardWidth = propWidth || CARD_WIDTH;
   const cardHeight = cardWidth; // 1:1 aspect ratio!
+  const [imageError, setImageError] = useState(false);
 
   const handlePressIn = () => {
     Animated.spring(scale, {
@@ -55,15 +56,16 @@ const ChannelCard = React.memo(function ChannelCard({ item, onPress, isSaved, on
       style={[styles.card, { width: cardWidth }, style]}
     >
       <Animated.View style={[styles.posterContainer, { width: cardWidth, height: cardHeight, transform: [{ scale }] }]}>
-        {item.posterUrl ? (
+        {item.posterUrl && !imageError ? (
           <Image
             source={{ uri: item.posterUrl }}
             style={[styles.logo, { width: cardWidth - 24, height: cardHeight - 24 }]}
-            resizeMode="contain" // Contain fits the logo inside nicely!
+            resizeMode="contain"
+            onError={() => setImageError(true)}
           />
         ) : (
           <View style={[styles.logo, styles.placeholder, { width: cardWidth - 24, height: cardHeight - 24 }]}>
-            <Text style={styles.placeholderText}>{item.title.substring(0, 2).toUpperCase()}</Text>
+            <Text style={styles.placeholderLogo}>Z</Text>
           </View>
         )}
 
@@ -116,10 +118,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: '#121214',
   },
-  placeholderText: {
-    color: '#8E8D92',
-    fontSize: 20,
-    fontWeight: 'bold',
+  placeholderLogo: {
+    color: '#5580FF',
+    fontSize: 22,
+    fontWeight: '900',
+    letterSpacing: -1,
+    opacity: 0.7,
   },
   heartBtn: {
     position: 'absolute',

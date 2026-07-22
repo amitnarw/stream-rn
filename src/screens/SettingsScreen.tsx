@@ -11,6 +11,7 @@ import {
   Pressable,
   PanResponder,
   TextInput,
+  Platform,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BlurView, BlurTargetView } from 'expo-blur';
@@ -21,13 +22,20 @@ import {
   CheckCircle,
   XCircle,
   Link,
-  Trash2
+  Trash2,
+  Terminal,
+  Copy,
+  Search,
+  X,
+  FileText
 } from 'lucide-react-native';
+import { Clipboard } from 'react-native';
 import * as bridge from '../api/cloudStreamBridge';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { theme } from '../theme';
 import { useTransitionActions } from '../context/TransitionContext';
 import { CustomModal } from '../components/CustomModal';
+import { subscribeLogs, clearLogs, exportLogsAsString, LogEntry } from '../utils/logger';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -245,6 +253,13 @@ export default function SettingsScreen({ navigation }: Props) {
   const [successIconColor, setSuccessIconColor] = useState<string>('#2ecc71');
   const [successIconBg, setSuccessIconBg] = useState<string>('rgba(46, 204, 113, 0.1)');
 
+  // Developer Logs Modal State
+  const [showLogsModal, setShowLogsModal] = useState(false);
+  const [logsList, setLogsList] = useState<LogEntry[]>([]);
+  const [logFilter, setLogFilter] = useState<'all' | 'plugin' | 'error' | 'network'>('all');
+  const [logSearchQuery, setLogSearchQuery] = useState('');
+  const [copiedLogs, setCopiedLogs] = useState(false);
+
   const scrollY = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -252,8 +267,46 @@ export default function SettingsScreen({ navigation }: Props) {
     const unsub = navigation.addListener('focus', () => {
       setGlobalBlurTarget(blurTargetRef.current);
     });
-    return unsub;
+    const unsubLogs = subscribeLogs((logs) => {
+      setLogsList(logs);
+    });
+    return () => {
+      unsub();
+      unsubLogs();
+    };
   }, [navigation, setGlobalBlurTarget]);
+
+  const handleCopyLogs = () => {
+    const text = exportLogsAsString();
+    try {
+      Clipboard.setString(text);
+    } catch (_) {}
+    setCopiedLogs(true);
+    setTimeout(() => setCopiedLogs(false), 2000);
+  };
+
+  const handleClearLogs = () => {
+    clearLogs();
+  };
+
+  const filteredLogs = logsList.filter(item => {
+    if (logFilter === 'plugin') {
+      if (!item.tag.toLowerCase().includes('plugin') && !item.message.toLowerCase().includes('plugin')) return false;
+    } else if (logFilter === 'error') {
+      if (item.level !== 'error' && !item.message.toLowerCase().includes('error')) return false;
+    } else if (logFilter === 'network') {
+      if (!item.tag.toLowerCase().includes('addon') && !item.message.toLowerCase().includes('fetch') && !item.message.toLowerCase().includes('http')) return false;
+    }
+    if (logSearchQuery.trim()) {
+      const q = logSearchQuery.toLowerCase();
+      return (
+        item.message.toLowerCase().includes(q) ||
+        item.tag.toLowerCase().includes(q) ||
+        item.timestamp.includes(q)
+      );
+    }
+    return true;
+  });
 
   async function loadCurrentSettings() {
     try {
@@ -563,6 +616,27 @@ export default function SettingsScreen({ navigation }: Props) {
               </TouchableOpacity>
             </View>
           </View>
+
+          {/* Developer Diagnostics Card (Dev Only) */}
+          <View style={styles.card}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+              <Text style={styles.cardTitle}>Developer Diagnostics</Text>
+              <View style={styles.devBadge}>
+                <Text style={styles.devBadgeText}>DEV ONLY</Text>
+              </View>
+            </View>
+            <Text style={styles.cardDescription}>
+              Inspect live application execution logs, plugin search traces, network responses, and background errors directly inside the app.
+            </Text>
+            <TouchableOpacity
+              style={styles.devLogsBtn}
+              onPress={() => setShowLogsModal(true)}
+              activeOpacity={0.8}
+            >
+              <Terminal size={18} color="#5580FF" style={{ marginRight: 8 }} />
+              <Text style={styles.devLogsBtnText}>View Real-Time Logs ({logsList.length})</Text>
+            </TouchableOpacity>
+          </View>
         </Animated.ScrollView>
       </BlurTargetView>
 
@@ -677,6 +751,124 @@ export default function SettingsScreen({ navigation }: Props) {
         }}
         pointerEvents="none"
       />
+      {/* Developer Logs Modal (Dev Only) */}
+      <Modal
+        visible={showLogsModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowLogsModal(false)}
+      >
+        <View style={styles.logsModalBackdrop}>
+          <SafeAreaView style={{ flex: 1 }}>
+            <View style={styles.logsModalContainer}>
+              {/* Header */}
+              <View style={styles.logsModalHeader}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                  <View style={styles.logsTerminalIconBadge}>
+                    <Terminal size={18} color="#5580FF" />
+                  </View>
+                  <View>
+                    <Text style={styles.logsModalTitle}>Developer Logs</Text>
+                    <Text style={styles.logsModalSubtitle}>{filteredLogs.length} entries</Text>
+                  </View>
+                </View>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <TouchableOpacity
+                    style={styles.logsHeaderBtn}
+                    onPress={handleCopyLogs}
+                    activeOpacity={0.7}
+                  >
+                    {copiedLogs ? (
+                      <CheckCircle size={16} color="#4ADE80" />
+                    ) : (
+                      <Copy size={16} color="#fff" />
+                    )}
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.logsHeaderBtn}
+                    onPress={handleClearLogs}
+                    activeOpacity={0.7}
+                  >
+                    <Trash2 size={16} color={theme.colors.rose} />
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.logsHeaderBtn}
+                    onPress={() => setShowLogsModal(false)}
+                    activeOpacity={0.7}
+                  >
+                    <X size={18} color="#fff" />
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              {/* Filter Tabs Bar */}
+              <View style={styles.logsFilterRow}>
+                {(['all', 'plugin', 'error', 'network'] as const).map(tab => (
+                  <TouchableOpacity
+                    key={tab}
+                    style={[styles.logsFilterChip, logFilter === tab && styles.logsFilterChipActive]}
+                    onPress={() => setLogFilter(tab)}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={[styles.logsFilterText, logFilter === tab && styles.logsFilterTextActive]}>
+                      {tab.toUpperCase()}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              {/* Search Bar */}
+              <View style={styles.logsSearchBox}>
+                <Search size={16} color="rgba(255,255,255,0.4)" style={{ marginRight: 8 }} />
+                <TextInput
+                  style={styles.logsSearchInput}
+                  placeholder="Filter logs by keyword, provider, error..."
+                  placeholderTextColor="rgba(255,255,255,0.3)"
+                  value={logSearchQuery}
+                  onChangeText={setLogSearchQuery}
+                  autoCorrect={false}
+                  autoCapitalize="none"
+                />
+                {logSearchQuery.length > 0 && (
+                  <TouchableOpacity onPress={() => setLogSearchQuery('')}>
+                    <XCircle size={16} color="rgba(255,255,255,0.4)" />
+                  </TouchableOpacity>
+                )}
+              </View>
+
+              {/* Terminal Container */}
+              <View style={styles.terminalContainer}>
+                <Animated.ScrollView showsVerticalScrollIndicator={true} contentContainerStyle={{ padding: 12 }}>
+                  {filteredLogs.length === 0 ? (
+                    <Text style={styles.emptyLogsText}>No logs match current filter.</Text>
+                  ) : (
+                    filteredLogs.map(item => (
+                      <View key={item.id} style={styles.logLineRow}>
+                        <Text style={styles.logTimestamp}>{item.timestamp}</Text>
+                        <Text style={[
+                          styles.logLevelBadge,
+                          item.level === 'error' && styles.logLevelError,
+                          item.level === 'warn' && styles.logLevelWarn,
+                        ]}>
+                          [{item.level.toUpperCase()}]
+                        </Text>
+                        <Text style={styles.logTag}>[{item.tag}]</Text>
+                        <Text style={[
+                          styles.logMessageText,
+                          item.level === 'error' && { color: '#FF7B9C' },
+                          item.level === 'warn' && { color: '#FFE066' },
+                        ]}>
+                          {item.message}
+                        </Text>
+                      </View>
+                    ))
+                  )}
+                </Animated.ScrollView>
+              </View>
+            </View>
+          </SafeAreaView>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -931,5 +1123,183 @@ const styles = StyleSheet.create({
   },
   modeOptionTextActive: {
     color: '#ffffff',
+  },
+  devBadge: {
+    backgroundColor: 'rgba(85, 128, 255, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(85, 128, 255, 0.3)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  devBadgeText: {
+    color: '#5580FF',
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+  },
+  devLogsBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(85, 128, 255, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(85, 128, 255, 0.3)',
+    borderRadius: 14,
+    paddingVertical: 14,
+    marginTop: 14,
+  },
+  devLogsBtnText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  logsModalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(5, 5, 8, 0.85)',
+  },
+  logsModalContainer: {
+    flex: 1,
+    backgroundColor: '#0A0A0F',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    marginHorizontal: 10,
+    marginBottom: 10,
+    marginTop: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    overflow: 'hidden',
+  },
+  logsModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  logsTerminalIconBadge: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: 'rgba(85, 128, 255, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(85, 128, 255, 0.3)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  logsModalTitle: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  logsModalSubtitle: {
+    color: theme.colors.textSecondary,
+    fontSize: 11,
+  },
+  logsHeaderBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  logsFilterRow: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  logsFilterChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  logsFilterChipActive: {
+    backgroundColor: 'rgba(85, 128, 255, 0.2)',
+    borderColor: '#5580FF',
+  },
+  logsFilterText: {
+    color: theme.colors.textSecondary,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  logsFilterTextActive: {
+    color: '#ffffff',
+  },
+  logsSearchBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderRadius: 12,
+    marginHorizontal: 16,
+    marginBottom: 10,
+    paddingHorizontal: 12,
+    height: 38,
+  },
+  logsSearchInput: {
+    flex: 1,
+    color: '#ffffff',
+    fontSize: 13,
+    paddingVertical: 0,
+  },
+  terminalContainer: {
+    flex: 1,
+    backgroundColor: '#050508',
+    marginHorizontal: 16,
+    marginBottom: 16,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  emptyLogsText: {
+    color: theme.colors.textMuted,
+    fontSize: 13,
+    textAlign: 'center',
+    marginTop: 40,
+  },
+  logLineRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginBottom: 6,
+    gap: 4,
+    alignItems: 'flex-start',
+  },
+  logTimestamp: {
+    color: '#666670',
+    fontFamily: Platform.OS === 'android' ? 'monospace' : 'Courier',
+    fontSize: 10,
+  },
+  logLevelBadge: {
+    color: '#5580FF',
+    fontFamily: Platform.OS === 'android' ? 'monospace' : 'Courier',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  logLevelWarn: {
+    color: '#FFE066',
+  },
+  logLevelError: {
+    color: '#FF7B9C',
+  },
+  logTag: {
+    color: 'rgba(255, 255, 255, 0.7)',
+    fontFamily: Platform.OS === 'android' ? 'monospace' : 'Courier',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  logMessageText: {
+    color: '#D0D0D5',
+    fontFamily: Platform.OS === 'android' ? 'monospace' : 'Courier',
+    fontSize: 11,
+    lineHeight: 16,
+    flex: 1,
   },
 });
