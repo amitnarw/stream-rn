@@ -262,12 +262,311 @@ export async function getProviders(): Promise<PluginProvider[]> {
     (p) => !excludeNames.some((ex) => p.name.toLowerCase().includes(ex.toLowerCase()))
   );
   const uniqueNames = new Set<string>();
-  return filtered.filter((p) => {
-    if (uniqueNames.has(p.name)) return false;
-    uniqueNames.add(p.name);
-    return true;
-  })
-  .map(p => ({ ...p, hasSearch: p.hasSearch !== false }));
+  return filtered
+    .filter((p) => {
+      if (uniqueNames.has(p.name)) return false;
+      uniqueNames.add(p.name);
+      return true;
+    })
+    .map((p) => ({ ...p, hasSearch: p.hasSearch !== false }));
+}
+
+export function getCleanPosterUrl(url: string | null | undefined, id?: string): string | null {
+  if (!url && !id) return null;
+  let imdbId = id && id.startsWith('tt') ? id : null;
+  if (!imdbId && url) {
+    const match = url.match(/(tt\d+)/);
+    if (match) imdbId = match[1];
+  }
+  if (url && (url.includes('ratingposterdb.com') || url.includes('rpdb'))) {
+    if (imdbId) {
+      return `https://images.metahub.space/poster/medium/${imdbId}/img`;
+    }
+  }
+  if (!url && imdbId) {
+    return `https://images.metahub.space/poster/medium/${imdbId}/img`;
+  }
+  return url ?? null;
+}
+
+async function fetchNewMoviesHelper(): Promise<any[]> {
+  const urls = [
+    'https://7a82163c306e-stremio-netflix-catalog-addon.baby-beamup.club/catalog/movie/nfx.json',
+    'https://7a82163c306e-stremio-netflix-catalog-addon.baby-beamup.club/catalog/movie/dnp.json',
+    'https://7a82163c306e-stremio-netflix-catalog-addon.baby-beamup.club/catalog/movie/hbm.json',
+  ];
+  const allMetas: any[] = [];
+  await Promise.all(urls.map(async (url) => {
+    try {
+      const res = await fetch(url);
+      const json = await res.json();
+      if (json.metas) allMetas.push(...json.metas);
+    } catch (_) {}
+  }));
+  const map = new Map<string, any>();
+  for (const m of allMetas) {
+    if (m.id && m.name && (m.poster || m.background) && !map.has(m.id)) {
+      map.set(m.id, m);
+    }
+  }
+  const items = Array.from(map.values())
+    .map(m => ({
+      provider: 'Cinemeta',
+      url: `movie/${m.id}`,
+      title: m.name ?? '',
+      posterUrl: m.poster ?? m.background ?? null,
+      type: 'movie',
+      genres: m.genres ?? [],
+      year: m.year ?? '',
+    }))
+    .filter(m => (parseInt(m.year) || 0) >= 2024);
+  items.sort((a, b) => (parseInt(b.year) || 0) - (parseInt(a.year) || 0));
+  return items;
+}
+
+async function fetchNewSeriesHelper(): Promise<any[]> {
+  const urls = [
+    'https://7a82163c306e-stremio-netflix-catalog-addon.baby-beamup.club/catalog/series/nfx.json',
+    'https://7a82163c306e-stremio-netflix-catalog-addon.baby-beamup.club/catalog/series/amp.json',
+    'https://7a82163c306e-stremio-netflix-catalog-addon.baby-beamup.club/catalog/series/hbm.json',
+  ];
+  const allMetas: any[] = [];
+  await Promise.all(urls.map(async (url) => {
+    try {
+      const res = await fetch(url);
+      const json = await res.json();
+      if (json.metas) allMetas.push(...json.metas);
+    } catch (_) {}
+  }));
+  const map = new Map<string, any>();
+  for (const m of allMetas) {
+    if (m.id && m.name && (m.poster || m.background) && !map.has(m.id)) {
+      map.set(m.id, m);
+    }
+  }
+  const items = Array.from(map.values())
+    .map(m => ({
+      provider: 'Cinemeta',
+      url: `series/${m.id}`,
+      title: m.name ?? '',
+      posterUrl: m.poster ?? m.background ?? null,
+      type: 'series',
+      genres: m.genres ?? [],
+      year: m.year ?? '',
+    }))
+    .filter(m => (parseInt(m.year) || 0) >= 2024);
+  items.sort((a, b) => (parseInt(b.year) || 0) - (parseInt(a.year) || 0));
+  return items;
+}
+
+async function fetchHindiMoviesHelper(): Promise<any[]> {
+  try {
+    const urls = [
+      'https://indiastreams.rdata.in/catalog/movie/hstzee.json',
+      'https://indiastreams.rdata.in/catalog/movie/nfxprm.json',
+      'https://indiastreams.rdata.in/catalog/movie/trendingmovies.json',
+    ];
+    const allMetas: any[] = [];
+    await Promise.all(urls.map(async (url) => {
+      try {
+        const res = await fetch(url);
+        const json = await res.json();
+        if (json.metas) allMetas.push(...json.metas);
+      } catch (_) {}
+    }));
+    const map = new Map<string, any>();
+    for (const m of allMetas) {
+      if (m.id && m.name && m.poster && !map.has(m.id)) {
+        map.set(m.id, m);
+      }
+    }
+    const itemsList = Array.from(map.values()).slice(0, 35);
+    const verified: any[] = [];
+    await Promise.all(itemsList.map(async (item) => {
+      try {
+        const res = await fetch(`https://v3-cinemeta.strem.io/meta/movie/${item.id}.json`);
+        const json = await res.json();
+        const meta = json.meta;
+        if (meta && (meta.country || '').toLowerCase().includes('india')) {
+          verified.push({
+            provider: 'Cinemeta',
+            url: `movie/${item.id}`,
+            title: meta.name || item.name || '',
+            posterUrl: meta.poster || item.poster || null,
+            type: 'movie',
+            genres: meta.genres || item.genres || [],
+            year: meta.year || item.year || '',
+          });
+        }
+      } catch (_) {
+        verified.push({
+          provider: 'Cinemeta',
+          url: `movie/${item.id}`,
+          title: item.name || '',
+          posterUrl: item.poster || null,
+          type: 'movie',
+          genres: item.genres || [],
+          year: item.year || '',
+        });
+      }
+    }));
+    verified.sort((a, b) => (parseInt(b.year) || 0) - (parseInt(a.year) || 0));
+    return verified;
+  } catch (_) {
+    return [];
+  }
+}
+
+async function fetchHindiSeriesHelper(): Promise<any[]> {
+  try {
+    const urls = [
+      'https://indiastreams.rdata.in/catalog/series/hstzeetv.json',
+      'https://indiastreams.rdata.in/catalog/series/nfxprmtv.json',
+      'https://indiastreams.rdata.in/catalog/series/trendingtv.json',
+    ];
+    const allMetas: any[] = [];
+    await Promise.all(urls.map(async (url) => {
+      try {
+        const res = await fetch(url);
+        const json = await res.json();
+        if (json.metas) allMetas.push(...json.metas);
+      } catch (_) {}
+    }));
+    const map = new Map<string, any>();
+    for (const m of allMetas) {
+      if (m.id && m.name && m.poster && !map.has(m.id)) {
+        map.set(m.id, m);
+      }
+    }
+    const itemsList = Array.from(map.values()).slice(0, 35);
+    const verified: any[] = [];
+    await Promise.all(itemsList.map(async (item) => {
+      try {
+        const res = await fetch(`https://v3-cinemeta.strem.io/meta/series/${item.id}.json`);
+        const json = await res.json();
+        const meta = json.meta;
+        if (meta && (meta.country || '').toLowerCase().includes('india')) {
+          verified.push({
+            provider: 'Cinemeta',
+            url: `series/${item.id}`,
+            title: meta.name || item.name || '',
+            posterUrl: meta.poster || item.poster || null,
+            type: 'series',
+            genres: meta.genres || item.genres || [],
+            year: meta.year || item.year || '',
+          });
+        }
+      } catch (_) {
+        verified.push({
+          provider: 'Cinemeta',
+          url: `series/${item.id}`,
+          title: item.name || '',
+          posterUrl: item.poster || null,
+          type: 'series',
+          genres: item.genres || [],
+          year: item.year || '',
+        });
+      }
+    }));
+    return verified;
+  } catch (_) {
+    return [];
+  }
+}
+
+async function fetchPunjabiMoviesHelper(): Promise<any[]> {
+  try {
+    const urls = [
+      'https://v3-cinemeta.strem.io/catalog/movie/top/search=Punjabi.json',
+      'https://v3-cinemeta.strem.io/catalog/movie/top/search=Pollywood.json',
+      'https://v3-cinemeta.strem.io/catalog/movie/top/search=Jatt.json',
+    ];
+    const allMetas: any[] = [];
+    await Promise.all(urls.map(async (url) => {
+      try {
+        const res = await fetch(url);
+        const json = await res.json();
+        if (json.metas) allMetas.push(...json.metas);
+      } catch (_) {}
+    }));
+    const map = new Map<string, any>();
+    for (const m of allMetas) {
+      if (m.id && m.name && m.poster && !map.has(m.id)) {
+        map.set(m.id, m);
+      }
+    }
+    const itemsList = Array.from(map.values()).slice(0, 30);
+    const verified: any[] = [];
+    await Promise.all(itemsList.map(async (item) => {
+      try {
+        const res = await fetch(`https://v3-cinemeta.strem.io/meta/movie/${item.id}.json`);
+        const json = await res.json();
+        const meta = json.meta;
+        if (meta && (meta.country || '').toLowerCase().includes('india')) {
+          verified.push({
+            provider: 'Cinemeta',
+            url: `movie/${item.id}`,
+            title: meta.name || item.name || '',
+            posterUrl: meta.poster || item.poster || null,
+            type: 'movie',
+            genres: meta.genres || item.genres || [],
+            year: meta.year || item.year || '',
+          });
+        }
+      } catch (_) {}
+    }));
+    verified.sort((a, b) => (parseInt(b.year) || 0) - (parseInt(a.year) || 0));
+    return verified;
+  } catch (_) {
+    return [];
+  }
+}
+
+async function fetchPunjabiSeriesHelper(): Promise<any[]> {
+  try {
+    const urls = [
+      'https://v3-cinemeta.strem.io/catalog/series/top/search=Punjabi.json',
+      'https://v3-cinemeta.strem.io/catalog/series/top/search=Pollywood.json',
+      'https://v3-cinemeta.strem.io/catalog/series/top/search=Jatt.json',
+    ];
+    const allMetas: any[] = [];
+    await Promise.all(urls.map(async (url) => {
+      try {
+        const res = await fetch(url);
+        const json = await res.json();
+        if (json.metas) allMetas.push(...json.metas);
+      } catch (_) {}
+    }));
+    const map = new Map<string, any>();
+    for (const m of allMetas) {
+      if (m.id && m.name && m.poster && !map.has(m.id)) {
+        map.set(m.id, m);
+      }
+    }
+    const itemsList = Array.from(map.values()).slice(0, 30);
+    const verified: any[] = [];
+    await Promise.all(itemsList.map(async (item) => {
+      try {
+        const res = await fetch(`https://v3-cinemeta.strem.io/meta/series/${item.id}.json`);
+        const json = await res.json();
+        const meta = json.meta;
+        if (meta && (meta.country || '').toLowerCase().includes('india')) {
+          verified.push({
+            provider: 'Cinemeta',
+            url: `series/${item.id}`,
+            title: meta.name || item.name || '',
+            posterUrl: meta.poster || item.poster || null,
+            type: 'series',
+            genres: meta.genres || item.genres || [],
+            year: meta.year || item.year || '',
+          });
+        }
+      } catch (_) {}
+    }));
+    return verified;
+  } catch (_) {
+    return [];
+  }
 }
 
 export async function getMainPage(
@@ -277,13 +576,13 @@ export async function getMainPage(
   category: string = 'Trending'
 ): Promise<HomeSection[]> {
   const cacheKey = category === 'LiveTV'
-    ? `@zuno_cache_main_cinemeta_cat_${category}_prov_${providerName || 'CloudPlay'}_page_${page}`
-    : `@zuno_cache_main_cinemeta_cat_${category}_page_${page}`;
+    ? `@zuno_cache_v13_cinemeta_cat_${category}_prov_${providerName || 'CloudPlay'}_page_${page}`
+    : `@zuno_cache_v13_cinemeta_cat_${category}_page_${page}`;
 
   if (!forceRefresh) {
     const settings = await getSettings();
     const cachedData = await getCache<HomeSection[]>(cacheKey, settings.mainPageTtl);
-    if (cachedData && cachedData.length > 0) {
+    if (cachedData) {
       return cachedData;
     }
   }
@@ -375,6 +674,7 @@ export async function getMainPage(
   switch (category) {
     case 'Trending':
       urls = [
+        { name: 'New & Latest Releases', url: 'NEW_MOVIES' },
         { name: 'Trending Movies', url: 'https://v3-cinemeta.strem.io/catalog/movie/top.json' },
         { name: 'Trending TV Shows', url: 'https://v3-cinemeta.strem.io/catalog/series/top.json' },
         { name: 'Action & Adventure', url: 'https://v3-cinemeta.strem.io/catalog/movie/top/genre=Action.json' },
@@ -385,20 +685,9 @@ export async function getMainPage(
         { name: 'Mystery & Crime Series', url: 'https://v3-cinemeta.strem.io/catalog/series/top/genre=Crime.json' },
       ];
       break;
-    case 'New':
-      urls = [
-        { name: 'Highly Rated Movies', url: 'https://v3-cinemeta.strem.io/catalog/movie/imdbRating.json' },
-        { name: 'Highly Rated Series', url: 'https://v3-cinemeta.strem.io/catalog/series/imdbRating.json' },
-        { name: 'New Actions', url: 'https://v3-cinemeta.strem.io/catalog/movie/imdbRating/genre=Action.json' },
-        { name: 'New Sci-Fi', url: 'https://v3-cinemeta.strem.io/catalog/movie/imdbRating/genre=Sci-Fi.json' },
-        { name: 'New Crime Thrillers', url: 'https://v3-cinemeta.strem.io/catalog/movie/imdbRating/genre=Thriller.json' },
-        { name: 'New Comedies', url: 'https://v3-cinemeta.strem.io/catalog/movie/imdbRating/genre=Comedy.json' },
-        { name: 'New Drama Series', url: 'https://v3-cinemeta.strem.io/catalog/series/imdbRating/genre=Drama.json' },
-        { name: 'New Animated Series', url: 'https://v3-cinemeta.strem.io/catalog/series/imdbRating/genre=Animation.json' },
-      ];
-      break;
     case 'Movies':
       urls = [
+        { name: 'New Movies', url: 'NEW_MOVIES' },
         { name: 'Popular Movies', url: 'https://v3-cinemeta.strem.io/catalog/movie/top.json' },
         { name: 'Action Movies', url: 'https://v3-cinemeta.strem.io/catalog/movie/top/genre=Action.json' },
         { name: 'Comedy Movies', url: 'https://v3-cinemeta.strem.io/catalog/movie/top/genre=Comedy.json' },
@@ -411,6 +700,7 @@ export async function getMainPage(
       break;
     case 'Series':
       urls = [
+        { name: 'New Series', url: 'NEW_SERIES' },
         { name: 'Popular Series', url: 'https://v3-cinemeta.strem.io/catalog/series/top.json' },
         { name: 'Drama Series', url: 'https://v3-cinemeta.strem.io/catalog/series/top/genre=Drama.json' },
         { name: 'Action & Adventure Series', url: 'https://v3-cinemeta.strem.io/catalog/series/top/genre=Action.json' },
@@ -421,18 +711,9 @@ export async function getMainPage(
         { name: 'Animated Series', url: 'https://v3-cinemeta.strem.io/catalog/series/top/genre=Animation.json' },
       ];
       break;
-    case 'TV Show':
-      urls = [
-        { name: 'Top TV Shows', url: 'https://v3-cinemeta.strem.io/catalog/series/top.json' },
-        { name: 'Reality & Talk Shows', url: 'https://v3-cinemeta.strem.io/catalog/series/top/genre=Documentary.json' },
-        { name: 'Comedy Shows', url: 'https://v3-cinemeta.strem.io/catalog/series/top/genre=Comedy.json' },
-        { name: 'Documentary Series', url: 'https://v3-cinemeta.strem.io/catalog/series/top/genre=Documentary.json' },
-        { name: 'Mystery Shows', url: 'https://v3-cinemeta.strem.io/catalog/series/top/genre=Mystery.json' },
-        { name: 'Family Shows', url: 'https://v3-cinemeta.strem.io/catalog/series/top/genre=Family.json' },
-      ];
-      break;
     case 'Cartoon':
       urls = [
+        { name: 'New Cartoons', url: 'NEW_MOVIES' },
         { name: 'Animated Movies', url: 'https://v3-cinemeta.strem.io/catalog/movie/top/genre=Animation.json' },
         { name: 'Animated Series', url: 'https://v3-cinemeta.strem.io/catalog/series/top/genre=Animation.json' },
         { name: 'Kids & Family', url: 'https://v3-cinemeta.strem.io/catalog/movie/top/genre=Family.json' },
@@ -442,9 +723,32 @@ export async function getMainPage(
       break;
     case 'Anime':
       urls = [
+        { name: 'New Anime Releases', url: 'NEW_SERIES' },
         { name: 'Popular Anime Series', url: 'https://v3-cinemeta.strem.io/catalog/series/top/genre=Anime.json' },
         { name: 'Trending Anime Movies', url: 'https://v3-cinemeta.strem.io/catalog/movie/top/genre=Anime.json' },
         { name: 'Highly Rated Anime', url: 'https://v3-cinemeta.strem.io/catalog/series/imdbRating/genre=Anime.json' },
+      ];
+      break;
+    case 'English':
+      urls = [
+        { name: 'New English Movies', url: 'NEW_MOVIES' },
+        { name: 'New English TV Series', url: 'NEW_SERIES' },
+        { name: 'Popular English Movies', url: 'https://v3-cinemeta.strem.io/catalog/movie/top.json' },
+        { name: 'Popular English Series', url: 'https://v3-cinemeta.strem.io/catalog/series/top.json' },
+        { name: 'Hollywood Action Hits', url: 'https://v3-cinemeta.strem.io/catalog/movie/top/genre=Action.json' },
+        { name: 'Hollywood Thrillers', url: 'https://v3-cinemeta.strem.io/catalog/movie/top/genre=Thriller.json' },
+      ];
+      break;
+    case 'Hindi':
+      urls = [
+        { name: 'New Movies', url: 'https://indian-regional-catalog.vercel.app/catalog/movie/hi.json' },
+        { name: 'New Series', url: 'https://indian-regional-catalog.vercel.app/catalog/series/hi_series.json' },
+      ];
+      break;
+    case 'Punjabi':
+      urls = [
+        { name: 'New Movies', url: 'https://indian-regional-catalog.vercel.app/catalog/movie/pa.json' },
+        { name: 'New Series', url: 'https://indian-regional-catalog.vercel.app/catalog/series/pa_series.json' },
       ];
       break;
     default:
@@ -459,16 +763,36 @@ export async function getMainPage(
   const results = await Promise.all(
     urls.map(async (u) => {
       try {
-        const response = await fetch(u.url);
-        const json = await response.json();
-        let items = (json.metas ?? []).map((m: any) => ({
-          provider: 'Cinemeta',
-          url: `${m.type}/${m.id}`,
-          title: m.name ?? '',
-          posterUrl: m.poster ?? null,
-          type: m.type ?? null,
-          genres: m.genres ?? [],
-        }));
+        let items: any[] = [];
+        if (u.url === 'NEW_MOVIES') {
+          items = await fetchNewMoviesHelper();
+        } else if (u.url === 'NEW_SERIES') {
+          items = await fetchNewSeriesHelper();
+        } else if (u.url === 'HINDI_MOVIES' || u.url === 'NEW_HINDI') {
+          items = await fetchHindiMoviesHelper();
+        } else if (u.url === 'HINDI_SERIES') {
+          items = await fetchHindiSeriesHelper();
+        } else if (u.url === 'PUNJABI_MOVIES' || u.url === 'NEW_PUNJABI') {
+          items = await fetchPunjabiMoviesHelper();
+        } else if (u.url === 'PUNJABI_SERIES') {
+          items = await fetchPunjabiSeriesHelper();
+        } else {
+          const response = await fetch(u.url);
+          const json = await response.json();
+          items = (json.metas ?? []).map((m: any) => {
+            const rawId = m.id || '';
+            const cleanId = rawId.includes('||') ? rawId.split('||')[0] : rawId;
+            const itemType = m.type || (u.url.includes('/series/') ? 'series' : 'movie');
+            return {
+              provider: 'Cinemeta',
+              url: `${itemType}/${cleanId}`,
+              title: m.name ?? '',
+              posterUrl: getCleanPosterUrl(m.poster, cleanId),
+              type: itemType,
+              genres: m.genres ?? [],
+            };
+          });
+        }
 
         if (category === 'Cartoon') {
           items = items.filter((item: any) => {

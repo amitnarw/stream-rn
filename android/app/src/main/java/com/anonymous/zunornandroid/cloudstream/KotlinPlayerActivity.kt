@@ -625,6 +625,7 @@ class KotlinPlayerActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        savePlaybackPosition()
         mediaSession?.isActive = false
         mediaSession?.release()
         mediaSession = null

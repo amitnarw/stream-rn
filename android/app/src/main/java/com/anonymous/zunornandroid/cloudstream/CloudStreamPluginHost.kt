@@ -285,7 +285,10 @@ class CloudStreamPluginHost(val appContext: ReactApplicationContext) {
             "Desicinemas" to "https://desicinemas.to",
             "Tamilblasters" to "https://www.1tamilblasters.pro",
             "VegaMovies" to "https://vegamoviez.nl",
-            "Vegamovies" to "https://vegamoviez.nl"
+            "Vegamovies" to "https://vegamoviez.nl",
+            "Bolly4u" to "https://bolly4u.ski",
+            "1Bolly4u" to "https://1bolly4u.com",
+            "Bolly4uProvider" to "https://bolly4u.ski"
         )
     }
 
@@ -422,6 +425,15 @@ class CloudStreamPluginHost(val appContext: ReactApplicationContext) {
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to load plugin asset $fileName", e)
             }
+        }
+        try {
+            if (APIHolder.allProviders.none { it.name.equals("Bolly4u", ignoreCase = true) }) {
+                APIHolder.allProviders.add(Bolly4uProvider())
+                allProviders.add("Bolly4u")
+                Log.i(TAG, "Registered native Bolly4uProvider")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to register native Bolly4uProvider", e)
         }
         return allProviders
     }

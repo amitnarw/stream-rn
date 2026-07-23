@@ -18,6 +18,8 @@ const CARD_WIDTH = (width - 48) / 3;
 import type { CardLayout } from '../context/TransitionContext';
 import { useTransition } from '../context/TransitionContext';
 
+import { getCleanPosterUrl } from '../api/cloudStreamBridge';
+
 interface Props {
   item: MediaItem;
   onPress: (item: MediaItem, layout: CardLayout) => void;
@@ -33,6 +35,8 @@ export default function MediaCard({ item, onPress, onDelete, width: propWidth, s
   const cardWidth = propWidth || CARD_WIDTH;
   const cardHeight = cardWidth * 1.5;
   const [imageError, setImageError] = useState(false);
+
+  const cleanPosterUrl = getCleanPosterUrl(item.posterUrl, item.url?.split('/')[1]);
 
   const { phase, item: activeItem } = useTransition();
   const wasTargetRef = useRef(false);
@@ -117,9 +121,9 @@ export default function MediaCard({ item, onPress, onDelete, width: propWidth, s
           scale transform — prevents layout reflow / size-correction flash. */}
       <View ref={viewRef}>
         <Animated.View style={{ transform: [{ scale }] }}>
-          {item.posterUrl && !imageError ? (
+          {cleanPosterUrl && !imageError ? (
             <Image
-              source={{ uri: item.posterUrl, cache: 'force-cache' }}
+              source={{ uri: cleanPosterUrl, cache: 'force-cache' }}
               style={[styles.poster, { width: cardWidth, height: cardHeight }]}
               resizeMode="cover"
               onError={() => setImageError(true)}

@@ -76,13 +76,14 @@ const CW_CARD_W = S_CARD_W * 1.2;
 
 const CATEGORY_TABS = [
   "Trending",
-  "New",
   "Movies",
   "Series",
-  "TV Show",
   "Cartoon",
   "Anime",
   "LiveTV",
+  "English",
+  "Hindi",
+  "Punjabi",
 ];
 
 // Display genre/duration/rating tags for hero cards (rotated per item index)
@@ -1177,7 +1178,7 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
       );
     }
 
-    const displaySections = sections.filter((_: HomeSection, i: number) => i !== heroSectionIdx);
+    const displaySections = sections;
 
     return (
       <Reanimated.View entering={FadeIn.duration(400)}>

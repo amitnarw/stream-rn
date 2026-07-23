@@ -1495,7 +1495,12 @@ export default function DetailScreen() {
           subtitles,
           allEpisodes ? JSON.stringify(allEpisodes) : "[]",
           activeEpisodeIndex ?? -1,
-          detail?.imdbId || "",
+          detail?.imdbId ||
+            (detail?.url
+              ? detail.url.split("/")[1]
+              : item?.url
+                ? item.url.split("/")[1]
+                : ""),
           detail?.isSerial ? "series" : "movie",
           detail?.posterUrl || "",
           currentEp?.season || 1,
@@ -2535,8 +2540,7 @@ export default function DetailScreen() {
             {/* 3. Footer: Caption & Cancel Button */}
             <View style={styles.torrentDashboardFooter}>
               <Text style={styles.torrentDashboardCaption}>
-                Finding sources and preparing your stream. Please wait a
-                moment...
+                Finding sources and preparing your stream. Please wait.
               </Text>
 
               <TouchableOpacity
