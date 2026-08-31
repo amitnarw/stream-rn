@@ -176,6 +176,10 @@ class KotlinPlayerActivity : AppCompatActivity() {
     private var isPreStartedTorrent = false
     private var currentHeadersJson = "{}"
     private var originalTorrentMagnetUrl = ""
+    private var liveChannels: JSONArray? = null
+    private var currentChannelIndex = -1
+    private var liveChannelsTitle = "Channels"
+    private var currentLiveSubtitleUrl = ""
     private lateinit var audioTrackBtn: View
 
     private var episodesArray: JSONArray? = null
@@ -202,6 +206,12 @@ class KotlinPlayerActivity : AppCompatActivity() {
     private var torrentLoadingOverlay: FrameLayout? = null
 
     private var torrentJob: kotlinx.coroutines.Job? = null
+    // Cache for channel logos: URL → Bitmap. Keeps recently used channel icons in memory
+    // so reopening the channel drawer doesn't refetch them.
+    private val channelLogoCache: android.util.LruCache<String, android.graphics.Bitmap> =
+        object : android.util.LruCache<String, android.graphics.Bitmap>(48) {
+            override fun sizeOf(key: String, value: android.graphics.Bitmap): Int = 1
+        }
     // File-picker for local subtitle files (.srt, .vtt, .ass, .ssa)
     private val subtitleFilePicker = registerForActivityResult(ActivityResultContracts.GetContent()) { uri: android.net.Uri? ->
         if (uri != null) {
@@ -409,9 +419,15 @@ class KotlinPlayerActivity : AppCompatActivity() {
         allSubtitles = try { JSONArray(subtitlesJsonStr) } catch (_: Exception) { null }
         episodesArray = try { JSONArray(episodesJsonStr) } catch (_: Exception) { null }
 
+        // Live channel list (passed from LiveTVScreen)
+        val channelsJsonStr = intent.getStringExtra("channelsJson") ?: ""
+        liveChannels = try { JSONArray(channelsJsonStr) } catch (_: Exception) { null }
+        currentChannelIndex = intent.getIntExtra("currentChannelIndex", -1)
+
         currentUrl = url ?: ""
         currentHeadersJson = headersJson
         isPreStartedTorrent = intent.getBooleanExtra("isTorrentStream", false)
+        currentLiveSubtitleUrl = subtitleUrl
         if (subtitleUrl.isNotEmpty()) currentSubtitleIndex = 0
 
         allSources?.let { sources ->
@@ -765,7 +781,13 @@ class KotlinPlayerActivity : AppCompatActivity() {
         errorChangeSourceBtn.setOnClickListener {
             errorOverlay.visibility = View.GONE
             isErrorShowing = false
-            showSettingsDialog("Quality")
+            if (isLive && liveChannels != null && liveChannels!!.length() > 0) {
+                // Open the same left-side channel drawer used by the sources pill
+                val anchor = if (::sourcesPillBtn.isInitialized) sourcesPillBtn else errorChangeSourceBtn
+                LiveChannelGridDialog(anchor).show()
+            } else {
+                showSettingsDialog("Quality")
+            }
         }
 
         errorCloseBtn.setOnClickListener { finish() }
@@ -902,9 +924,9 @@ class KotlinPlayerActivity : AppCompatActivity() {
             rightMargin = dp(8)
         })
 
-        // Button 2: Change Source (electric blue border, light background)
+        // Button 2: Change Source / Change Channel
         errorChangeSourceBtn = TextView(this).apply {
-            text = "Change Source"
+            text = if (intent.getStringExtra("mediaType") == "live") "Change Channel" else "Change Source"
             setTextColor(Color.parseColor("#5580FF")) // theme.colors.accentLight
             textSize = 13f
             typeface = android.graphics.Typeface.DEFAULT_BOLD
@@ -1477,6 +1499,48 @@ class KotlinPlayerActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * Update the blurred background poster to match a newly selected live channel.
+     * Falls back to black if the URL is empty or fails to load.
+     */
+    private fun updatePlayerPosterForChannel(posterUrl: String) {
+        if (posterUrl.isEmpty()) {
+            placeholderImageView?.setImageDrawable(null)
+            placeholderImageView?.setBackgroundColor(Color.BLACK)
+            return
+        }
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val conn = java.net.URL(posterUrl).openConnection()
+                conn.connectTimeout = 5000
+                conn.readTimeout = 5000
+                conn.setRequestProperty(
+                    "User-Agent",
+                    "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Mobile Safari/537.36"
+                )
+                conn.connect()
+                val input = conn.getInputStream()
+                val bmp = android.graphics.BitmapFactory.decodeStream(input)
+                input.close()
+                (conn as? java.net.HttpURLConnection)?.disconnect()
+                if (bmp != null) {
+                    withContext(Dispatchers.Main) {
+                        placeholderImageView?.setImageBitmap(bmp)
+                        placeholderImageView?.alpha = 0.2f
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                            val blur = android.graphics.RenderEffect.createBlurEffect(
+                                25f, 25f, android.graphics.Shader.TileMode.CLAMP
+                            )
+                            placeholderImageView?.setRenderEffect(blur)
+                        }
+                    }
+                }
+            } catch (_: Exception) {
+                // keep previous backdrop on failure
+            }
+        }
+    }
+
     // ─── Center play controls ─── exact TSX sizes: 42×42 ep, 54×54 seek, 88×88 play
     private fun createCenterControls(): View {
         val container = FrameLayout(this)
@@ -1491,7 +1555,7 @@ class KotlinPlayerActivity : AppCompatActivity() {
         ).apply { gravity = Gravity.CENTER }
         container.addView(row, rowLp)
 
-        // Prev episode — 42×42 glass circle matching centerEpBtn in TSX
+        // Prev episode ,  42×42 glass circle matching centerEpBtn in TSX
         prevEpBtn = ImageView(this).apply {
             setImageResource(R.drawable.ic_hero_backward)
             setColorFilter(Color.WHITE)
@@ -1506,7 +1570,7 @@ class KotlinPlayerActivity : AppCompatActivity() {
         addPremiumTouchAnimation(prevEpBtn)
         row.addView(prevEpBtn, LinearLayout.LayoutParams(dp(42), dp(42)).apply { rightMargin = dp(16) })
 
-        // Rewind 10s — 54×54 glass circle matching centerNavBtn in TSX
+        // Rewind 10s ,  54×54 glass circle matching centerNavBtn in TSX
         rewindBtn = FrameLayout(this).apply {
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
@@ -1538,7 +1602,7 @@ class KotlinPlayerActivity : AppCompatActivity() {
         skipBackBtn = rewindIcon
         row.addView(rewindBtn, LinearLayout.LayoutParams(dp(54), dp(54)).apply { rightMargin = dp(24) })
 
-        // Play / Pause — 88×88 glass circle matching centerPlayBtn in TSX
+        // Play / Pause ,  88×88 glass circle matching centerPlayBtn in TSX
         playFrame = FrameLayout(this).apply {
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
@@ -1568,7 +1632,7 @@ class KotlinPlayerActivity : AppCompatActivity() {
             leftMargin = 0; rightMargin = 0
         })
 
-        // Fast forward 10s — 54×54 glass circle
+        // Fast forward 10s ,  54×54 glass circle
         ffBtn = FrameLayout(this).apply {
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
@@ -1602,7 +1666,7 @@ class KotlinPlayerActivity : AppCompatActivity() {
         skipForwardBtn = ffIcon
         row.addView(ffBtn, LinearLayout.LayoutParams(dp(54), dp(54)).apply { leftMargin = dp(24) })
 
-        // Next episode — 42×42 glass circle
+        // Next episode ,  42×42 glass circle
         nextEpBtn = ImageView(this).apply {
             setImageResource(R.drawable.ic_hero_forward)
             setColorFilter(Color.WHITE)
@@ -1648,7 +1712,7 @@ class KotlinPlayerActivity : AppCompatActivity() {
             gravity = Gravity.CENTER_VERTICAL
         }
 
-        // X Close — 44x44 glass circle
+        // X Close ,  44x44 glass circle
         val closeBtn = FrameLayout(this).apply {
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
@@ -1665,7 +1729,7 @@ class KotlinPlayerActivity : AppCompatActivity() {
         closeBtn.addView(closeIcon, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
         leftPanel.addView(closeBtn, LinearLayout.LayoutParams(dp(44), dp(44)).apply { rightMargin = dp(8) })
 
-        // ↗ External Player — 44x44 glass circle
+        // ↗ External Player ,  44x44 glass circle
         val extBtn = FrameLayout(this).apply {
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
@@ -1773,17 +1837,18 @@ class KotlinPlayerActivity : AppCompatActivity() {
         volumeSliderLayout = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(8), 0, dp(8), 0) // Reduced background blur card padding
+            setPadding(dp(3), 0, dp(3), 0) // Tighter horizontal padding
             background = GradientDrawable().apply {
                 setColor(Color.parseColor("#D9141218"))
-                cornerRadius = dp(15).toFloat()
+                cornerRadius = dp(18).toFloat()
             }
         }
         volumeSeekBar = SeekBar(this, null, android.R.attr.seekBarStyle).apply {
             max = maxVol
-            progressDrawable = createPremiumProgressDrawable(Color.parseColor("#33FFFFFF"), Color.WHITE, 4)
-            thumb = android.graphics.drawable.ColorDrawable(Color.TRANSPARENT)
-            setPadding(0, dp(12), 0, dp(12)) // Preserved touch area for seekbar
+            progressDrawable = createPremiumProgressDrawable(Color.parseColor("#33FFFFFF"), Color.WHITE, 12)
+            thumb = androidx.core.content.ContextCompat.getDrawable(this@KotlinPlayerActivity, R.drawable.slider_thumb)
+            setPadding(0, dp(2), 0, dp(2))
+            splitTrack = false
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(sb: SeekBar?, progress: Int, fromUser: Boolean) {
                     if (fromUser) am?.setStreamVolume(AudioManager.STREAM_MUSIC, progress, 0)
@@ -1795,27 +1860,28 @@ class KotlinPlayerActivity : AppCompatActivity() {
         val volIcon = ImageView(this).apply {
             setImageResource(R.drawable.ic_hero_speaker_wave)
             setColorFilter(Color.WHITE)
-            setPadding(dp(6), 0, 0, 0)
+            setPadding(dp(4), 0, dp(2), 0)
         }
-        volumeSliderLayout.addView(volumeSeekBar, LinearLayout.LayoutParams(dp(110), dp(24)))
+        volumeSliderLayout.addView(volumeSeekBar, LinearLayout.LayoutParams(dp(180), dp(18)))
         volumeSliderLayout.addView(volIcon, LinearLayout.LayoutParams(dp(22), dp(22)))
-        slidersPanel.addView(volumeSliderLayout, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(30)))
+        slidersPanel.addView(volumeSliderLayout, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(22)))
 
         // Brightness slider pill
         brightnessSliderLayout = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(8), 0, dp(8), 0) // Reduced background blur card padding
+            setPadding(dp(3), 0, dp(3), 0) // Tighter horizontal padding
             background = GradientDrawable().apply {
                 setColor(Color.parseColor("#D9141218"))
-                cornerRadius = dp(15).toFloat()
+                cornerRadius = dp(18).toFloat()
             }
         }
         brightnessSeekBar = SeekBar(this, null, android.R.attr.seekBarStyle).apply {
             max = 100
-            progressDrawable = createPremiumProgressDrawable(Color.parseColor("#33FFFFFF"), Color.WHITE, 4)
-            thumb = android.graphics.drawable.ColorDrawable(Color.TRANSPARENT)
-            setPadding(0, dp(12), 0, dp(12)) // Preserved touch area for seekbar
+            progressDrawable = createPremiumProgressDrawable(Color.parseColor("#33FFFFFF"), Color.WHITE, 12)
+            thumb = androidx.core.content.ContextCompat.getDrawable(this@KotlinPlayerActivity, R.drawable.slider_thumb)
+            setPadding(0, dp(2), 0, dp(2))
+            splitTrack = false
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(sb: SeekBar?, progress: Int, fromUser: Boolean) {
                     if (fromUser) {
@@ -1833,11 +1899,11 @@ class KotlinPlayerActivity : AppCompatActivity() {
         val brightIcon = ImageView(this).apply {
             setImageResource(R.drawable.ic_hero_sun)
             setColorFilter(Color.WHITE)
-            setPadding(dp(6), 0, 0, 0)
+            setPadding(dp(4), 0, dp(2), 0)
         }
-        brightnessSliderLayout.addView(brightnessSeekBar, LinearLayout.LayoutParams(dp(110), dp(24)))
+        brightnessSliderLayout.addView(brightnessSeekBar, LinearLayout.LayoutParams(dp(180), dp(18)))
         brightnessSliderLayout.addView(brightIcon, LinearLayout.LayoutParams(dp(22), dp(22)))
-        slidersPanel.addView(brightnessSliderLayout, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(30)).apply { topMargin = dp(4) })
+        slidersPanel.addView(brightnessSliderLayout, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(22)).apply { topMargin = dp(12) })
 
         bar.addView(slidersPanel, FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT
@@ -1879,7 +1945,7 @@ class KotlinPlayerActivity : AppCompatActivity() {
             FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT
         ).apply { gravity = Gravity.BOTTOM })
 
-        // ── Row 1: Logo/Title (left) — This is the bottomMetaRow in TSX
+        // ── Row 1: Logo/Title (left) ,  This is the bottomMetaRow in TSX
         val metaRow = FrameLayout(this)
 
         // Left: title/logo + episode info
@@ -1919,7 +1985,7 @@ class KotlinPlayerActivity : AppCompatActivity() {
             LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT
         ))
 
-        // Episode label S1E2: EpisodeTitle — TSX episodeText style
+        // Episode label S1E2: EpisodeTitle ,  TSX episodeText style
         episodeSubtitleTv = TextView(this).apply {
             setTextColor(Color.parseColor("#A0A0A5"))
             textSize = 16f
@@ -1937,7 +2003,7 @@ class KotlinPlayerActivity : AppCompatActivity() {
             LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
         ).apply { bottomMargin = dp(4) })
 
-        // ── Row 2: Scrubber row: [time] [seekbar] [duration] — TSX: scrubberRow ──
+        // ── Row 2: Scrubber row: [time] [seekbar] [duration] ,  TSX: scrubberRow ──
         val scrubberRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -1955,7 +2021,7 @@ class KotlinPlayerActivity : AppCompatActivity() {
             LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT
         ))
 
-        // SeekBar — TSX: progressBarTrack, white fill, 12dp height rounded
+        // SeekBar ,  TSX: progressBarTrack, white fill, 12dp height rounded
         seekBar = SeekBar(this, null, android.R.attr.seekBarStyle).apply {
             progressDrawable = createPremiumProgressDrawable(Color.parseColor("#33FFFFFF"), Color.WHITE, 12)
             thumb = android.graphics.drawable.ColorDrawable(Color.TRANSPARENT)
@@ -2025,7 +2091,7 @@ class KotlinPlayerActivity : AppCompatActivity() {
             LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT
         ).apply { rightMargin = dp(8) })
 
-        // Sources pill — always shown
+        // Sources pill ,  always shown
         val srcPill = FrameLayout(this).apply {
             background = GradientDrawable().apply {
                 setColor(Color.parseColor("#D9141218"))
@@ -2048,7 +2114,7 @@ class KotlinPlayerActivity : AppCompatActivity() {
             setPadding(0, 0, dp(6), 0)
         }
         val srcLabel = TextView(this).apply {
-            text = "Sources"
+            text = if (intent.getStringExtra("mediaType") == "live") "Channels" else "Sources"
             setTextColor(Color.WHITE)
             textSize = 13f
             typeface = android.graphics.Typeface.DEFAULT_BOLD
@@ -2097,7 +2163,7 @@ class KotlinPlayerActivity : AppCompatActivity() {
             FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT
         ).apply { gravity = Gravity.LEFT or Gravity.CENTER_VERTICAL })
 
-        // Right side: Settings capsule [Language icon | Speed icon] — TSX: capsuleBlur
+        // Right side: Settings capsule [Language icon | Speed icon] ,  TSX: capsuleBlur
         val settingsCapsule = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -2341,7 +2407,11 @@ class KotlinPlayerActivity : AppCompatActivity() {
     private fun showSourcesGrid() {
         if (!::sourcesPillBtn.isInitialized) return
         sourcesPillBtn.animate().scaleX(1.0f).scaleY(1.0f).setDuration(0).start()
-        SourcesGridDialog(sourcesPillBtn).show()
+        if (isLive && liveChannels != null && liveChannels!!.length() > 0) {
+            LiveChannelGridDialog(sourcesPillBtn).show()
+        } else {
+            SourcesGridDialog(sourcesPillBtn).show()
+        }
     }
 
     private fun showSpeedDropdown() {
@@ -3256,7 +3326,7 @@ class KotlinPlayerActivity : AppCompatActivity() {
         init {
             container = FrameLayout(this@KotlinPlayerActivity).apply {
                 setBackgroundColor(Color.TRANSPARENT)
-                setOnClickListener { /* consume — settings panel closes only via X button */ }
+                setOnClickListener { /* consume ,  settings panel closes only via X button */ }
             }
 
             card = LinearLayout(this@KotlinPlayerActivity).apply {
@@ -3323,7 +3393,8 @@ class KotlinPlayerActivity : AppCompatActivity() {
 
         private fun refreshCategories() {
             categoryList.removeAllViews()
-            val categories = mutableListOf("Sources", "Video Quality", "Audio Track", "Subtitles", "Sleep Timer", "Playback Speed", "Swipe Gestures")
+            val sourcesLabel = if (isLive) "Channels" else "Sources"
+            val categories = mutableListOf(sourcesLabel, "Video Quality", "Audio Track", "Subtitles", "Sleep Timer", "Playback Speed", "Swipe Gestures")
             
             categories.forEach { cat ->
                 val iconRes = when (cat) {
@@ -3382,8 +3453,9 @@ class KotlinPlayerActivity : AppCompatActivity() {
 
         private fun showCategoryOptions() {
             optionsContainer.removeAllViews()
+            val sourcesLabel = if (isLive) "Channels" else "Sources"
             when (activeCategory) {
-                "Sources" -> populateQualityOptions()
+                sourcesLabel -> populateQualityOptions()
                 "Video Quality" -> populateVideoQualityOptions()
                 "Audio Track" -> populateAudioTrackOptions()
                 "Subtitles" -> populateSubtitleOptions()
@@ -3559,14 +3631,15 @@ class KotlinPlayerActivity : AppCompatActivity() {
                 val primarySourcePair = groupSources.first()
                 val originalIndex = primarySourcePair.first
                 val s = primarySourcePair.second
-                
+
                 val isGroupSelected = groupSources.any { it.first == currentSourceIndex }
+                val resolvedIndex = if (isGroupSelected) originalIndex else originalIndex
 
                 val availableQualities = groupSources.map { pair ->
                     extractResolutionTag(pair.second)
                 }.distinct()
 
-                val row = createOptionSourceRow(s, if (isGroupSelected) currentSourceIndex else originalIndex, idx == 0, availableQualities) {
+                val row = createOptionSourceRow(s, resolvedIndex, idx == 0, availableQualities) {
                     currentSourceIndex = originalIndex
                     switchToSource(originalIndex)
                     dismiss()
@@ -3581,25 +3654,26 @@ class KotlinPlayerActivity : AppCompatActivity() {
                     visibility = if (torrentExpanded) View.VISIBLE else View.GONE
                 }
 
-                torrentGroups.forEachIndexed { idx, groupSources ->
-                    val primarySourcePair = groupSources.first()
-                    val originalIndex = primarySourcePair.first
-                    val s = primarySourcePair.second
-                    
-                    val isFirst = directGroups.isEmpty() && idx == 0
-                    val isGroupSelected = groupSources.any { it.first == currentSourceIndex }
+            torrentGroups.forEachIndexed { idx, groupSources ->
+                val primarySourcePair = groupSources.first()
+                val originalIndex = primarySourcePair.first
+                val s = primarySourcePair.second
 
-                    val availableQualities = groupSources.map { pair ->
-                        extractResolutionTag(pair.second)
-                    }.distinct()
+                val isFirst = directGroups.isEmpty() && idx == 0
+                val isGroupSelected = groupSources.any { it.first == currentSourceIndex }
+                val resolvedIndex = if (isGroupSelected) originalIndex else originalIndex
 
-                    val row = createOptionSourceRow(s, if (isGroupSelected) currentSourceIndex else originalIndex, isFirst, availableQualities) {
-                        currentSourceIndex = originalIndex
-                        switchToSource(originalIndex)
-                        dismiss()
-                    }
-                    torrentContainer.addView(row)
+                val availableQualities = groupSources.map { pair ->
+                    extractResolutionTag(pair.second)
+                }.distinct()
+
+                val row = createOptionSourceRow(s, resolvedIndex, isFirst, availableQualities) {
+                    currentSourceIndex = originalIndex
+                    switchToSource(originalIndex)
+                    dismiss()
                 }
+                torrentContainer.addView(row)
+            }
 
                 val accordionHeader = LinearLayout(this@KotlinPlayerActivity).apply {
                     orientation = LinearLayout.HORIZONTAL
@@ -4426,7 +4500,7 @@ class KotlinPlayerActivity : AppCompatActivity() {
         // Local torrent stream URL served by our own HTTP server. This happens when
         // the JS side pre-buffered the torrent and started the server, OR when the
         // user retries a playback error while the server is still alive. In both
-        // cases do NOT stopStream() (that kills the server) and do NOT re-resolve —
+        // cases do NOT stopStream() (that kills the server) and do NOT re-resolve , 
         // just play the URL directly.
         val isLocalStream = url.startsWith("http://127.0.0.1:") && url.contains("/stream")
         val serverAlive =
@@ -4491,7 +4565,7 @@ class KotlinPlayerActivity : AppCompatActivity() {
 
                 // Wait until we have at least 0.1% buffered before launching the player.
                 // Previously this was 1.0% which meant 40MB on a 4GB file before ExoPlayer
-                // even started — 30-120s of silent waiting. ExoPlayer handles the rest via
+                // even started ,  30-120s of silent waiting. ExoPlayer handles the rest via
                 // HTTP range requests to our local server.
                 while (status.progress < 0.1f && !isCancelled) {
                     val speedKb = status.downloadRate / 1024
@@ -4520,7 +4594,7 @@ class KotlinPlayerActivity : AppCompatActivity() {
         hideTorrentLoadingOverlay()
 
         val overlay = FrameLayout(this).apply {
-            setBackgroundColor(Color.parseColor("#80050505")) // 50% opaque dark glass — lets blurred backdrop show through
+            setBackgroundColor(Color.parseColor("#80050505")) // 50% opaque dark glass ,  lets blurred backdrop show through
             isClickable = true
             isFocusable = true
             alpha = 0f
@@ -4685,7 +4759,7 @@ class KotlinPlayerActivity : AppCompatActivity() {
         } else {
             updateCenterPlayPauseIcon()
             
-            // Buffering ended — hide overlay (STATE_READY will also hide it)
+            // Buffering ended ,  hide overlay (STATE_READY will also hide it)
             if (loadingGroup.visibility == View.VISIBLE) {
                 loadingGroup.animate()
                     .alpha(0f)
@@ -4916,7 +4990,7 @@ class KotlinPlayerActivity : AppCompatActivity() {
             isFocusable = true
             setOnClickListener { /* consume taps */ }
         }
-        // Unlock button — same glass circle as TSX lockBtn, left-center
+        // Unlock button ,  same glass circle as TSX lockBtn, left-center
         val unlockBtn = FrameLayout(this).apply {
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
@@ -4991,7 +5065,7 @@ class KotlinPlayerActivity : AppCompatActivity() {
         }
     }
 
-    // ── Resume Prompt Dialog — shown when saved position > 10s ──
+    // ── Resume Prompt Dialog ,  shown when saved position > 10s ──
     private fun checkAndShowResumePrompt(savedMs: Long) {
         if (hasShownResumePrompt || savedMs <= 10000L) return
         hasShownResumePrompt = true
@@ -6262,6 +6336,469 @@ class KotlinPlayerActivity : AppCompatActivity() {
             if (isDismissing) return
             isDismissing = true
             dismissActiveOverlay()
+        }
+    }
+
+    // ── Live TV: full-height left drawer with premium player-UI look ─────────────
+    private inner class LiveChannelGridDialog(val anchorView: View) {
+        private val container: FrameLayout
+        private val card: LinearLayout
+        private var isDismissing = false
+        private val drawerWidthPx = dp(340)
+
+        init {
+            container = FrameLayout(this@KotlinPlayerActivity).apply {
+                setBackgroundColor(Color.TRANSPARENT)
+                setOnClickListener { dismiss() }
+            }
+
+            card = LinearLayout(this@KotlinPlayerActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(20), dp(20), dp(20), dp(20))
+                background = GradientDrawable().apply {
+                    setColor(Color.parseColor("#D9161620"))
+                    val radius = dp(28).toFloat()
+                    cornerRadii = floatArrayOf(0f, 0f, radius, radius, radius, radius, 0f, 0f)
+                    setStroke(dp(1), Color.parseColor("#33FFFFFF"))
+                }
+                setOnClickListener { /* consume */ }
+                elevation = dp(24).toFloat()
+            }
+
+            // Right-edge accent glow (soft shadow layer)
+            val edgeGlow = View(this@KotlinPlayerActivity).apply {
+                background = GradientDrawable().apply {
+                    orientation = GradientDrawable.Orientation.LEFT_RIGHT
+                    colors = intArrayOf(
+                        Color.parseColor("#000047FF"),
+                        Color.parseColor("#330047FF"),
+                        Color.parseColor("#660047FF")
+                    )
+                    val radius = dp(28).toFloat()
+                    cornerRadii = floatArrayOf(0f, 0f, radius, radius, radius, radius, 0f, 0f)
+                }
+            }
+            container.addView(edgeGlow, FrameLayout.LayoutParams(dp(6), FrameLayout.LayoutParams.MATCH_PARENT).apply {
+                gravity = Gravity.TOP or Gravity.LEFT
+                leftMargin = drawerWidthPx - dp(6)
+            })
+
+            // Header
+            val header = FrameLayout(this@KotlinPlayerActivity)
+
+            // LIVE pill on left
+            val livePill = LinearLayout(this@KotlinPlayerActivity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(8), dp(4), dp(10), dp(4))
+                background = GradientDrawable().apply {
+                    setColor(Color.parseColor("#1AFF4A7D"))
+                    cornerRadius = dp(8).toFloat()
+                    setStroke(dp(1), Color.parseColor("#4DFF4A7D"))
+                }
+            }
+            val liveDot = View(this@KotlinPlayerActivity).apply {
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.OVAL
+                    setColor(Color.parseColor("#FF4A7D"))
+                }
+            }
+            livePill.addView(liveDot, LinearLayout.LayoutParams(dp(6), dp(6)))
+            val liveTv = TextView(this@KotlinPlayerActivity).apply {
+                text = "LIVE"
+                setTextColor(Color.parseColor("#FF4A7D"))
+                textSize = 10f
+                typeface = android.graphics.Typeface.DEFAULT_BOLD
+                setPadding(dp(4), 0, 0, 0)
+            }
+            livePill.addView(liveTv, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ))
+            header.addView(livePill, FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT
+            ).apply { gravity = Gravity.LEFT or Gravity.CENTER_VERTICAL })
+
+            // Title in center (offset to make room for pill + close)
+            val titleTv = TextView(this@KotlinPlayerActivity).apply {
+                text = liveChannelsTitle
+                setTextColor(Color.WHITE)
+                textSize = 15f
+                typeface = android.graphics.Typeface.DEFAULT_BOLD
+                alpha = 0.95f
+            }
+            header.addView(titleTv, FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT
+            ).apply { gravity = Gravity.LEFT or Gravity.CENTER_VERTICAL; leftMargin = dp(72) })
+
+            // Channel count badge (top-bar pill)
+            val countBadge = LinearLayout(this@KotlinPlayerActivity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER
+                setPadding(dp(8), dp(3), dp(8), dp(3))
+                background = GradientDrawable().apply {
+                    setColor(Color.parseColor("#26FFFFFF"))
+                    cornerRadius = dp(8).toFloat()
+                    setStroke(dp(1), Color.parseColor("#33FFFFFF"))
+                }
+            }
+            val countBadgeTv = TextView(this@KotlinPlayerActivity).apply {
+                text = "${liveChannels?.length() ?: 0}"
+                setTextColor(Color.parseColor("#E5FFFFFF"))
+                textSize = 11f
+                typeface = android.graphics.Typeface.DEFAULT_BOLD
+            }
+            countBadge.addView(countBadgeTv, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ))
+            header.addView(countBadge, FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT
+            ).apply { gravity = Gravity.LEFT or Gravity.CENTER_VERTICAL; leftMargin = dp(72 + 110) })
+
+            // Close button (glass circle)
+            val closeBtn = FrameLayout(this@KotlinPlayerActivity).apply {
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.OVAL
+                    setColor(Color.parseColor("#26FFFFFF"))
+                    setStroke(dp(1), Color.parseColor("#33FFFFFF"))
+                }
+                val xIcon = ImageView(this@KotlinPlayerActivity).apply {
+                    setImageResource(R.drawable.ic_hero_xmark)
+                    setColorFilter(Color.WHITE)
+                    setPadding(dp(8), dp(8), dp(8), dp(8))
+                }
+                addView(xIcon, FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT
+                ))
+                setOnClickListener { dismiss() }
+                elevation = dp(4).toFloat()
+            }
+            header.addView(closeBtn, FrameLayout.LayoutParams(dp(34), dp(34)).apply {
+                gravity = Gravity.RIGHT or Gravity.CENTER_VERTICAL
+            })
+            card.addView(header, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ))
+
+            // Scrollable list of horizontal channel rows
+            val scroll = AccentScrollView(this@KotlinPlayerActivity).apply {
+                isVerticalScrollBarEnabled = true
+                scrollBarStyle = View.SCROLLBARS_OUTSIDE_OVERLAY
+                overScrollMode = View.OVER_SCROLL_NEVER
+                setPadding(dp(2), 0, dp(8), 0)
+            }
+            val list = LinearLayout(this@KotlinPlayerActivity).apply {
+                orientation = LinearLayout.VERTICAL
+            }
+
+            val total = liveChannels?.length() ?: 0
+            for (i in 0 until total) {
+                val ch = liveChannels!!.getJSONObject(i)
+                val title = ch.optString("title")
+                val poster = ch.optString("posterUrl", "")
+                val url = ch.optString("url", "")
+                val provider = ch.optString("provider", "")
+
+                val isSelected = (i == currentChannelIndex)
+
+                // Outer row container (so the selected accent bar can extend full-height)
+                val rowOuter = LinearLayout(this@KotlinPlayerActivity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(0, dp(4), 0, dp(4))
+                    background = if (isSelected) GradientDrawable().apply {
+                        setColor(Color.parseColor("#1A0047FF"))
+                        cornerRadius = dp(16).toFloat()
+                        setStroke(dp(1), Color.parseColor("#4D5580FF"))
+                    } else GradientDrawable().apply {
+                        setColor(Color.parseColor("#0FFFFFFF"))
+                        cornerRadius = dp(16).toFloat()
+                        setStroke(dp(1), Color.parseColor("#1AFFFFFF"))
+                    }
+                    setOnClickListener { onChannelPicked(i) }
+                }
+                addPremiumTouchAnimation(rowOuter)
+
+                // Accent left bar intentionally removed (per user request)
+
+                // Inner content container
+                val rowInner = LinearLayout(this@KotlinPlayerActivity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(dp(10), dp(10), dp(12), dp(10))
+                }
+
+                val logoBox = FrameLayout(this@KotlinPlayerActivity).apply {
+                    background = GradientDrawable().apply {
+                        setColor(Color.parseColor("#1FFFFFFF"))
+                        cornerRadius = dp(14).toFloat()
+                        setStroke(dp(1), Color.parseColor("#1AFFFFFF"))
+                    }
+                    val inner = LinearLayout(this@KotlinPlayerActivity).apply {
+                        gravity = Gravity.CENTER
+                    }
+                    val ph = ImageView(this@KotlinPlayerActivity).apply {
+                        setImageResource(R.drawable.ic_app_logo_placeholder)
+                        setPadding(dp(10), dp(10), dp(10), dp(10))
+                    }
+                    inner.addView(ph, LinearLayout.LayoutParams(dp(40), dp(40)))
+                    addView(inner, FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.MATCH_PARENT,
+                        FrameLayout.LayoutParams.MATCH_PARENT
+                    ))
+                }
+                rowInner.addView(logoBox, LinearLayout.LayoutParams(dp(64), dp(64)))
+
+                val titleTv = TextView(this@KotlinPlayerActivity).apply {
+                    text = title
+                    setTextColor(
+                        if (isSelected) Color.parseColor("#FFFFFF") else Color.parseColor("#F0FFFFFF")
+                    )
+                    textSize = 15f
+                    typeface = android.graphics.Typeface.DEFAULT_BOLD
+                    maxLines = 1
+                    ellipsize = android.text.TextUtils.TruncateAt.END
+                }
+                rowInner.addView(titleTv, LinearLayout.LayoutParams(
+                    0,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    1f
+                ).apply { leftMargin = dp(14) })
+
+                // Right-side indicator: playing arrow for selected, otherwise a tiny chevron
+                val rightIndicator = ImageView(this@KotlinPlayerActivity).apply {
+                    if (isSelected) {
+                        setImageResource(R.drawable.ic_hero_play)
+                        setColorFilter(Color.parseColor("#0047FF"))
+                        alpha = 1f
+                    } else {
+                        setImageResource(R.drawable.ic_hero_arrow_up_right)
+                        setColorFilter(Color.parseColor("#4DFFFFFF"))
+                        alpha = 0.6f
+                    }
+                }
+                rowInner.addView(rightIndicator, LinearLayout.LayoutParams(dp(18), dp(18)))
+
+                rowOuter.addView(rowInner, LinearLayout.LayoutParams(
+                    0,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    1f
+                ))
+
+                list.addView(rowOuter, LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { bottomMargin = dp(8) })
+
+                // Async load poster (if any)
+                if (poster.isNotEmpty()) {
+                    loadChannelLogoAsync(poster, logoBox)
+                }
+            }
+
+            scroll.addView(list, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ))
+            card.addView(scroll, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.MATCH_PARENT
+            ))
+
+            // Anchor full-height left
+            val cardParams = FrameLayout.LayoutParams(drawerWidthPx, FrameLayout.LayoutParams.MATCH_PARENT).apply {
+                gravity = Gravity.TOP or Gravity.LEFT
+            }
+            container.addView(card, cardParams)
+
+            // Slide-in animation from left with overshoot
+            card.translationX = (-drawerWidthPx).toFloat()
+            card.alpha = 0f
+            card.animate()
+                .translationX(0f)
+                .alpha(1f)
+                .setDuration(320)
+                .setInterpolator(android.view.animation.OvershootInterpolator(1.2f))
+                .start()
+        }
+
+        private fun loadChannelLogoAsync(url: String, logoBox: FrameLayout) {
+            // Check cache first
+            val cached = channelLogoCache.get(url)
+            if (cached != null) {
+                applyLogoBitmap(logoBox, cached)
+                return
+            }
+            CoroutineScope(Dispatchers.IO).launch {
+                val bmp = fetchLogoBitmap(url)
+                if (bmp != null) {
+                    channelLogoCache.put(url, bmp)
+                    withContext(Dispatchers.Main) { applyLogoBitmap(logoBox, bmp) }
+                }
+            }
+        }
+
+        private fun fetchLogoBitmap(urlStr: String): android.graphics.Bitmap? {
+            var url: java.net.URL? = null
+            try { url = java.net.URL(urlStr) } catch (_: Exception) { return null }
+            var current: java.net.URL? = url
+            val ua = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Mobile Safari/537.36"
+            repeat(5) {
+                val u = current ?: return null
+                val conn = u.openConnection()
+                conn.connectTimeout = 5000
+                conn.readTimeout = 5000
+                conn.setRequestProperty("User-Agent", ua)
+                conn.setRequestProperty("Accept", "image/*,*/*;q=0.8")
+                if (conn is java.net.HttpURLConnection) {
+                    conn.instanceFollowRedirects = true
+                    conn.requestMethod = "GET"
+                    conn.doInput = true
+                    val code = try { conn.responseCode } catch (_: Exception) { return null }
+                    if (code in 300..399) {
+                        val loc = conn.getHeaderField("Location")
+                        conn.disconnect()
+                        if (loc.isNullOrBlank()) return null
+                        current = try { java.net.URL(u, loc) } catch (_: Exception) { return null }
+                        return@repeat
+                    }
+                    if (code !in 200..299) {
+                        conn.disconnect()
+                        return null
+                    }
+                    return try {
+                        val input = conn.inputStream
+                        val bmp = android.graphics.BitmapFactory.decodeStream(input)
+                        input.close()
+                        conn.disconnect()
+                        bmp
+                    } catch (_: Exception) {
+                        conn.disconnect()
+                        null
+                    }
+                } else {
+                    return try {
+                        val input = conn.getInputStream()
+                        val bmp = android.graphics.BitmapFactory.decodeStream(input)
+                        input.close()
+                        bmp
+                    } catch (_: Exception) { null }
+                }
+            }
+            return null
+        }
+
+        private fun applyLogoBitmap(logoBox: FrameLayout, bmp: android.graphics.Bitmap) {
+            val iv = ImageView(this@KotlinPlayerActivity).apply {
+                setImageBitmap(bmp)
+                scaleType = ImageView.ScaleType.FIT_CENTER
+            }
+            logoBox.removeAllViews()
+            logoBox.addView(iv, FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            ))
+        }
+
+        private fun onChannelPicked(index: Int) {
+            val arr = liveChannels ?: return
+            if (index < 0 || index >= arr.length()) return
+            val ch = arr.getJSONObject(index)
+            val newTitle = ch.optString("title", liveChannelsTitle)
+            val newUrl = ch.optString("url", "")
+            val newProvider = ch.optString("provider", "")
+            val newPoster = ch.optString("posterUrl", "")
+            if (newUrl.isEmpty()) return
+
+            currentChannelIndex = index
+            updateTopBarTitle(newTitle)
+            updatePlayerPosterForChannel(newPoster)
+
+            try {
+                val parsed = org.json.JSONObject(newUrl)
+                val streamUrl = parsed.optString("url", "")
+                if (streamUrl.startsWith("http")) {
+                    val headersJson = parsed.optJSONObject("headers")?.toString() ?: "{}"
+                    checkAndPlay(streamUrl, headersJson, currentLiveSubtitleUrl)
+                    dismiss()
+                    return
+                }
+            } catch (_: Exception) { }
+
+            val host = CloudStreamPluginHost.instance
+            if (host != null) {
+                CoroutineScope(Dispatchers.IO).launch {
+                    try {
+                        val linksJson = host.loadLinksBlocking(newProvider, newUrl)
+                        val obj = org.json.JSONObject(linksJson)
+                        val sourcesArr = obj.optJSONArray("sources")
+                        if (sourcesArr != null && sourcesArr.length() > 0) {
+                            val first = sourcesArr.getJSONObject(0)
+                            val streamUrl = first.optString("url", "")
+                            val headersJson = first.optJSONObject("headers")?.toString() ?: "{}"
+                            if (streamUrl.isNotEmpty()) {
+                                withContext(Dispatchers.Main) {
+                                    checkAndPlay(streamUrl, headersJson, currentLiveSubtitleUrl)
+                                }
+                            }
+                        }
+                    } catch (_: Exception) { }
+                }
+            }
+            dismiss()
+        }
+
+        private fun updateTopBarTitle(newTitle: String) {
+            try {
+                val topBar = window.decorView.findViewById<View>(android.R.id.content)
+                fun findTextView(root: View?): TextView? {
+                    if (root == null) return null
+                    if (root is TextView && root.tag == "player_title") return root
+                    if (root is android.view.ViewGroup) {
+                        for (i in 0 until root.childCount) {
+                            val c = findTextView(root.getChildAt(i))
+                            if (c != null) return c
+                        }
+                    }
+                    return null
+                }
+                findTextView(topBar)?.text = newTitle
+            } catch (_: Exception) {}
+        }
+
+        fun show() {
+            showOverlay(container)
+        }
+
+        fun dismiss() {
+            if (isDismissing) return
+            isDismissing = true
+            dismissActiveOverlay()
+        }
+    }
+
+    // ScrollView with custom accent-tinted vertical scrollbar
+    private inner class AccentScrollView(context: android.content.Context) : android.widget.ScrollView(context) {
+        override fun getVerticalScrollbarThumbDrawable(): android.graphics.drawable.Drawable? {
+            val d = androidx.core.content.ContextCompat.getDrawable(context, R.drawable.channel_scrollbar_thumb)
+            if (d is android.graphics.drawable.GradientDrawable) {
+                d.setColor(android.graphics.Color.parseColor("#B30047FF"))
+            }
+            return d
+        }
+
+        override fun getVerticalScrollbarTrackDrawable(): android.graphics.drawable.Drawable? {
+            val d = androidx.core.content.ContextCompat.getDrawable(context, R.drawable.channel_scrollbar_thumb)
+            if (d is android.graphics.drawable.GradientDrawable) {
+                d.setColor(android.graphics.Color.parseColor("#260047FF"))
+            }
+            return d
         }
     }
 

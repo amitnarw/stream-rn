@@ -12,6 +12,7 @@ import type { MediaItem } from "../types/plugin";
 import type { CardLayout } from "../context/TransitionContext";
 import { useTransition } from "../context/TransitionContext";
 import { theme } from "../theme";
+import AppIconPlaceholder from "./AppIconPlaceholder";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const S_CARD_W = (SCREEN_WIDTH - 40 - 16) / 3;
@@ -114,7 +115,7 @@ export const SmallCard = React.memo(function SmallCard({
             />
           ) : (
             <View style={[styles.smallCardImg, styles.cardFallback]}>
-              <Text style={styles.placeholderLogo}>Z</Text>
+              <AppIconPlaceholder size={S_CARD_W * 0.4} />
             </View>
           )}
         </Animated.View>
@@ -134,13 +135,6 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.placeholder,
   },
   cardFallback: { backgroundColor: theme.colors.placeholder, alignItems: 'center', justifyContent: 'center' },
-  placeholderLogo: {
-    color: '#5580FF',
-    fontSize: 24,
-    fontWeight: '900',
-    letterSpacing: -1,
-    opacity: 0.7,
-  },
   cardTitle: {
     color: "rgba(255, 255, 255, 0.7)",
     fontSize: 11,

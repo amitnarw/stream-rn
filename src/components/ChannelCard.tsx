@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Pressable,
   Image,
@@ -7,10 +7,12 @@ import {
   StyleSheet,
   Dimensions,
   Animated,
+  Easing,
 } from 'react-native';
 import { Heart } from 'lucide-react-native';
 import type { MediaItem } from '../types/plugin';
 import { theme } from '../theme';
+import AppIconPlaceholder from './AppIconPlaceholder';
 
 const { width } = Dimensions.get('window');
 const CARD_WIDTH = (width - 48) / 3;
@@ -29,6 +31,9 @@ const ChannelCard = React.memo(function ChannelCard({ item, onPress, isSaved, on
   const cardWidth = propWidth || CARD_WIDTH;
   const cardHeight = cardWidth; // 1:1 aspect ratio!
   const [imageError, setImageError] = useState(false);
+  const [imageLoaded, setImageLoaded] = useState(false);
+  const shimmerAnim = useRef(new Animated.Value(0)).current;
+  const imageOpacity = useRef(new Animated.Value(0)).current;
 
   const handlePressIn = () => {
     Animated.spring(scale, {
@@ -48,6 +53,39 @@ const ChannelCard = React.memo(function ChannelCard({ item, onPress, isSaved, on
     }).start();
   };
 
+  useEffect(() => {
+    // Reset state when item changes
+    setImageError(false);
+    setImageLoaded(false);
+    imageOpacity.setValue(0);
+  }, [item.url]);
+
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.timing(shimmerAnim, {
+        toValue: 1,
+        duration: 1200,
+        easing: Easing.linear,
+        useNativeDriver: true,
+      }),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [shimmerAnim]);
+
+  const showImage = !!item.posterUrl && !imageError;
+  const showSkeleton = showImage && !imageLoaded;
+
+  const shimmerTranslate = shimmerAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [-cardWidth, cardWidth],
+  });
+
+  const logoBoxStyle = {
+    width: cardWidth - 24,
+    height: cardHeight - 24,
+  };
+
   return (
     <Pressable
       onPress={() => onPress(item)}
@@ -56,18 +94,40 @@ const ChannelCard = React.memo(function ChannelCard({ item, onPress, isSaved, on
       style={[styles.card, { width: cardWidth }, style]}
     >
       <Animated.View style={[styles.posterContainer, { width: cardWidth, height: cardHeight, transform: [{ scale }] }]}>
-        {item.posterUrl && !imageError ? (
-          <Image
-            source={{ uri: item.posterUrl }}
-            style={[styles.logo, { width: cardWidth - 24, height: cardHeight - 24 }]}
+        {showImage ? (
+          <Animated.Image
+            source={{ uri: item.posterUrl ?? undefined }}
+            style={[styles.logo, { ...logoBoxStyle, opacity: imageOpacity }]}
             resizeMode="contain"
+            onLoad={() => {
+              setImageLoaded(true);
+              Animated.timing(imageOpacity, {
+                toValue: 1,
+                duration: 320,
+                useNativeDriver: true,
+              }).start();
+            }}
             onError={() => setImageError(true)}
           />
         ) : (
-          <View style={[styles.logo, styles.placeholder, { width: cardWidth - 24, height: cardHeight - 24 }]}>
-            <Text style={styles.placeholderLogo}>Z</Text>
+          <View style={[styles.logo, styles.placeholder, logoBoxStyle]}>
+            <AppIconPlaceholder size={Math.min(cardWidth, cardHeight) * 0.4} />
           </View>
         )}
+
+        {showSkeleton ? (
+          <View style={[styles.skeletonBase, logoBoxStyle]}>
+            <Animated.View
+              style={[
+                styles.skeletonShimmer,
+                {
+                  width: cardWidth,
+                  transform: [{ translateX: shimmerTranslate }],
+                },
+              ]}
+            />
+          </View>
+        ) : null}
 
         {/* Favorite/Save Toggle Button */}
         <Pressable
@@ -118,12 +178,16 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: '#121214',
   },
-  placeholderLogo: {
-    color: '#5580FF',
-    fontSize: 22,
-    fontWeight: '900',
-    letterSpacing: -1,
-    opacity: 0.7,
+  skeletonBase: {
+    position: 'absolute',
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    overflow: 'hidden',
+  },
+  skeletonShimmer: {
+    height: '100%',
+    backgroundColor: 'rgba(255, 255, 255, 0.10)',
+    opacity: 0.55,
   },
   heartBtn: {
     position: 'absolute',

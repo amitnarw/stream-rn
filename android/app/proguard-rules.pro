@@ -13,7 +13,7 @@
 
 # Add any project specific keep options here:
 
-# CloudStream library (v4.7.0) — keep all classes loaded at runtime
+# CloudStream library (v4.7.0) ,  keep all classes loaded at runtime
 -keep class com.lagradost.cloudstream3.** { *; }
 -keep class com.lagradost.api.** { *; }
 -dontwarn com.lagradost.cloudstream3.**

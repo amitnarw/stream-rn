@@ -1,6 +1,6 @@
 // @ts-nocheck
 /**
- * MeshGradient — Premium Sphere Orb (React Native Skia)
+ * MeshGradient ,  Premium Sphere Orb (React Native Skia)
  * Exact 1:1 port of Exaldia PremiumOrb visual without eyes/face.
  * Colors: blue theme (#0047FF → #5580FF) replacing Exaldia orange.
  *
@@ -65,7 +65,7 @@ export const MeshGradient: React.FC<IAnimatedMeshGradient> = memo(({
 
   const blobTransform = useDerivedValue(() => [{ rotate: rotation.value }]);
 
-  // No inset — body fills the full circle (inset-2 in web caused a darker ring artifact in Skia)
+  // No inset ,  body fills the full circle (inset-2 in web caused a darker ring artifact in Skia)
   const inset = 0;
   const bodySize = size;
   const bodyR    = size / 2;

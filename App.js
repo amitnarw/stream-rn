@@ -1,15 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { NavigationContainer } from '@react-navigation/native';
+import { NavigationContainer, useNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { View, Text, StyleSheet, Dimensions, Animated, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, Dimensions, Animated, TouchableOpacity, BackHandler, Modal, Pressable } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import HomeScreen from './src/screens/HomeScreen';
 import SearchScreen from './src/screens/SearchScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
 import FavoritesScreen from './src/screens/FavoritesScreen';
 import SeeAllScreen from './src/screens/SeeAllScreen';
+import LiveTVScreen from './src/screens/LiveTVScreen';
 import { TransitionProvider, useTransition } from './src/context/TransitionContext';
 import { getFavorites, subscribeFavorites } from './src/api/favorites';
 import DetailScreen from './src/screens/DetailScreen';
@@ -18,7 +19,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import OnboardingScreen from './src/screens/OnboardingScreen';
 import * as Font from 'expo-font';
 import { BlurView } from 'expo-blur';
-import { Home, Search, Heart, Settings } from 'lucide-react-native';
+import { Home, Search, Heart, Settings, LogOut } from 'lucide-react-native';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -210,9 +211,124 @@ function TabNavigator({ navigation }) {
   );
 }
 
+function ExitConfirmModal({ visible, onCancel, onConfirm }) {
+  const insets = useSafeAreaInsets();
+  return (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      onRequestClose={onCancel}
+      statusBarTranslucent
+    >
+      <Pressable style={exitStyles.backdrop} onPress={onCancel}>
+        <Pressable style={[exitStyles.card, { marginBottom: insets.bottom }]} onPress={(e) => e.stopPropagation?.()}>
+          <View style={exitStyles.iconWrap}>
+            <LogOut size={22} color={theme.colors.rose} />
+          </View>
+          <Text style={exitStyles.title}>Exit Zuno?</Text>
+          <Text style={exitStyles.subtitle}>Are you sure you want to close the app?</Text>
+          <View style={exitStyles.btnRow}>
+            <TouchableOpacity
+              style={[exitStyles.btn, exitStyles.btnCancel]}
+              onPress={onCancel}
+              activeOpacity={0.8}
+            >
+              <Text style={exitStyles.btnCancelText}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[exitStyles.btn, exitStyles.btnConfirm]}
+              onPress={onConfirm}
+              activeOpacity={0.8}
+            >
+              <Text style={exitStyles.btnConfirmText}>Exit</Text>
+            </TouchableOpacity>
+          </View>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
+const exitStyles = StyleSheet.create({
+  backdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 28,
+  },
+  card: {
+    width: '100%',
+    maxWidth: 360,
+    backgroundColor: '#161618',
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    padding: 24,
+    alignItems: 'center',
+  },
+  iconWrap: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: 'rgba(255, 74, 125, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 74, 125, 0.25)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
+  title: {
+    color: '#ffffff',
+    fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 6,
+  },
+  subtitle: {
+    color: '#A0A0A5',
+    fontSize: 13,
+    textAlign: 'center',
+    marginBottom: 22,
+  },
+  btnRow: {
+    flexDirection: 'row',
+    gap: 10,
+    width: '100%',
+  },
+  btn: {
+    flex: 1,
+    height: 46,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  btnCancel: {
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  btnCancelText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  btnConfirm: {
+    backgroundColor: theme.colors.rose,
+  },
+  btnConfirmText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+});
+
 export default function App() {
   const [isFirstTime, setIsFirstTime] = React.useState(null);
   const [fontsLoaded, setFontsLoaded] = React.useState(false);
+  const [showExitModal, setShowExitModal] = React.useState(false);
+  const navigationRef = useNavigationContainerRef();
+  const canGoBackRef = useRef(false);
 
   React.useEffect(() => {
     async function checkFirstTimeAndLoadFonts() {
@@ -247,6 +363,23 @@ export default function App() {
     checkFirstTimeAndLoadFonts();
   }, []);
 
+  // Global hardware back handler: if we can navigate back, do so; otherwise show exit confirm.
+  React.useEffect(() => {
+    const onBack = () => {
+      const canGoBack =
+        navigationRef?.isReady?.() && navigationRef.canGoBack();
+      canGoBackRef.current = !!canGoBack;
+      if (canGoBack) {
+        navigationRef.goBack();
+        return true;
+      }
+      setShowExitModal(true);
+      return true;
+    };
+    const sub = BackHandler.addEventListener('hardwareBackPress', onBack);
+    return () => sub.remove();
+  }, [navigationRef]);
+
   const handleFinishOnboarding = async () => {
     try {
       await AsyncStorage.setItem('@zuno_is_first_time', 'false');
@@ -254,6 +387,11 @@ export default function App() {
       console.warn(e);
     }
     setIsFirstTime(false);
+  };
+
+  const handleConfirmExit = () => {
+    setShowExitModal(false);
+    BackHandler.exitApp();
   };
 
   if (isFirstTime === null || !fontsLoaded) {
@@ -267,7 +405,7 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <TransitionProvider>
-        <NavigationContainer>
+        <NavigationContainer ref={navigationRef}>
           <StatusBar style="light" translucent backgroundColor="transparent" />
           <RootStack.Navigator screenOptions={{ headerShown: false, contentStyle: { backgroundColor: theme.colors.background } }}>
             {isFirstTime ? (
@@ -278,11 +416,17 @@ export default function App() {
               <>
                 <RootStack.Screen name="Main" component={TabNavigator} />
                 <RootStack.Screen name="SeeAll" component={SeeAllScreen} />
+                <RootStack.Screen name="LiveTV" component={LiveTVScreen} />
               </>
             )}
           </RootStack.Navigator>
         </NavigationContainer>
         <DetailScreen />
+        <ExitConfirmModal
+          visible={showExitModal}
+          onCancel={() => setShowExitModal(false)}
+          onConfirm={handleConfirmExit}
+        />
       </TransitionProvider>
     </SafeAreaProvider>
   );

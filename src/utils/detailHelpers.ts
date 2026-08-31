@@ -1,7 +1,7 @@
 /**
  * Maps a wide range of language names / abbreviations to short display codes.
  * Torrentio / Stremio expose audio languages only inside the release title
- * string — there is no structured API field — so we parse the filename.
+ * string ,  there is no structured API field ,  so we parse the filename.
  */
 export const LANG_CODES: Record<string, string> = {
   en: "EN", eng: "EN", english: "EN",
@@ -50,10 +50,10 @@ export function normalizeLangCode(lang: string): string {
  * Parse a torrent filename / title for embedded audio-language tags.
  * Handles slash/dot/space/plus separated codes (EN/ITA/FR/ES, Eng.Fre.Ger,
  * Hindi English, Ita Eng), full language names, and Dual/Multi labels.
- * Returns "—" when no language info can be detected (discovered at playback).
+ * Returns ", " when no language info can be detected (discovered at playback).
  */
 export function parseAudioLanguages(fileName: string): string {
-  if (!fileName) return "—";
+  if (!fileName) return ", ";
   const lower = fileName.toLowerCase();
   const found: string[] = [];
 
@@ -71,13 +71,13 @@ export function parseAudioLanguages(fileName: string): string {
     if (!found.includes("MULTI")) found.push("MULTI");
   }
 
-  return found.length > 0 ? found.join(", ") : "—";
+  return found.length > 0 ? found.join(", ") : ", ";
 }
 
 export function extractTorrentSize(qualityStr: string): string {
-  if (!qualityStr) return "—";
+  if (!qualityStr) return ", ";
   const match = qualityStr.match(/(?:💾|size:?)\s*([\d.]+\s*(?:GB|MB|KB|B))/i) || qualityStr.match(/\b([\d.]+\s*(?:GB|MB|KB|B))\b/i);
-  return match ? match[1] : "—";
+  return match ? match[1] : ", ";
 }
 
 export function cleanQualityTag(qualityStr: string): string {
@@ -86,7 +86,7 @@ export function cleanQualityTag(qualityStr: string): string {
 }
 
 export function extractResolution(qualityStr: string): string {
-  if (!qualityStr) return "—";
+  if (!qualityStr) return ", ";
   const match = qualityStr.match(/\b(2160p|1080p|720p|480p|360p|4k|8k|hd|sd|cam|hdtv)\b/i);
   return match ? match[1].toUpperCase() : "HD";
 }

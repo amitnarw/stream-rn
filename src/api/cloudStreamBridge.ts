@@ -231,6 +231,216 @@ function parseJson<T>(json: string): T {
   return JSON.parse(json);
 }
 
+interface M3uEntry {
+  name: string;
+  logo: string | null;
+  group: string;
+  url: string;
+  headers: Record<string, string>;
+}
+
+function parseM3u(text: string): M3uEntry[] {
+  const entries: M3uEntry[] = [];
+  const lines = text.split(/\r?\n/);
+  let pending: { name: string; logo: string | null; group: string; headers: Record<string, string> } | null = null;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+
+    if (line.startsWith('#EXTM3U')) continue;
+
+    if (line.startsWith('#EXTVLCOPT')) {
+      if (!pending) continue;
+      const opt = line.substring('#EXTVLCOPT:'.length).trim();
+      const eqIdx = opt.indexOf('=');
+      if (eqIdx === -1) continue;
+      const key = opt.substring(0, eqIdx).trim();
+      const val = opt.substring(eqIdx + 1).trim();
+      pending.headers[key] = val;
+      continue;
+    }
+
+    if (line.startsWith('#EXTINF')) {
+      const nameMatch = line.match(/,(.*)$/);
+      const name = nameMatch ? nameMatch[1].trim() : 'Unknown Channel';
+      const tvgLogo = line.match(/tvg-logo="([^"]*)"/);
+      const group = line.match(/group-title="([^"]*)"/);
+      pending = {
+        name,
+        logo: tvgLogo ? tvgLogo[1] : null,
+        group: group ? group[1] : 'General',
+        headers: {},
+      };
+      continue;
+    }
+
+    if (line.startsWith('#')) continue;
+
+    if (pending) {
+      pending.headers['User-Agent'] = pending.headers['http-user-agent'] ?? pending.headers['User-Agent'] ?? '';
+      entries.push({ ...pending, url: line });
+      pending = null;
+    }
+  }
+
+  return entries;
+}
+
+function parseM3uToSections(text: string, providerName: string): HomeSection[] {
+  const entries = parseM3u(text);
+  const sectionsMap = new Map<string, any[]>();
+  for (const entry of entries) {
+    if (!entry.url.startsWith('http')) continue;
+    const item = {
+      provider: providerName,
+      url: JSON.stringify({ url: entry.url, headers: entry.headers, title: entry.name }),
+      title: entry.name,
+      posterUrl: entry.logo,
+      type: 'live',
+    };
+    if (!sectionsMap.has(entry.group)) sectionsMap.set(entry.group, []);
+    sectionsMap.get(entry.group)!.push(item);
+  }
+
+  const sections: HomeSection[] = [];
+  for (const [groupName, items] of sectionsMap.entries()) {
+    if (items.length === 0) continue;
+    sections.push({ name: groupName, items });
+  }
+
+  sections.sort((a, b) => a.name.localeCompare(b.name));
+  return sections;
+}
+
+export const M3U_SOURCE_MAP: Record<string, string> = {
+  // Indian DTH / cable (primary)
+  'DishTV d2h': 'https://raw.githubusercontent.com/amazeyourself/m3u/main/dishd2h.m3u',
+  'Jio TV': 'https://raw.githubusercontent.com/amazeyourself/m3u/main/jtv.m3u',
+  'Tango TV': 'https://raw.githubusercontent.com/amazeyourself/m3u/main/tangotv.m3u',
+  'SmartPlay': 'https://raw.githubusercontent.com/amazeyourself/m3u/main/smartplay.m3u',
+  'Pishow': 'https://raw.githubusercontent.com/amazeyourself/m3u/main/pishow.m3u',
+  'Riptv': 'https://raw.githubusercontent.com/amazeyourself/m3u/main/riptv.m3u',
+  'LiveBox': 'https://raw.githubusercontent.com/amazeyourself/m3u/main/livebox.m3u',
+  'StreamBridge': 'https://raw.githubusercontent.com/amazeyourself/m3u/main/streambridge.m3u',
+  'Akash Go': 'https://raw.githubusercontent.com/amazeyourself/m3u/main/akashgo.m3u',
+  'Amigo FX': 'https://raw.githubusercontent.com/amazeyourself/m3u/main/amigofx.m3u',
+  'Ashoka Digital': 'https://raw.githubusercontent.com/amazeyourself/m3u/main/ashokadigital.m3u',
+  'Max Digital TV': 'https://raw.githubusercontent.com/amazeyourself/m3u/main/maxdigitaltv.m3u',
+  'Neo TV': 'https://raw.githubusercontent.com/amazeyourself/m3u/main/neotv.m3u',
+  'Nellai IPTV': 'https://raw.githubusercontent.com/amazeyourself/m3u/main/nellaiiptv.m3u',
+  'Madurai IPTV': 'https://raw.githubusercontent.com/amazeyourself/m3u/main/maduraiiptv.m3u',
+  'WebChnl': 'https://raw.githubusercontent.com/amazeyourself/m3u/main/webchnl.m3u',
+  'YuppTV Fast': 'https://raw.githubusercontent.com/amazeyourself/m3u/main/yupptvfast.m3u',
+  'EK TV': 'https://raw.githubusercontent.com/amazeyourself/m3u/main/ektv.m3u',
+  'Elekta Media': 'https://raw.githubusercontent.com/amazeyourself/m3u/main/elektamedia.m3u',
+  'Roarzone': 'https://raw.githubusercontent.com/amazeyourself/m3u/main/roarzone.m3u',
+  'Jayam OTT': 'https://raw.githubusercontent.com/amazeyourself/m3u/main/jayamott.m3u',
+  'Joshua OTT': 'https://raw.githubusercontent.com/amazeyourself/m3u/main/joshuaott.m3u',
+  // International / curated
+  'IPTV Org India': 'https://iptv-org.github.io/iptv/countries/in.m3u',
+  'DistroTV': 'https://raw.githubusercontent.com/amazeyourself/m3u/main/distrotv.m3u',
+};
+
+// Ordered provider list for the dedicated LiveTV screen
+export const M3U_PROVIDER_ORDER: string[] = [
+  'DishTV d2h',
+  'Jio TV',
+  'Tango TV',
+  'SmartPlay',
+  'Pishow',
+  'Riptv',
+  'LiveBox',
+  'StreamBridge',
+  'Akash Go',
+  'Amigo FX',
+  'Ashoka Digital',
+  'Max Digital TV',
+  'Neo TV',
+  'Nellai IPTV',
+  'Madurai IPTV',
+  'WebChnl',
+  'YuppTV Fast',
+  'EK TV',
+  'Elekta Media',
+  'Roarzone',
+  'Jayam OTT',
+  'Joshua OTT',
+  'IPTV Org India',
+  'DistroTV',
+];
+
+// CloudStream .cs3 plugins that act as live TV providers
+export const CS_LIVE_TV_PROVIDERS: string[] = [
+  'IPTV Player',
+  'PublicSportsIPTV',
+  'Sports IPTV',
+  'Pirate IPTV',
+  'Japan IPTV',
+];
+
+const DEFAULT_IPTV_PROVIDER_KEY = '@sozo_default_iptv_provider';
+
+// Returns the union of all currently available IPTV providers, grouped.
+export async function getAvailableIPTVProviders(): Promise<{
+  m3u: PluginProvider[];
+  cs: PluginProvider[];
+}> {
+  const m3u: PluginProvider[] = M3U_PROVIDER_ORDER.map((name) => ({
+    id: name,
+    name,
+    url: M3U_SOURCE_MAP[name] || '',
+    hasMainPage: true,
+    hasSearch: false,
+  }));
+
+  let csList: PluginProvider[] = [];
+  try {
+    const all = await getProviders();
+    const allowed = new Set(CS_LIVE_TV_PROVIDERS.map((n) => n.toLowerCase()));
+    csList = all.filter((p) => allowed.has(p.name.toLowerCase()));
+  } catch (_) {
+    // fall back to static list
+    csList = CS_LIVE_TV_PROVIDERS.map((name) => ({
+      id: name,
+      name,
+      url: '',
+      hasMainPage: true,
+      hasSearch: false,
+    }));
+  }
+
+  // If the native plugin list failed, also fall back to static list
+  if (csList.length === 0) {
+    csList = CS_LIVE_TV_PROVIDERS.map((name) => ({
+      id: name,
+      name,
+      url: '',
+      hasMainPage: true,
+      hasSearch: false,
+    }));
+  }
+
+  return { m3u, cs: csList };
+}
+
+export async function getDefaultIPTVProvider(): Promise<string | null> {
+  try {
+    const value = await AsyncStorage.getItem(DEFAULT_IPTV_PROVIDER_KEY);
+    return value && value.trim() ? value : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+export async function setDefaultIPTVProvider(name: string): Promise<void> {
+  try {
+    await AsyncStorage.setItem(DEFAULT_IPTV_PROVIDER_KEY, name);
+  } catch (_) {
+    /* ignore */
+  }
+}
+
 function mapItem(item: any): MediaItem {
   return {
     provider: item.provider ?? '',
@@ -569,6 +779,252 @@ async function fetchPunjabiSeriesHelper(): Promise<any[]> {
   }
 }
 
+export async function fetchM3uSections(providerName: string, force: boolean = false): Promise<HomeSection[]> {
+  const cacheKey = `@zuno_cache_v13_cinemeta_cat_LiveTV_prov_${providerName}_page_1`;
+  if (!force) {
+    const settings = await getSettings();
+    const cachedData = await getCache<HomeSection[]>(cacheKey, settings.mainPageTtl);
+    if (cachedData) {
+      return cachedData;
+    }
+  }
+
+  const m3uUrl = M3U_SOURCE_MAP[providerName];
+  if (!m3uUrl) {
+    return [];
+  }
+  try {
+    await ensureOnline();
+  } catch (e) {
+    const expired = await getCache<HomeSection[]>(cacheKey, Infinity);
+    if (expired && expired.length > 0) return expired;
+    throw e;
+  }
+  try {
+    const resp = await fetch(m3uUrl);
+    const text = await resp.text();
+    const sections = parseM3uToSections(text, providerName);
+    await setCache(cacheKey, sections);
+    return sections;
+  } catch (err) {
+    console.warn(`Failed to fetch ${providerName} M3U:`, err);
+    return [];
+  }
+}
+
+export interface QualityOption {
+  quality: string;
+  url: string;
+  bandwidth?: number;
+  width?: number;
+  height?: number;
+}
+
+export function guessQualityFromUrl(url: string): QualityOption[] {
+  const lc = url.toLowerCase();
+  const label = (() => {
+    if (/_4k_|4k\.|_4k\/|\/4k\//.test(lc) || /res=4k|quality=4k|2160p?/.test(lc)) return '4K';
+    if (/_1080|_fhd|1080p?/.test(lc)) return '1080p';
+    if (/_720|_hd|720p?/.test(lc)) return '720p';
+    if (/_480|480p?/.test(lc)) return '480p';
+    if (/_360|360p?/.test(lc)) return '360p';
+    if (/_240|240p?/.test(lc)) return '240p';
+    if (/_hd[^a-z]/.test(lc)) return 'HD';
+    if (/_sd[^a-z]/.test(lc)) return 'SD';
+    return '';
+  })();
+  return label ? [{ quality: label, url }] : [];
+}
+
+export async function fetchM3u8Variants(url: string, headers: Record<string, string> = {}): Promise<QualityOption[]> {
+  try {
+    const resp = await fetch(url, { headers });
+    const text = await resp.text();
+    if (!text.includes('#EXT-X-STREAM-INF')) return [];
+    const lines = text.split(/\r?\n/);
+    const variants: QualityOption[] = [];
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line.startsWith('#EXT-X-STREAM-INF')) continue;
+      const resMatch = line.match(/RESOLUTION=(\d+)x(\d+)/);
+      const bwMatch = line.match(/BANDWIDTH=(\d+)/);
+      let streamUrl = '';
+      for (let j = i + 1; j < lines.length; j++) {
+        const next = lines[j].trim();
+        if (!next) continue;
+        if (next.startsWith('#')) break;
+        streamUrl = next;
+        break;
+      }
+      if (!streamUrl) continue;
+      const height = resMatch ? Number(resMatch[2]) : 0;
+      let quality = 'Auto';
+      if (height >= 2160) quality = '4K';
+      else if (height >= 1080) quality = '1080p';
+      else if (height >= 720) quality = '720p';
+      else if (height >= 480) quality = '480p';
+      else if (height >= 360) quality = '360p';
+      else if (height > 0) quality = `${height}p`;
+      variants.push({
+        quality,
+        url: new URL(streamUrl, url).toString(),
+        bandwidth: bwMatch ? Number(bwMatch[1]) : undefined,
+        width: resMatch ? Number(resMatch[1]) : undefined,
+        height: resMatch ? Number(resMatch[2]) : undefined,
+      });
+    }
+    return variants;
+  } catch {
+    return [];
+  }
+}
+
+export async function getStreamQualityOptions(
+  url: string,
+  headers: Record<string, string> = {}
+): Promise<QualityOption[]> {
+  // Fast path: URL hints
+  const hinted = guessQualityFromUrl(url);
+  if (hinted.length > 0) return hinted;
+  // Async fallback: parse master M3U8
+  if (/\.m3u8(\?|$)/i.test(url)) {
+    const variants = await fetchM3u8Variants(url, headers);
+    if (variants.length > 0) return variants;
+  }
+  return [{ quality: 'HD', url }];
+}
+
+export async function loadNativeLiveTV(
+  providerName: string,
+  page: number = 1
+): Promise<HomeSection[]> {
+  const json = await CloudStreamModule.getMainPage(providerName, page);
+  const obj = parseJson<{ provider: string; sections: any[] }>(json);
+  return (obj.sections ?? []).map((sec: any) => ({
+    name: sec.name,
+    items: (sec.items ?? []).map((item: any) => ({
+      provider: providerName,
+      url: item.url ?? '',
+      title: item.title ?? '',
+      posterUrl: item.posterUrl ?? item.poster ?? null,
+      type: 'live',
+    })),
+  }));
+}
+
+// ── In-memory LiveTV cache (instant provider switching) ────────────────────────
+export interface LiveChannel {
+  item: MediaItem;
+  category: string;
+}
+
+const liveTvMemoryCache = new Map<
+  string,
+  { timestamp: number; channels: LiveChannel[]; categories: string[] }
+>();
+const LIVE_TV_MEMORY_TTL = 5 * 60 * 1000; // 5 minutes
+
+function flattenSectionsToChannels(
+  sections: HomeSection[]
+): { channels: LiveChannel[]; categories: string[] } {
+  const seen = new Set<string>();
+  const channels: LiveChannel[] = [];
+  const categorySet = new Set<string>();
+  for (const sec of sections) {
+    if (!sec.items) continue;
+    if (sec.name) categorySet.add(sec.name);
+    for (const item of sec.items) {
+      if (seen.has(item.url)) continue;
+      seen.add(item.url);
+      channels.push({ item, category: sec.name || 'General' });
+    }
+  }
+  return { channels, categories: Array.from(categorySet).sort() };
+}
+
+export function clearLiveTVMemoryCache(): void {
+  liveTvMemoryCache.clear();
+}
+
+/**
+ * Returns the full LiveTV channel list for a provider.
+ * Uses an in-memory cache for instant switching, falls back to AsyncStorage,
+ * and finally fetches from network when needed.
+ */
+export async function getLiveTVChannels(
+  providerName: string,
+  force: boolean = false
+): Promise<{ channels: LiveChannel[]; categories: string[] }> {
+  const cacheKey = `@zuno_cache_v13_cinemeta_cat_LiveTV_prov_${providerName}_page_1`;
+  const now = Date.now();
+
+  // 1) In-memory hit
+  if (!force) {
+    const mem = liveTvMemoryCache.get(providerName);
+    if (mem && now - mem.timestamp < LIVE_TV_MEMORY_TTL) {
+      return { channels: mem.channels, categories: mem.categories };
+    }
+  }
+
+  // 2) AsyncStorage hit (try fresh first, then expired as fallback)
+  let sections: HomeSection[] | null = null;
+  try {
+    const settings = await getSettings();
+    sections = await getCache<HomeSection[]>(cacheKey, settings.mainPageTtl);
+  } catch (_) {}
+  if (!sections) {
+    sections = await getCache<HomeSection[]>(cacheKey, Infinity);
+  }
+
+  // 3) Network fetch
+  if (!sections || sections.length === 0) {
+    const m3uUrl = M3U_SOURCE_MAP[providerName];
+    try {
+      if (m3uUrl) {
+        const resp = await fetch(m3uUrl);
+        const text = await resp.text();
+        sections = parseM3uToSections(text, providerName);
+      } else {
+        sections = await loadNativeLiveTV(providerName, 1);
+      }
+      // Persist for next cold start (background)
+      if (sections && sections.length > 0) {
+        setCache(cacheKey, sections).catch(() => {});
+      }
+    } catch (e) {
+      // Last resort: return whatever AsyncStorage had, even empty
+      sections = sections || [];
+    }
+  }
+
+  const { channels, categories } = flattenSectionsToChannels(sections);
+
+  // Save in memory for next switch
+  liveTvMemoryCache.set(providerName, {
+    timestamp: now,
+    channels,
+    categories,
+  });
+
+  return { channels, categories };
+}
+
+export async function peekMainPageCache(
+  category: string,
+  providerName: string = '',
+  page: number = 1
+): Promise<HomeSection[] | null> {
+  const cacheKey = category === 'LiveTV'
+    ? `@zuno_cache_v13_cinemeta_cat_${category}_prov_${providerName || 'Jio TV'}_page_${page}`
+    : `@zuno_cache_v13_cinemeta_cat_${category}_page_${page}`;
+  try {
+    const settings = await getSettings();
+    return await getCache<HomeSection[]>(cacheKey, settings.mainPageTtl);
+  } catch {
+    return null;
+  }
+}
+
 export async function getMainPage(
   providerName: string,
   page: number = 1,
@@ -576,7 +1032,7 @@ export async function getMainPage(
   category: string = 'Trending'
 ): Promise<HomeSection[]> {
   const cacheKey = category === 'LiveTV'
-    ? `@zuno_cache_v13_cinemeta_cat_${category}_prov_${providerName || 'CloudPlay'}_page_${page}`
+    ? `@zuno_cache_v13_cinemeta_cat_${category}_prov_${providerName || 'Jio TV'}_page_${page}`
     : `@zuno_cache_v13_cinemeta_cat_${category}_page_${page}`;
 
   if (!forceRefresh) {
@@ -602,7 +1058,7 @@ export async function getMainPage(
       try {
         const resp = await fetch('https://raw.githubusercontent.com/yowmamasita/usa-tv-next/main/catalog/tv/all.json');
         const catalog = await resp.json();
-        
+
         // Group by genre
         const sectionsMap = new Map<string, any[]>();
         (catalog.metas ?? []).forEach((meta: any) => {
@@ -618,7 +1074,7 @@ export async function getMainPage(
             type: 'live'
           });
         });
-        
+
         const resultSections = Array.from(sectionsMap.entries()).map(([name, items]) => ({
           name,
           items
@@ -632,21 +1088,23 @@ export async function getMainPage(
       }
     }
 
+    const m3uUrl = M3U_SOURCE_MAP[providerName];
+    if (m3uUrl) {
+      try {
+        const resp = await fetch(m3uUrl);
+        const text = await resp.text();
+        const sections = parseM3uToSections(text, providerName);
+        await setCache(cacheKey, sections);
+        return sections;
+      } catch (err) {
+        console.warn(`Failed to fetch ${providerName} M3U:`, err);
+        return [];
+      }
+    }
+
     try {
-      const targetProvider = providerName || 'CloudPlay';
-      const json = await CloudStreamModule.getMainPage(targetProvider, page);
-      const obj = parseJson<{ provider: string; sections: any[] }>(json);
-      
-      const resultSections = (obj.sections ?? []).map((sec: any) => ({
-        name: sec.name,
-        items: (sec.items ?? []).map((item: any) => ({
-          provider: targetProvider,
-          url: item.url ?? '',
-          title: item.title ?? '',
-          posterUrl: item.posterUrl ?? item.poster ?? null,
-          type: 'live'
-        }))
-      }));
+      const targetProvider = providerName || 'Jio TV';
+      const resultSections = await loadNativeLiveTV(targetProvider, page);
 
       // Log the list of loaded channels to the console
       console.log(`[LiveTV Debug] Loaded ${resultSections.length} sections from plugin "${targetProvider}":`);
@@ -858,6 +1316,25 @@ export async function search(
   } catch (e) {
     console.warn('Cinemeta search failed:', e);
     return [];
+  }
+}
+
+export async function peekDetailCache(
+  providerName: string,
+  url: string
+): Promise<DetailResult | null> {
+  const parts = url.split('/');
+  const type = parts.length > 1 ? parts[0] : 'movie';
+  const id = parts.length > 1 ? parts[1] : url;
+  const isCinemeta = providerName === 'Cinemeta';
+  const cacheKey = isCinemeta
+    ? `@zuno_cache_detail_cinemeta_${type}_${id}`
+    : `@zuno_cache_detail_${providerName}_${url.replace(/[^a-zA-Z0-9]/g, '_')}`;
+  try {
+    const settings = await getSettings();
+    return await getCache<DetailResult>(cacheKey, settings.detailsTtl);
+  } catch {
+    return null;
   }
 }
 
@@ -1098,7 +1575,7 @@ export async function enrichDetail(data: DetailResult): Promise<DetailResult> {
         }
       }
     } catch (e) {
-      // TVmaze not reachable — keep Cinemeta's 3 names as fallback
+      // TVmaze not reachable ,  keep Cinemeta's 3 names as fallback
     }
   } else {
     // Enrich movie cast from TMDB via the /find endpoint (same DB Cinemeta uses, no API key needed)
@@ -1153,7 +1630,7 @@ export async function enrichDetail(data: DetailResult): Promise<DetailResult> {
         }
       }
     } catch (e) {
-      // TMDB not reachable — keep Cinemeta cast as fallback
+      // TMDB not reachable ,  keep Cinemeta cast as fallback
     }
   }
 
@@ -1166,13 +1643,14 @@ export async function loadLinks(
   data: string,
   onProgress?: (progress: PlaybackProgress[]) => void,
   onSourceFound?: (source: VideoSource) => void,
-  onAllDone?: () => void
+  onAllDone?: () => void,
+  force: boolean = false
 ): Promise<LinksResult> {
   const cacheKey = `${providerName}:${data}`;
   const now = Date.now();
   const cached = linksCache.get(cacheKey);
 
-  if (cached && now - cached.timestamp < currentLinksTtl) {
+  if (!force && cached && now - cached.timestamp < currentLinksTtl) {
     console.log(`[Cache Hit - Synced] Returning cached playback links for ${cacheKey}`);
     onAllDone?.(); // Signal that we're done so loading indicator clears
     return cached.result;
@@ -1180,7 +1658,7 @@ export async function loadLinks(
 
   await ensureOnline();
   const settings = await getSettings();
-  if (cached && now - cached.timestamp < settings.linksTtl) {
+  if (!force && cached && now - cached.timestamp < settings.linksTtl) {
     console.log(`[Cache Hit] Returning cached playback links for ${cacheKey}`);
     onAllDone?.(); // Signal that we're done so loading indicator clears
     return cached.result;
@@ -1255,13 +1733,42 @@ export async function loadLinks(
         sources,
         subtitles: []
       };
-      
+
       linksCache.set(cacheKey, { timestamp: now, result });
       onAllDone?.();
       return result;
     } catch (err) {
       console.warn("Failed to parse USA TV Next streams:", err);
       throw new Error("No playable sources found");
+    }
+  }
+
+  if (M3U_SOURCE_MAP[providerName]) {
+    try {
+      const parsed = JSON.parse(data);
+      const url: string = parsed.url;
+      const title: string = parsed.title ?? 'Channel';
+      const headers: Record<string, string> = parsed.headers ?? {};
+      if (!url) throw new Error('Missing stream URL');
+
+      const sources = [
+        {
+          quality: 'HD',
+          url,
+          type: 'hls',
+          headers,
+          provider: providerName,
+          host: providerName,
+        },
+      ];
+
+      const result: LinksResult = { sources, subtitles: [] };
+      linksCache.set(cacheKey, { timestamp: now, result });
+      onAllDone?.();
+      return result;
+    } catch (err) {
+      console.warn(`Failed to parse ${providerName} stream:`, err);
+      throw new Error('No playable sources found');
     }
   }
 
@@ -1297,6 +1804,43 @@ export async function loadLinks(
 
   onAllDone?.(); // Signal that we're done so loading indicator clears
   return result;
+}
+
+/**
+ * Cache-first link loader: returns any cached links immediately, then fires a
+ * background refresh using `force = true` so the user sees links instantly
+ * while still checking for newer ones. Callbacks (progress / source found /
+ * onAllDone) are wired to the background refresh only — the cached snapshot
+ * is delivered synchronously through the returned Promise.
+ */
+export async function loadLinksCacheThenRefresh(
+  providerName: string,
+  data: string,
+  onProgress?: (progress: PlaybackProgress[]) => void,
+  onSourceFound?: (source: VideoSource) => void,
+  onAllDone?: () => void,
+): Promise<LinksResult> {
+  const cacheKey = `${providerName}:${data}`;
+  const hadCache = hasCachedLinks(providerName, data);
+
+  // Always return cached result first (may be empty array if no cache exists)
+  const initial = await loadLinks(providerName, data, undefined, undefined, undefined, false);
+
+  if (hadCache) {
+    // Fire a background refresh with the same callbacks. The refresh will write
+    // to the same cache key so the next call sees the updated snapshot.
+    setTimeout(() => {
+      loadLinks(providerName, data, onProgress, onSourceFound, onAllDone, true).catch((e) => {
+        console.warn(`[loadLinksCacheThenRefresh] Background refresh failed for ${cacheKey}:`, e?.message || e);
+        onAllDone?.();
+      });
+    }, 350);
+  } else {
+    // No cache → behave like a normal loadLinks (forward callbacks)
+    return loadLinks(providerName, data, onProgress, onSourceFound, onAllDone, false);
+  }
+
+  return initial;
 }
 
 export interface PlaybackProgress {
@@ -1414,7 +1958,7 @@ async function fetchStremioAddonStreams(
         // Filter out weak/dead links (fewer than 3 seeders)
         const hasSeedersInfo = titleText.includes('👤') || /seeders|seeds|seed/i.test(titleText) || /\bS:\s*\d+/i.test(titleText);
         if (hasSeedersInfo && seeders < 3) {
-          return null; // Too few seeders — likely dead, discard
+          return null; // Too few seeders ,  likely dead, discard
         }
       }
 
@@ -1577,7 +2121,7 @@ export async function resolvePlaybackSources(
     const smaller = wordsA.size <= wordsB.size ? wordsA : wordsB;
     const larger  = wordsA.size <= wordsB.size ? wordsB : wordsA;
     if (overlap === smaller.size && smaller.size >= 1) {
-      // Full subset — score based on how much of the larger title is covered
+      // Full subset ,  score based on how much of the larger title is covered
       return 0.6 + (0.4 * smaller.size / larger.size);
     }
     const union = new Set([...wordsA, ...wordsB]).size;
@@ -1594,7 +2138,7 @@ export async function resolvePlaybackSources(
 
   // Register active callbacks so DeviceEventEmitter can stream new results directly to the UI
   activeSourceCallback = (s) => {
-    // No cross-provider dedup — each provider keeps all its sources.
+    // No cross-provider dedup ,  each provider keeps all its sources.
     // Within the same provider, dedup by URL to avoid streaming the same link twice.
     if (!finalSources.some(fs => fs.url === s.url && fs.provider === s.provider)) {
       finalSources.push(s);
@@ -1753,10 +2297,10 @@ export async function resolvePlaybackSources(
 
       if (sources.length > 0) {
         progressList[idx].status = 'found';
-        progressList[idx].linksCount = sources.length; // No cross-provider dedup — each provider keeps all its sources
+        progressList[idx].linksCount = sources.length; // No cross-provider dedup ,  each provider keeps all its sources
         onProgress([...progressList]);
 
-        // Push all sources without cross-provider dedup — same URL from different providers are kept separate
+        // Push all sources without cross-provider dedup ,  same URL from different providers are kept separate
         sources.forEach((s: any) => {
           if (!finalSources.some(fs => fs.url === s.url && fs.provider === s.provider)) {
             finalSources.push(s);
@@ -1808,7 +2352,7 @@ export async function resolvePlaybackSources(
     const checkResolve = (allDone = false) => {
       if (promiseResolved) return;
       if (finalSources.length > 0) {
-        // We have sources — resolve immediately to show them
+        // We have sources ,  resolve immediately to show them
         promiseResolved = true;
         console.log(`[ZunoPlugin][RESOLVED_SOURCES] Resolving links promise. Sources found: ${finalSources.length}`);
         const uniqueSubs = Array.from(new Map(finalSubtitles.map(s => [s.url, s])).values());
@@ -1816,7 +2360,7 @@ export async function resolvePlaybackSources(
           sources: [...finalSources],
           subtitles: uniqueSubs,
         });
-        // Don't null out activeSourceCallback here — keep feeding any
+        // Don't null out activeSourceCallback here ,  keep feeding any
         // in-flight streamed events (e.g. remaining links from 4K HDHUB)
         // into onSourceFound so the UI list keeps updating live.
         // Callbacks are cleaned up only when all providers finish.
@@ -1952,6 +2496,8 @@ export function playStream(
   provider?: string,
   detailUrl?: string,
   isTorrentStream?: boolean,
+  channelsJson?: string,
+  currentChannelIndex?: number,
 ) {
   CloudStreamModule.playStream(
     url,
@@ -1972,6 +2518,8 @@ export function playStream(
     provider ?? 'Cinemeta',
     detailUrl ?? '',
     isTorrentStream ?? false,
+    channelsJson ?? '',
+    currentChannelIndex ?? -1,
   );
 }
 

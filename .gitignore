@@ -19,6 +19,8 @@ expo-env.d.ts
 
 # Metro
 .metro-health-check*
+metro.log
+metro.err.log
 
 # debug
 npm-debug.*
@@ -34,3 +36,39 @@ yarn-error.*
 
 # typescript
 *.tsbuildinfo
+
+# App log dumps
+app_log*.txt
+app_log_v48*.txt
+all_logs.txt
+link_logs.txt
+load_link_logs.txt
+zuno_logs*.txt
+android/log.txt
+android/log_utf8.txt
+
+# Screenshots / scratch images
+screen*.png
+home*.png
+zuno_home.png
+search*.png
+scroll*.png
+h.png
+back.png
+tango.png
+livetv.png
+screen_v48*.png
+screen_livetv.png
+home_final.png
+
+# Scratch / dump files
+stranger_things.html
+ui.xml
+
+# Backup directories
+android_backup_*/
+ios/
+
+# IDE / tooling cache
+.agents/
+.claude/

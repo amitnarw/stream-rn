@@ -90,7 +90,7 @@ android {
     namespace 'com.anonymous.zunornandroid'
     defaultConfig {
         applicationId 'com.anonymous.zunornandroid'
-        minSdkVersion rootProject.ext.minSdkVersion
+        minSdkVersion 26
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
         versionName "1.0.0"
@@ -185,10 +185,10 @@ dependencies {
     }
 
     // CloudStream plugin loading
-    implementation("com.github.recloudstream.cloudstream:library:v4.7.0")
+    implementation("com.github.recloudstream.cloudstream:library:v4.8.0")
     implementation("org.jsoup:jsoup:1.18.3")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     implementation("com.github.TorrentStream:TorrentStream-Android:3.0.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
 

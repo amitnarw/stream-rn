@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Soft outer accent halo -->
+    <item>
+        <shape android:shape="oval">
+            <solid android:color="#1A0047FF" />
+            <size android:width="20dp" android:height="20dp" />
+        </shape>
+    </item>
+    <!-- Main accent thumb -->
+    <item
+        android:left="3dp"
+        android:top="3dp"
+        android:right="3dp"
+        android:bottom="3dp">
+        <shape android:shape="oval">
+            <solid android:color="#0047FF" />
+            <size android:width="14dp" android:height="14dp" />
+            <stroke android:color="#FFFFFF" android:width="1dp" />
+        </shape>
+    </item>
+</layer-list>

@@ -7,6 +7,7 @@ import com.facebook.react.bridge.ReactContext
 import com.facebook.react.modules.core.DeviceEventManagerModule
 import com.lagradost.cloudstream3.APIHolder
 import com.lagradost.cloudstream3.AnimeLoadResponse
+import com.lagradost.cloudstream3.CloudStreamApp
 import com.lagradost.cloudstream3.Episode
 import com.lagradost.cloudstream3.MainAPI
 import com.lagradost.cloudstream3.MainPageRequest
@@ -31,6 +32,10 @@ class CloudStreamPluginHost(val appContext: ReactApplicationContext) {
             val ctxField = cls.getDeclaredField("ctx")
             ctxField.isAccessible = true
             ctxField.set(null, WeakReference<android.content.Context>(appContext))
+        } catch (_: Exception) {}
+
+        try {
+            CloudStreamApp.context = appContext.applicationContext ?: appContext
         } catch (_: Exception) {}
 
         // Silence all plugin System.out/err console logs
@@ -281,6 +286,7 @@ class CloudStreamPluginHost(val appContext: ReactApplicationContext) {
         private val DOMAIN_PATCHES = mapOf(
             "Cinefreak" to "https://cinefreak.net",
             "Dudefilms" to "https://dudefilms.co",
+            "DudeFilms" to "https://dudefilms.co",
             "Goojara" to "https://ww1.goojara.to",
             "Desicinemas" to "https://desicinemas.to",
             "Tamilblasters" to "https://www.1tamilblasters.pro",
@@ -501,9 +507,15 @@ class CloudStreamPluginHost(val appContext: ReactApplicationContext) {
         for (mp in api.mainPage) {
             try {
                 Log.i("ZunoPlugin", "getMainPageJson calling api.getMainPage for ${mp.name}")
+                if (providerName.equals("CloudPlay", ignoreCase = true)) {
+                    Log.i("ZunoCloudPlay", "Main page entry: name=${mp.name} hasData=${mp.data.isNotEmpty()} dataLen=${mp.data.length}")
+                }
                 val resp = api.getMainPage(page, MainPageRequest(mp.name, mp.data, false))
                 if (resp == null) {
                     Log.i("ZunoPlugin", "getMainPageJson: api.getMainPage returned null")
+                    if (providerName.equals("CloudPlay", ignoreCase = true)) {
+                        Log.w("ZunoCloudPlay", "api.getMainPage returned null for main page entry '${mp.name}'. Backend may be unreachable or signature expired.")
+                    }
                     continue
                 }
                 Log.i("ZunoPlugin", "getMainPageJson: api.getMainPage returned ${resp.items.size} sections")
@@ -519,6 +531,9 @@ class CloudStreamPluginHost(val appContext: ReactApplicationContext) {
                 }
             } catch (t: Throwable) {
                 Log.e("ZunoPlugin", "getMainPageJson failed for ${api.name} '${mp.name}': ${t.javaClass.simpleName}: ${t.message}", t)
+                if (providerName.equals("CloudPlay", ignoreCase = true)) {
+                    Log.e("ZunoCloudPlay", "Exception while loading main page entry '${mp.name}': ${t.javaClass.simpleName}: ${t.message}", t)
+                }
             }
         }
         val result = JSONObject().apply {
@@ -526,6 +541,9 @@ class CloudStreamPluginHost(val appContext: ReactApplicationContext) {
             put("sections", sections)
         }.toString()
         Log.i("ZunoPlugin", "getMainPageJson returning: $result")
+        if (providerName.equals("CloudPlay", ignoreCase = true)) {
+            Log.i("ZunoCloudPlay", "Final sections.length=${sections.length()}; total items=${(0 until sections.length()).sumOf { (sections.getJSONObject(it).getJSONArray("items").length()) }}")
+        }
         return result
     }
 

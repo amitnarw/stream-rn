@@ -27,14 +27,23 @@ import {
   Copy,
   Search,
   X,
-  FileText
+  FileText,
+  Tv,
+  ChevronDown
 } from 'lucide-react-native';
 import { Clipboard } from 'react-native';
 import * as bridge from '../api/cloudStreamBridge';
+import {
+  getAvailableIPTVProviders,
+  getDefaultIPTVProvider,
+  setDefaultIPTVProvider
+} from '../api/cloudStreamBridge';
+import type { PluginProvider } from '../types/plugin';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { theme } from '../theme';
 import { useTransitionActions } from '../context/TransitionContext';
 import { CustomModal } from '../components/CustomModal';
+import ProviderPickerSheet from '../components/ProviderPickerSheet';
 import { subscribeLogs, clearLogs, exportLogsAsString, LogEntry } from '../utils/logger';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -224,6 +233,14 @@ export default function SettingsScreen({ navigation }: Props) {
   const [clearing, setClearing] = useState(false);
   const [clearingLinks, setClearingLinks] = useState(false);
 
+  // Default IPTV provider state
+  const [iptvProviders, setIptvProviders] = useState<{
+    m3u: PluginProvider[];
+    cs: PluginProvider[];
+  }>({ m3u: [], cs: [] });
+  const [defaultIptvProvider, setDefaultIptvProviderState] = useState<string>('First Available');
+  const [showIptvSheet, setShowIptvSheet] = useState(false);
+
   const [blurTarget, setBlurTarget] = useState<any>(null);
   const blurTargetRef = useRef<any>(null);
   const setBlurTargetRef = useCallback((val: any) => {
@@ -264,6 +281,7 @@ export default function SettingsScreen({ navigation }: Props) {
 
   useEffect(() => {
     loadCurrentSettings();
+    loadIptvSettings();
     const unsub = navigation.addListener('focus', () => {
       setGlobalBlurTarget(blurTargetRef.current);
     });
@@ -275,6 +293,22 @@ export default function SettingsScreen({ navigation }: Props) {
       unsubLogs();
     };
   }, [navigation, setGlobalBlurTarget]);
+
+  async function loadIptvSettings() {
+    try {
+      const list = await getAvailableIPTVProviders();
+      setIptvProviders(list);
+      const saved = await getDefaultIPTVProvider();
+      setDefaultIptvProviderState(saved || 'First Available');
+    } catch (_) {
+      // ignore
+    }
+  }
+
+  async function handleSetDefaultProvider(name: string) {
+    await setDefaultIPTVProvider(name);
+    setDefaultIptvProviderState(name);
+  }
 
   const handleCopyLogs = () => {
     const text = exportLogsAsString();
@@ -582,6 +616,42 @@ export default function SettingsScreen({ navigation }: Props) {
             </View>
            </View>
 
+           {/* Default IPTV Provider Card */}
+           <View style={styles.card}>
+             <View style={styles.cardHeaderRow}>
+               <Text style={styles.cardTitle}>Default IPTV Provider</Text>
+               <View style={styles.iptvBadge}>
+                 <Text style={styles.iptvBadgeText}>LIVE TV</Text>
+               </View>
+             </View>
+             <Text style={styles.cardDescription}>
+               Choose which IPTV source loads automatically when you open the Live TV screen. You can still switch providers anytime from the bottom sheet picker.
+             </Text>
+             <TouchableOpacity
+               style={styles.iptvSelector}
+               onPress={() => setShowIptvSheet(true)}
+               activeOpacity={0.8}
+             >
+               <View style={styles.iptvSelectorLeft}>
+                 <View style={styles.iptvSelectorIcon}>
+                   <Tv size={16} color={theme.colors.accentLight} />
+                 </View>
+                 <View style={{ flex: 1 }}>
+                   <Text style={styles.iptvSelectorLabel}>CURRENT PROVIDER</Text>
+                   <Text style={styles.iptvSelectorName} numberOfLines={1}>
+                     {defaultIptvProvider}
+                   </Text>
+                 </View>
+               </View>
+               <ChevronDown size={18} color="#fff" />
+             </TouchableOpacity>
+             {defaultIptvProvider === 'First Available' && (
+               <Text style={styles.iptvHint}>
+                 No default saved yet ,  Live TV opens the first available source.
+               </Text>
+             )}
+           </View>
+
            {/* Storage Management Card */}
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Storage & Cleanup</Text>
@@ -869,6 +939,18 @@ export default function SettingsScreen({ navigation }: Props) {
           </SafeAreaView>
         </View>
       </Modal>
+
+      {/* Default IPTV Provider picker */}
+      <ProviderPickerSheet
+        visible={showIptvSheet}
+        onClose={() => setShowIptvSheet(false)}
+        m3uProviders={iptvProviders.m3u}
+        csProviders={iptvProviders.cs}
+        activeProvider={
+          defaultIptvProvider === 'First Available' ? null : defaultIptvProvider
+        }
+        onSelect={(name) => handleSetDefaultProvider(name)}
+      />
     </SafeAreaView>
   );
 }
@@ -1301,5 +1383,73 @@ const styles = StyleSheet.create({
     fontSize: 11,
     lineHeight: 16,
     flex: 1,
+  },
+
+  // Default IPTV Provider card
+  cardHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  iptvBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    backgroundColor: 'rgba(0, 71, 255, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(0, 71, 255, 0.3)',
+  },
+  iptvBadgeText: {
+    color: theme.colors.accentLight,
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+  },
+  iptvSelector: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.06)',
+    marginTop: 8,
+  },
+  iptvSelectorLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    gap: 12,
+  },
+  iptvSelectorIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0, 71, 255, 0.18)',
+    borderWidth: 1,
+    borderColor: 'rgba(0, 71, 255, 0.4)',
+  },
+  iptvSelectorLabel: {
+    color: '#8E8D92',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1.0,
+    marginBottom: 2,
+  },
+  iptvSelectorName: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  iptvHint: {
+    color: theme.colors.textSecondary,
+    fontSize: 11,
+    marginTop: 8,
+    lineHeight: 15,
   },
 });

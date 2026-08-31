@@ -170,22 +170,10 @@ export default function FavoritesScreen({ navigation, isFocused }: Props) {
           <View style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(15, 15, 20, 0.38)' }]} />
         </Animated.View>
         
-        <TouchableOpacity 
-          style={styles.navButton} 
-          onPress={() => {
-            if (navigation.canGoBack()) {
-              navigation.goBack();
-            }
-          }}
-          activeOpacity={0.7}
-        >
-          <BlurView intensity={40} tint="dark" style={styles.navButtonBlur}>
-            <Heart size={18} color={theme.colors.rose} fill={theme.colors.rose} />
-          </BlurView>
-        </TouchableOpacity>
-        
+        <View style={styles.headerSpacer} />
+
         <Text style={styles.headerTitle}>Favorites</Text>
-        
+
         <View style={styles.headerSpacer} />
       </Animated.View>
 

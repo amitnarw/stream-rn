@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { X } from 'lucide-react-native';
 import type { MediaItem } from '../types/plugin';
+import AppIconPlaceholder from './AppIconPlaceholder';
 
 const { width } = Dimensions.get('window');
 const CARD_WIDTH = (width - 48) / 3;
@@ -118,7 +119,7 @@ export default function MediaCard({ item, onPress, onDelete, width: propWidth, s
     >
       {/* viewRef only wraps the poster so measure() captures poster-only bounds.
           Title is outside the Animated.View so it never participates in the
-          scale transform — prevents layout reflow / size-correction flash. */}
+          scale transform ,  prevents layout reflow / size-correction flash. */}
       <View ref={viewRef}>
         <Animated.View style={{ transform: [{ scale }] }}>
           {cleanPosterUrl && !imageError ? (
@@ -130,7 +131,7 @@ export default function MediaCard({ item, onPress, onDelete, width: propWidth, s
             />
           ) : (
             <View style={[styles.poster, styles.placeholder, { width: cardWidth, height: cardHeight }]}>
-              <Text style={styles.placeholderLogo}>Z</Text>
+              <AppIconPlaceholder size={Math.min(cardWidth, cardHeight) * 0.4} />
             </View>
           )}
 
@@ -173,13 +174,6 @@ const styles = StyleSheet.create({
   placeholder: {
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  placeholderLogo: {
-    color: '#5580FF',
-    fontSize: 28,
-    fontWeight: '900',
-    letterSpacing: -1,
-    opacity: 0.7,
   },
   title: {
     color: 'rgba(229, 226, 227, 0.8)',

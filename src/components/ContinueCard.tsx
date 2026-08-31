@@ -13,6 +13,7 @@ import { X } from "lucide-react-native";
 import type { MediaItem } from "../types/plugin";
 import type { CardLayout } from "../context/TransitionContext";
 import { theme } from "../theme";
+import AppIconPlaceholder from "./AppIconPlaceholder";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const S_CARD_W = (SCREEN_WIDTH - 40 - 16) / 3;
@@ -97,7 +98,7 @@ export const ContinueCard = React.memo(function ContinueCard({
               />
             ) : (
               <View style={[styles.cwCardImg, styles.cardFallback]}>
-                <Text style={styles.placeholderLogo}>Z</Text>
+                <AppIconPlaceholder size={cardWidth * 0.4} />
               </View>
             )}
 
@@ -151,13 +152,6 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.placeholder,
   },
   cardFallback: { flex: 1, backgroundColor: theme.colors.placeholder, alignItems: 'center', justifyContent: 'center' },
-  placeholderLogo: {
-    color: '#5580FF',
-    fontSize: 28,
-    fontWeight: '900',
-    letterSpacing: -1,
-    opacity: 0.7,
-  },
 
   deleteBtn: {
     position: "absolute",

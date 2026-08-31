@@ -72,6 +72,11 @@ import MaskedView from "@react-native-masked-view/masked-view";
 import { theme } from "../theme";
 import type { EpisodeItem, VideoSource, PluginProvider } from "../types/plugin";
 import * as bridge from "../api/cloudStreamBridge";
+import {
+  MoviesNexusWebView,
+  getTmdbIdFromImdb,
+  buildPageUrl,
+} from "../api/moviesNexusResolver";
 import { useTransition } from "../context/TransitionContext";
 import { CustomModal } from "../components/CustomModal";
 import CustomVideoPlayer from "../components/CustomVideoPlayer";
@@ -106,6 +111,12 @@ import {
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 const HERO_HEIGHT = SCREEN_HEIGHT * 0.5; // 50% for hero, overlaps with sheet
 const EASE_OUT = Easing.bezier(0.25, 1, 0.5, 1);
+
+function parseNumberLocal(val: any): number | undefined {
+  if (val === undefined || val === null || val === "") return undefined;
+  const num = Number(val);
+  return isNaN(num) ? undefined : num;
+}
 
 export default function DetailScreen() {
   const [blurTarget, setBlurTarget] = useState<any>(null);
@@ -244,7 +255,7 @@ export default function DetailScreen() {
   const descriptionAnimatedStyle = useAnimatedStyle(() => {
     if (collapsedDescHeight === 0) {
       // Heights not yet measured. Return overflow:hidden so the Text's
-      // own numberOfLines={3} prop keeps it at 3 lines — no jerk.
+      // own numberOfLines={3} prop keeps it at 3 lines ,  no jerk.
       return { overflow: "hidden" };
     }
     const targetHeight = interpolate(
@@ -265,6 +276,8 @@ export default function DetailScreen() {
   const [subtitles, setSubtitles] = useState<{ lang: string; url: string }[]>(
     [],
   );
+  const [moviesNexusUrl, setMoviesNexusUrl] = useState<string | null>(null);
+  const [moviesNexusActive, setMoviesNexusActive] = useState(false);
   const [showSourcePicker, setShowSourcePicker] = useState(false);
   const [selectedSourceIndex, setSelectedSourceIndex] = useState(0);
   const [isTorrentBuffering, setIsTorrentBuffering] = useState(false);
@@ -513,6 +526,8 @@ export default function DetailScreen() {
     setIsSheetTransitionDone(false);
     setIsResolving(false);
     setIsOpeningPlayer(false);
+    setMoviesNexusActive(false);
+    setMoviesNexusUrl(null);
     torrentSessionIdRef.current++; // Invalidate active torrent load session
     if (resolveTimeoutRef.current) {
       clearTimeout(resolveTimeoutRef.current);
@@ -601,7 +616,6 @@ export default function DetailScreen() {
       "4K HDHUB",
       "Goojara",
       "YTS",
-      "CloudPlay",
       "Movies4u",
       "Movierulzhd",
       "HDHub4u",
@@ -900,6 +914,8 @@ export default function DetailScreen() {
         list.push("VidSrcMe");
       if (!list.includes("VsEmbed") && !isLiveTvProvider("VsEmbed"))
         list.push("VsEmbed");
+      if (!list.includes("MoviesNexus") && !isLiveTvProvider("MoviesNexus"))
+        list.push("MoviesNexus");
     } else {
       // Cached / Done: ONLY show plugins for which we actually HAVE sources!
       const activeProvidersWithData = new Set<string>();
@@ -932,6 +948,7 @@ export default function DetailScreen() {
       ...allProviders.map((p) => p.name.toLowerCase()),
       "vidsrcme",
       "vsembed",
+      "moviesnexus",
     ];
     list.sort((a, b) => {
       const idxA = canonical.indexOf(a.toLowerCase());
@@ -1079,7 +1096,7 @@ export default function DetailScreen() {
   }, [providerTabs, activeProviderTab]);
 
   const isTabResolving = useMemo(() => {
-    // Always use isResolving — while ANY provider is still searching, ALL tabs show the circular loader.
+    // Always use isResolving ,  while ANY provider is still searching, ALL tabs show the circular loader.
     // Individual provider status is still tracked in resolvingProgress for tab labels.
     return isResolving;
   }, [isResolving]);
@@ -1113,7 +1130,7 @@ export default function DetailScreen() {
   const scrollViewRef = useRef<ScrollView>(null);
   const [trailerDisabled, setTrailerDisabled] = useState(false);
 
-  // Pure worklet — no JS-thread bridge on every scroll frame
+  // Pure worklet ,  no JS-thread bridge on every scroll frame
   const scrollHandler = useAnimatedScrollHandler((e) => {
     scrollY.value = e.contentOffset.y;
   });
@@ -1250,7 +1267,7 @@ export default function DetailScreen() {
     };
   });
 
-  // playEpisode MUST be above the early return — hooks cannot appear after conditional returns
+  // playEpisode MUST be above the early return ,  hooks cannot appear after conditional returns
   const playEpisode = useCallback(
     async (ep: EpisodeItem, index: number) => {
       if (!detail) return;
@@ -1270,9 +1287,67 @@ export default function DetailScreen() {
         streamedFlushRef.current = null;
       }
       setIsResolving(true);
+      setIsOpeningPlayer(false); // ensure stale "Opening Player..." overlay never leaks into source picker
       setShowSourcePicker(true);
       setSelectedSourceIndex(0);
       setActiveProviderTab("All");
+
+      // Cache-first: if we already have cached links for this episode, surface
+      // them instantly so the user sees the list immediately while a fresh
+      // background resolution continues to look for new sources.
+      if (bridge.hasCachedLinks && bridge.hasCachedLinks(providerName, ep.mediaRef)) {
+        try {
+          const cached = await bridge.loadLinks(
+            providerName,
+            ep.mediaRef,
+            undefined,
+            undefined,
+            undefined,
+            false,
+          );
+          if (showSourcePickerRef.current && cached?.sources?.length) {
+            setSources(cached.sources);
+            if (cached.subtitles?.length) setSubtitles(cached.subtitles);
+            setIsResolving(false); // hide main resolving spinner
+          }
+        } catch (_) {
+          // ignore cache load errors — fall through to fresh resolution
+        }
+      }
+
+      // MoviesNexus: resolve TMDB ID from IMDb and mount hidden WebView
+      // to capture stream URLs from /api/extract
+      setMoviesNexusUrl(null);
+      setMoviesNexusActive(false);
+      const imdbIdForNexus = detail?.imdbId || null;
+      if (imdbIdForNexus && imdbIdForNexus.startsWith('tt')) {
+        const seasonNum =
+          parseNumberLocal(ep.season?.toString()) ??
+          parseNumberLocal(detail?.episodes?.[index]?.season?.toString()) ??
+          1;
+        const episodeNum =
+          parseNumberLocal(ep.episode?.toString()) ??
+          parseNumberLocal(detail?.episodes?.[index]?.episode?.toString()) ??
+          1;
+        try {
+          const tmdbId = await getTmdbIdFromImdb(
+            imdbIdForNexus,
+            detail?.isSerial ? 'tv' : 'movie'
+          );
+          if (tmdbId) {
+            const url = buildPageUrl(
+              tmdbId,
+              !!detail?.isSerial,
+              seasonNum,
+              episodeNum
+            );
+            setMoviesNexusUrl(url);
+            setMoviesNexusActive(true);
+          }
+        } catch (_) {
+          // ignore ,  MoviesNexus is optional
+        }
+      }
 
       if (resolveTimeoutRef.current) {
         clearTimeout(resolveTimeoutRef.current);
@@ -1312,7 +1387,7 @@ export default function DetailScreen() {
         };
 
         try {
-          const result = await bridge.loadLinks(
+          const result = await bridge.loadLinksCacheThenRefresh(
             providerName,
             ep.mediaRef,
             (progress) => {
@@ -1335,7 +1410,7 @@ export default function DetailScreen() {
               }
             },
             () => {
-              // onAllDone: ALL providers have completed — flush any remaining and stop loading
+              // onAllDone: ALL providers have completed ,  flush any remaining and stop loading
               if (showSourcePickerRef.current) {
                 if (streamedFlushRef.current) {
                   clearTimeout(streamedFlushRef.current);
@@ -1437,7 +1512,7 @@ export default function DetailScreen() {
 
         if (isTorrent) {
           if (isTorrentBuffering) return; // Prevent re-entry while already buffering
-          setIsOpeningPlayer(false); // Torrents don't use the "Opening Player" spinner — show the buffering modal instead
+          setIsOpeningPlayer(false); // Torrents don't use the "Opening Player" spinner ,  show the buffering modal instead
           const sourceSeeders = (source as any).seeders ?? 0;
           try {
             const sessionId = ++torrentSessionIdRef.current;
@@ -2100,7 +2175,7 @@ export default function DetailScreen() {
                             style={styles.descriptionText}
                             numberOfLines={
                               // Always constrain to 3 lines until BOTH heights are
-                              // measured — this prevents any jerk during initial load.
+                              // measured ,  this prevents any jerk during initial load.
                               collapsedDescHeight === 0 || fullDescHeight === 0
                                 ? 3
                                 : textLinesLimit
@@ -2180,7 +2255,7 @@ export default function DetailScreen() {
                         {detail?.isSerial ? "Episodes List" : "Play Video"}
                       </Text>
 
-                      {/* Episodes — FlatList with scrollEnabled=false so outer ScrollView drives scrolling */}
+                      {/* Episodes ,  FlatList with scrollEnabled=false so outer ScrollView drives scrolling */}
                       <FlatList
                         data={displayedEpisodes}
                         keyExtractor={(ep, index) => `${ep.mediaRef}-${index}`}
@@ -2528,7 +2603,7 @@ export default function DetailScreen() {
                       ellipsizeMode="tail"
                     >
                       {!parseAudioLanguages(selectedTorrentHost) ||
-                      parseAudioLanguages(selectedTorrentHost) === "—"
+                      parseAudioLanguages(selectedTorrentHost) === ", "
                         ? "-"
                         : parseAudioLanguages(selectedTorrentHost)}
                     </Text>
@@ -2580,7 +2655,37 @@ export default function DetailScreen() {
         onConfirm={() => setTorrentErrorModal({ visible: false, message: "" })}
       />
 
-      {/* Source Picker Bottom Sheet Overlay — always mounted, hidden off-screen when closed */}
+      {/* MoviesNexus hidden WebView ,  captures /api/extract stream URLs */}
+      <MoviesNexusWebView
+        pageUrl={moviesNexusUrl ?? ""}
+        enabled={moviesNexusActive && !!moviesNexusUrl}
+        onSources={(sources) => {
+          if (!showSourcePickerRef.current) return;
+          for (const s of sources) {
+            if (streamedSourcesRef.current.some((x) => x.url === s.url)) continue;
+            streamedSourcesRef.current.push(s);
+          }
+          if (!streamedFlushRef.current) {
+            streamedFlushRef.current = setTimeout(() => {
+              streamedFlushRef.current = null;
+              const buffered = streamedSourcesRef.current;
+              streamedSourcesRef.current = [];
+              setSources((prev) => {
+                const merged = new Map(prev.map((s) => [s.url, s]));
+                buffered.forEach((s) => {
+                  if (!merged.has(s.url)) merged.set(s.url, s);
+                });
+                return [...merged.values()];
+              });
+            }, 350);
+          }
+        }}
+        onDone={() => {
+          setMoviesNexusActive(false);
+        }}
+      />
+
+      {/* Source Picker Bottom Sheet Overlay ,  always mounted, hidden off-screen when closed */}
       <Animated.View
         style={[
           styles.sheetOverlay,
@@ -3106,7 +3211,7 @@ export default function DetailScreen() {
                             renderSourceRow(source, idx),
                           )}
 
-                          {/* Collapsible Torrent Accordion — isolated child so toggling
+                          {/* Collapsible Torrent Accordion ,  isolated child so toggling
                                 it never re-renders the parent (the 100+ row source list,
                                 provider tabs, hero and background blurs). */}
                           <TorrentAccordion

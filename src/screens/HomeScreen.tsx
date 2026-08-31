@@ -16,20 +16,17 @@ import {
   Animated,
   Dimensions,
   Image,
-  Pressable,
   Easing,
   DimensionValue,
   RefreshControl,
-  Alert,
-  Modal,
-  TextInput,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BlurView, BlurTargetView } from "expo-blur";
 import Reanimated, { FadeInUp, FadeIn, FadeOut, Easing as ReanimatedEasing } from "react-native-reanimated";
 import { LinearGradient } from "expo-linear-gradient";
-import { WifiOff, AlertCircle, RotateCw } from "lucide-react-native";
-import type { HomeSection, MediaItem, PluginProvider } from "../types/plugin";
+import { WifiOff, AlertCircle } from "lucide-react-native";
+import { MaterialIcons } from "@expo/vector-icons";
+import type { HomeSection, MediaItem } from "../types/plugin";
 import * as bridge from "../api/cloudStreamBridge";
 import { useTransition, useTransitionActions } from "../context/TransitionContext";
 import type { CardLayout } from "../context/TransitionContext";
@@ -37,8 +34,6 @@ import { HeroCard } from "../components/HeroCard";
 import { BlurCarousel } from "../components/BlurCarousel";
 import MediaCard from "../components/MediaCard";
 import { ContinueCard } from "../components/ContinueCard";
-import ChannelCard from "../components/ChannelCard";
-import QuickScrollFab from "../components/QuickScrollFab";
 
 import { theme } from "../theme";
 
@@ -63,7 +58,7 @@ function cleanGeneralError(err: any): string {
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
-// Hero carousel dimensions — active card centers, side cards peek symmetrically
+// Hero carousel dimensions ,  active card centers, side cards peek symmetrically
 const HERO_CARD_WIDTH = SCREEN_WIDTH * 0.8;
 const HERO_CARD_HEIGHT = HERO_CARD_WIDTH * 1.4;
 const HERO_SNAP = SCREEN_WIDTH * 0.77;
@@ -80,7 +75,6 @@ const CATEGORY_TABS = [
   "Series",
   "Cartoon",
   "Anime",
-  "LiveTV",
   "English",
   "Hindi",
   "Punjabi",
@@ -166,30 +160,8 @@ function SkeletonBox({
 // Components extracted to separate files in src/components/ to keep file clean and structured.
 
 // ── Premium Skeleton Loading Screen ──────────────────────────────────────────
-function HomeSkeletonScreen({ isLive }: { isLive?: boolean }) {
+function HomeSkeletonScreen() {
   const insets = useSafeAreaInsets();
-  if (isLive) {
-    return (
-      <View style={[styles.root, { backgroundColor: theme.colors.background }]}>
-        <View
-          style={{
-            paddingTop: insets.top + 125,
-            paddingHorizontal: 20,
-            gap: 16,
-          }}
-        >
-          {[1, 2, 3, 4, 5].map((rowIdx) => (
-            <View key={rowIdx} style={{ flexDirection: "row", gap: 8 }}>
-              <SkeletonBox width={S_CARD_W} height={S_CARD_W} borderRadius={20} />
-              <SkeletonBox width={S_CARD_W} height={S_CARD_W} borderRadius={20} />
-              <SkeletonBox width={S_CARD_W} height={S_CARD_W} borderRadius={20} />
-            </View>
-          ))}
-        </View>
-      </View>
-    );
-  }
-
   return (
     <View style={[styles.root, { backgroundColor: theme.colors.background }]}>
       <ScrollView
@@ -291,9 +263,6 @@ interface SectionRowProps {
   navigation: any;
   goDetail: (item: MediaItem, layout: CardLayout) => void;
   onDeleteHistoryItem?: (id: string) => void;
-  isLiveTab: boolean;
-  savedUrls: Set<string>;
-  onToggleSave: (item: MediaItem) => void;
 }
 
 const SectionRow = React.memo(function SectionRow({
@@ -301,9 +270,6 @@ const SectionRow = React.memo(function SectionRow({
   navigation,
   goDetail,
   onDeleteHistoryItem,
-  isLiveTab,
-  savedUrls,
-  onToggleSave,
 }: SectionRowProps) {
   const { phase } = useTransition();
   const isCW = section.name === "Continue Watching";
@@ -313,29 +279,6 @@ const SectionRow = React.memo(function SectionRow({
       if (isCW) {
         return (
           <ContinueCard item={item} onPress={goDetail} onDelete={onDeleteHistoryItem} />
-        );
-      }
-      
-      const isLiveItem = item.type === "live" || isLiveTab;
-      
-      if (isLiveItem) {
-        return (
-          <ChannelCard
-            item={item as MediaItem}
-            onPress={(i) =>
-              goDetail(i, {
-                x: 0,
-                y: 0,
-                width: S_CARD_W,
-                height: S_CARD_W,
-                borderRadius: 22,
-              })
-            }
-            isSaved={savedUrls.has(item.url)}
-            onToggleSave={onToggleSave}
-            width={S_CARD_W}
-            style={{ marginRight: 8 }}
-          />
         );
       }
 
@@ -348,7 +291,7 @@ const SectionRow = React.memo(function SectionRow({
         />
       );
     },
-    [isCW, goDetail, onDeleteHistoryItem, isLiveTab, savedUrls, onToggleSave],
+    [isCW, goDetail, onDeleteHistoryItem],
   );
 
   const handleSeeAll = useCallback(() => {
@@ -399,144 +342,7 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
   heroIdxRef.current = heroIdx;
 
   const lastLoadRequestRef = useRef<{ category: string; provider: string } | null>(null);
-  const liveTVFlatListRef = useRef<any>(null);
-
-  const [allProviders, setAllProviders] = useState<PluginProvider[]>([
-    { id: "CloudPlay", name: "CloudPlay", url: "", hasMainPage: true, hasSearch: false },
-    { id: "IPTV Player", name: "IPTV Player", url: "", hasMainPage: true, hasSearch: false },
-    { id: "PublicSportsIPTV", name: "PublicSportsIPTV", url: "", hasMainPage: true, hasSearch: false },
-    { id: "Sports IPTV", name: "Sports IPTV", url: "", hasMainPage: true, hasSearch: false },
-    { id: "Pirate IPTV", name: "Pirate IPTV", url: "", hasMainPage: true, hasSearch: false },
-    { id: "Sony IPTV", name: "Sony IPTV", url: "", hasMainPage: true, hasSearch: false },
-    { id: "Japan IPTV", name: "Japan IPTV", url: "", hasMainPage: true, hasSearch: false },
-    { id: "USA TV Next", name: "USA TV Next", url: "", hasMainPage: true, hasSearch: false },
-  ]);
-  const [activeLiveTVProvider, setActiveLiveTVProvider] = useState<string>("IPTV Player");
-  const [savedChannels, setSavedChannels] = useState<MediaItem[]>([]);
-  const [resolvingLiveChannel, setResolvingLiveChannel] = useState<string | null>(null);
   const [loadingCategory, setLoadingCategory] = useState<string>("");
-  const [liveTVSearchQuery, setLiveTVSearchQuery] = useState("");
-  const [selectedCategory, setSelectedCategory] = useState("All");
-  const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
-
-  const liveTVProviders = useMemo(() => {
-    return allProviders.filter((p) =>
-      ["cloudplay", "iptvplayer", "publicsportsiptv", "usa tv next"].includes(
-        p.name.toLowerCase(),
-      ) || p.name.toLowerCase().includes("iptv"),
-    );
-  }, [allProviders]);
-
-  const savedUrls = useMemo(() => {
-    return new Set(savedChannels.map((x) => x.url));
-  }, [savedChannels]);
-
-  useEffect(() => {
-    if (liveTVProviders.length > 0 && !activeLiveTVProvider) {
-      setActiveLiveTVProvider(liveTVProviders[0].name);
-    }
-  }, [liveTVProviders, activeLiveTVProvider]);
-
-  const loadSavedChannelsList = async () => {
-    try {
-      const list = await bridge.getSavedChannels();
-      setSavedChannels(list);
-      return list;
-    } catch {
-      return [];
-    }
-  };
-
-  const playLiveChannel = useCallback(async (item: MediaItem) => {
-    setResolvingLiveChannel(item.title);
-    try {
-      const result = await bridge.loadLinks(item.provider, item.url);
-      if (result.sources && result.sources.length > 0) {
-        const source = result.sources[0];
-        bridge.playStream(
-          source.url,
-          source.headers,
-          item.title,
-          undefined,
-          result.sources,
-          result.subtitles,
-          undefined,
-          -1,
-          undefined,
-          "live",
-          item.posterUrl || undefined,
-          1,
-          1,
-          item.title,
-          undefined,
-          item.provider,
-          item.url
-        );
-      } else {
-        Alert.alert("Playback Error", "No playable links found for this channel.");
-      }
-    } catch (e: any) {
-      console.warn("Failed to play live channel:", e);
-      Alert.alert("Playback Error", "Failed to load channel: " + (e.message || String(e)));
-    } finally {
-      setResolvingLiveChannel(null);
-    }
-  }, []);
-
-  const handleToggleSaveChannel = useCallback(async (item: MediaItem) => {
-    try {
-      const saved = await bridge.getSavedChannels();
-      const isCurrentlySaved = saved.some((x) => x.url === item.url);
-      let updated: MediaItem[];
-      if (isCurrentlySaved) {
-        updated = await bridge.removeSavedChannel(item.url);
-      } else {
-        const newItem = { ...item, type: "live" };
-        updated = await bridge.saveChannel(newItem);
-      }
-      setSavedChannels(updated);
-
-      if (CATEGORY_TABS[activeTab] === "LiveTV") {
-        setSections((prev) => {
-          const copy = [...prev];
-          const idx = copy.findIndex((x) => x.name === "Saved Channels");
-          if (updated.length > 0) {
-            if (idx !== -1) {
-              copy[idx] = { name: "Saved Channels", items: updated };
-            } else {
-              copy.unshift({ name: "Saved Channels", items: updated });
-            }
-          } else {
-            if (idx !== -1) {
-              copy.splice(idx, 1);
-            }
-          }
-          return copy;
-        });
-      }
-    } catch (e) {
-      console.warn("Failed to toggle save channel:", e);
-    }
-  }, [activeTab]);
-
-  useEffect(() => {
-    async function loadProviders() {
-      try {
-        const provs = await bridge.getProviders();
-        if (provs && provs.length > 0) {
-          const hasUsaTv = provs.some(p => p.name === "USA TV Next");
-          const customProvs = hasUsaTv ? provs : [
-            ...provs,
-            { id: "USA TV Next", name: "USA TV Next", url: "", hasMainPage: true, hasSearch: false }
-          ];
-          setAllProviders(customProvs);
-        }
-      } catch (e) {
-        console.warn("Failed to load providers:", e);
-      }
-    }
-    loadProviders();
-  }, []);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -697,16 +503,15 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
     const unsub = navigation.addListener('focus', () => {
       // Restore blur target whenever the screen regains focus
       setGlobalBlurTarget(blurTargetRef.current);
-      
+
       // Update Continue Watching in background on screen focus
       refreshHistoryOnly();
-      loadSavedChannelsList();
 
       // Only re-fetch sections when we have no data (e.g. after an error).
       // Re-fetching every time the user comes back from a nested screen
       // (SeeAll, detail, etc.) sets sectionsLoading=true → shows a skeleton
       // flash over the already-rendered carousel. If we already have data,
-      // the content is still fresh enough — skip the re-fetch.
+      // the content is still fresh enough ,  skip the re-fetch.
       if (!sectionsLoadedRef.current) {
         loadSections(false, CATEGORY_TABS[activeTab]);
       }
@@ -715,31 +520,34 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
   }, [navigation, activeTab]);
 
   async function init() {
+    setError(null);
+    // Cache-first: try cache synchronously and render instantly if available
+    try {
+      const cached = await bridge.peekMainPageCache(
+        CATEGORY_TABS[activeTab],
+        "",
+        1
+      );
+      if (cached && cached.length > 0) {
+        setSections(cached);
+        sectionsLoadedRef.current = true;
+        // Instantly hide skeleton — no fade animation needed
+        skeletonOpacity.setValue(0);
+        setShowSkeleton(false);
+        setLoading(false);
+        // Background: load plugins for next refresh
+        bridge.loadPlugins().catch(() => {});
+        return;
+      }
+    } catch (_) {}
+
+    // No cache: show skeleton and fetch fresh
     setShowSkeleton(true);
     skeletonOpacity.setValue(1);
     setLoading(true);
-    setError(null);
     try {
-      const provs = await bridge.loadPlugins();
-      let defaultLiveProvider = "";
-      if (provs && provs.length > 0) {
-        const hasUsaTv = provs.some(p => p.name === "USA TV Next");
-        const customProvs = hasUsaTv ? provs : [
-          ...provs,
-          { id: "USA TV Next", name: "USA TV Next", url: "", hasMainPage: true, hasSearch: false }
-        ];
-        setAllProviders(customProvs);
-        const liveProvs = customProvs.filter((p) =>
-          ["cloudplay", "iptvplayer", "publicsportsiptv", "usa tv next"].includes(
-            p.name.toLowerCase(),
-          ) || p.name.toLowerCase().includes("iptv"),
-        );
-        if (liveProvs.length > 0) {
-          defaultLiveProvider = liveProvs[0].name;
-          setActiveLiveTVProvider(defaultLiveProvider);
-        }
-      }
-      await loadSections(false, CATEGORY_TABS[activeTab], defaultLiveProvider);
+      await bridge.loadPlugins();
+      await loadSections(false, CATEGORY_TABS[activeTab]);
     } catch (e: any) {
       setError(cleanGeneralError(e));
     } finally {
@@ -758,74 +566,67 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
   async function loadSections(
     force: boolean = false,
     categoryName: string = CATEGORY_TABS[activeTab],
-    liveTVProvider: string = activeLiveTVProvider,
     showLoader: boolean = !force,
   ) {
-    const currentProviderName = categoryName === "LiveTV"
-      ? (liveTVProvider || (liveTVProviders[0]?.name || ""))
-      : "";
-    lastLoadRequestRef.current = { category: categoryName, provider: currentProviderName };
+    lastLoadRequestRef.current = { category: categoryName, provider: "" };
 
-    if (showLoader) {
+    // Cache-first: render instantly without skeleton if a cached entry exists
+    if (!force) {
+      const cached = await bridge.peekMainPageCache(categoryName, "", 1);
+      if (cached && cached.length > 0) {
+        // Decorative injected rows (history) are not in cache; skip for instant render
+        setSections(cached);
+        sectionsLoadedRef.current = true;
+      } else if (showLoader) {
+        setSectionsLoading(true);
+        setLoadingCategory(categoryName);
+      }
+    } else if (showLoader) {
       setSectionsLoading(true);
       setLoadingCategory(categoryName);
     }
     setSectionError(null);
     try {
-      const targetProvider = currentProviderName;
       const secs: HomeSection[] = await bridge.getMainPage(
-        targetProvider,
+        "",
         1,
         force,
         categoryName,
       );
 
       // Check if this request is still the most recent active one
-      if (
-        lastLoadRequestRef.current?.category !== categoryName ||
-        (categoryName === "LiveTV" && lastLoadRequestRef.current?.provider !== targetProvider)
-      ) {
+      if (lastLoadRequestRef.current?.category !== categoryName) {
         return;
       }
 
-      if (categoryName === "LiveTV") {
-        const saved = await loadSavedChannelsList();
-        if (saved && saved.length > 0) {
+      try {
+        const hist = await bridge.getPlaybackHistory();
+        const filteredHist = (hist || []).filter((h: any) => {
+          const isLive = h.mediaType === "live" ||
+                         h.type === "live" ||
+                         ["cloudplay", "iptv player", "publicsportsiptv", "sports iptv", "pirate iptv", "sony iptv", "japan iptv"].includes(
+                           (h.provider || "").toLowerCase()
+                         );
+          return !isLive;
+        });
+        if (filteredHist && filteredHist.length > 0) {
           secs.unshift({
-            name: "Saved Channels",
-            items: saved,
-          });
-        }
-      } else {
-        try {
-          const hist = await bridge.getPlaybackHistory();
-          const filteredHist = (hist || []).filter((h: any) => {
-            const isLive = h.mediaType === "live" || 
-                           h.type === "live" || 
-                           ["cloudplay", "iptv player", "publicsportsiptv", "sports iptv", "pirate iptv", "sony iptv", "japan iptv"].includes(
-                             (h.provider || "").toLowerCase()
-                           );
-            return !isLive;
-          });
-          if (filteredHist && filteredHist.length > 0) {
-            secs.unshift({
-              name: "Continue Watching",
-              items: filteredHist.map((h: any) => ({
-                provider: h.provider || "Cinemeta",
-                url: h.detailUrl || (h.mediaType + "/" + h.imdbId),
-                title: h.videoTitle,
-                posterUrl: h.posterUrl,
-                type: h.mediaType,
-                position: h.position,
-                duration: h.duration,
-                season: h.season,
-                episode: h.episode,
+            name: "Continue Watching",
+            items: filteredHist.map((h: any) => ({
+              provider: h.provider || "Cinemeta",
+              url: h.detailUrl || (h.mediaType + "/" + h.imdbId),
+              title: h.videoTitle,
+              posterUrl: h.posterUrl,
+              type: h.mediaType,
+              position: h.position,
+              duration: h.duration,
+              season: h.season,
+              episode: h.episode,
                 imdbId: h.imdbId,
               })) as any,
             });
           }
-        } catch (_) {}
-      }
+      } catch (_) {}
 
       setSections(secs);
       sectionsLoadedRef.current = true;
@@ -833,7 +634,7 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
       // Collect some recommended items from general sections as a fallback
       const fallbacks: MediaItem[] = [];
       secs.forEach((s) => {
-        if (s.name !== "Continue Watching" && s.name !== "Saved Channels" && s.items) {
+        if (s.name !== "Continue Watching" && s.items) {
           fallbacks.push(...s.items.slice(0, 5));
         }
       });
@@ -845,17 +646,11 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
         setFallbackRecommendations(unique.slice(0, 10));
       }
     } catch (e: any) {
-      if (
-        lastLoadRequestRef.current?.category === categoryName &&
-        (categoryName !== "LiveTV" || lastLoadRequestRef.current?.provider === currentProviderName)
-      ) {
+      if (lastLoadRequestRef.current?.category === categoryName) {
         setSectionError(cleanGeneralError(e));
       }
     } finally {
-      if (
-        lastLoadRequestRef.current?.category === categoryName &&
-        (categoryName !== "LiveTV" || lastLoadRequestRef.current?.provider === currentProviderName)
-      ) {
+      if (lastLoadRequestRef.current?.category === categoryName) {
         setSectionsLoading(false);
         setLoadingCategory("");
       }
@@ -863,33 +658,17 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
   }
 
   const handleTabPress = (index: number) => {
-    setActiveTab(index);
-    setLiveTVSearchQuery("");
-    setSelectedCategory("All");
-    sectionsLoadedRef.current = false;
     const category = CATEGORY_TABS[index];
-    const targetProvider = category === "LiveTV" ? (activeLiveTVProvider || (liveTVProviders[0]?.name || "")) : "";
-    loadSections(false, category, targetProvider);
-  };
-
-  const handleLiveTVProviderPress = (providerName: string) => {
-    setActiveLiveTVProvider(providerName);
-    setLiveTVSearchQuery("");
-    setSelectedCategory("All");
+    setActiveTab(index);
     sectionsLoadedRef.current = false;
-    loadSections(false, "LiveTV", providerName);
+    loadSections(false, category);
   };
 
   const goDetail = useCallback(
     (item: MediaItem, layout: CardLayout, index?: number) => {
-      const isLiveItem = item.type === "live" || CATEGORY_TABS[activeTab] === "LiveTV";
-      if (isLiveItem) {
-        playLiveChannel(item);
-      } else {
-        openFromCard(item, layout);
-      }
+      openFromCard(item, layout);
     },
-    [openFromCard, activeTab, playLiveChannel],
+    [openFromCard],
   );
 
   const handleDeleteHistoryItem = useCallback(async (id: string) => {
@@ -921,26 +700,6 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
       );
     }
     if (sectionsLoading) {
-      const isLive = loadingCategory === "LiveTV" || CATEGORY_TABS[activeTab] === "LiveTV";
-      if (isLive) {
-        return (
-          <View
-            style={{
-              paddingTop: insets.top + 125,
-              paddingHorizontal: 20,
-              gap: 16,
-            }}
-          >
-            {[1, 2, 3, 4, 5].map((rowIdx) => (
-              <View key={rowIdx} style={{ flexDirection: "row", gap: 8 }}>
-                <SkeletonBox width={S_CARD_W} height={S_CARD_W} borderRadius={20} />
-                <SkeletonBox width={S_CARD_W} height={S_CARD_W} borderRadius={20} />
-                <SkeletonBox width={S_CARD_W} height={S_CARD_W} borderRadius={20} />
-              </View>
-            ))}
-          </View>
-        );
-      }
       return (
         <View style={{ paddingHorizontal: 20, marginTop: 24, gap: 16 }}>
           <View style={{ gap: 10 }}>
@@ -962,221 +721,6 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
         </View>
       );
     }
-    if (CATEGORY_TABS[activeTab] === "LiveTV") {
-      const categoriesList = sections.map((s) => s.name);
-      
-      let filtered: MediaItem[] = [];
-      if (selectedCategory === "All") {
-        const seen = new Set<string>();
-        sections.forEach((sec) => {
-          (sec.items ?? []).forEach((item) => {
-            if (!seen.has(item.url)) {
-              seen.add(item.url);
-              filtered.push(item);
-            }
-          });
-        });
-      } else {
-        const sec = sections.find((s) => s.name === selectedCategory);
-        if (sec) {
-          filtered = [...(sec.items ?? [])];
-        }
-      }
-
-      if (liveTVSearchQuery.trim()) {
-        const q = liveTVSearchQuery.toLowerCase();
-        filtered = filtered.filter((item) => item.title.toLowerCase().includes(q));
-      }
-
-      return (
-        <Reanimated.View entering={FadeIn.duration(400)} style={{ flex: 1 }}>
-          <Animated.FlatList
-            ref={liveTVFlatListRef}
-            key="liveTV_grid_virtualized"
-            data={filtered}
-            keyExtractor={(item, idx) => item.url + String(idx)}
-            numColumns={3}
-            showsVerticalScrollIndicator={false}
-            scrollEnabled={!showCategoryDropdown}
-            initialNumToRender={18}
-            maxToRenderPerBatch={18}
-            windowSize={5}
-            contentContainerStyle={{
-              paddingTop: insets.top + 110,
-              paddingBottom: 110,
-            }}
-            columnWrapperStyle={{
-              paddingHorizontal: 20,
-              gap: 8,
-              marginBottom: 8,
-            }}
-            style={{ flex: 1 }}
-            onScroll={Animated.event(
-              [{ nativeEvent: { contentOffset: { y: scrollY } } }],
-              { useNativeDriver: true }
-            )}
-            scrollEventThrottle={16}
-            refreshControl={
-              <RefreshControl
-                refreshing={refreshing}
-                onRefresh={onRefresh}
-                tintColor="transparent"
-                colors={["transparent"]}
-                progressBackgroundColor="transparent"
-                progressViewOffset={insets.top + 115}
-              />
-            }
-            ListHeaderComponent={
-              <View style={{ paddingBottom: 16, zIndex: 10 }}>
-                <View style={styles.liveTVControlRow}>
-                  <View style={styles.liveTVSearchContainer}>
-                    <TextInput
-                      style={styles.liveTVSearchInput}
-                      placeholder="Search channels..."
-                      placeholderTextColor="#8E8D92"
-                      value={liveTVSearchQuery}
-                      onChangeText={setLiveTVSearchQuery}
-                    />
-                  </View>
-                  
-                  <TouchableOpacity
-                    style={styles.liveTVDropdown}
-                    onPress={() => setShowCategoryDropdown(!showCategoryDropdown)}
-                    activeOpacity={0.8}
-                  >
-                    <Text style={styles.liveTVDropdownText} numberOfLines={1}>
-                      {selectedCategory === "All" ? "All Categories" : selectedCategory}
-                    </Text>
-                    <Text style={{ color: "#8E8D92", fontSize: 10, marginLeft: 6 }}>▼</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={styles.liveTVRefreshButton}
-                    onPress={() => loadSections(true, "LiveTV", activeLiveTVProvider, true)}
-                    disabled={sectionsLoading}
-                    activeOpacity={0.75}
-                  >
-                    {sectionsLoading ? (
-                      <ActivityIndicator size="small" color="#ffffff" />
-                    ) : (
-                      <RotateCw size={16} color="#ffffff" />
-                    )}
-                  </TouchableOpacity>
-                </View>
-              </View>
-            }
-            renderItem={({ item }) => (
-              <ChannelCard
-                item={item}
-                onPress={(i) =>
-                  goDetail(i, {
-                    x: 0,
-                    y: 0,
-                    width: S_CARD_W,
-                    height: S_CARD_W,
-                    borderRadius: 22,
-                  })
-                }
-                isSaved={savedUrls.has(item.url)}
-                onToggleSave={handleToggleSaveChannel}
-                width={S_CARD_W}
-              />
-            )}
-            ListEmptyComponent={
-              <View style={{ alignItems: "center", marginTop: 40, paddingHorizontal: 20 }}>
-                <Text style={{ color: "#8E8D92", fontSize: 13, textAlign: "center" }}>
-                  No channels match your search or filter.
-                </Text>
-              </View>
-            }
-          />
-
-          {/* Category Dropdown rendered ABOVE the FlatList to avoid clipping */}
-          {showCategoryDropdown && (
-            <>
-              <Pressable
-                style={{
-                  position: 'absolute',
-                  top: 0, bottom: 0, left: 0, right: 0,
-                  zIndex: 90,
-                }}
-                onPress={() => setShowCategoryDropdown(false)}
-              />
-              <Reanimated.View
-                entering={FadeIn.duration(200)}
-                exiting={FadeOut.duration(150)}
-                style={[
-                  styles.floatingDropdown,
-                  {
-                    position: 'absolute',
-                    top: insets.top + 155,
-                    right: 68,
-                    zIndex: 999,
-                    elevation: 20,
-                  },
-                ]}
-              >
-                <LinearGradient
-                  colors={["#1c1c22", "#0f0f12"]}
-                  style={StyleSheet.absoluteFillObject}
-                />
-                <ScrollView
-                  nestedScrollEnabled={true}
-                  showsVerticalScrollIndicator={true}
-                  style={{ maxHeight: 280 }}
-                >
-                  <TouchableOpacity
-                    style={[
-                      styles.dropdownItem,
-                      selectedCategory === "All" && styles.dropdownItemSelected,
-                    ]}
-                    onPress={() => {
-                      setSelectedCategory("All");
-                      setShowCategoryDropdown(false);
-                    }}
-                  >
-                    <View style={styles.dropdownItemLeft}>
-                      <View style={[styles.seasonNumberBox, selectedCategory === "All" && styles.seasonNumberBoxSelected]}>
-                        <Text style={[styles.seasonNumberText, selectedCategory === "All" && styles.seasonNumberTextSelected, { fontSize: 10 }]}>ALL</Text>
-                      </View>
-                      <Text style={[styles.dropdownItemText, selectedCategory === "All" && styles.dropdownItemTextSelected]}>All Categories</Text>
-                    </View>
-                    {selectedCategory === "All" && <Text style={styles.checkmark}>✓</Text>}
-                  </TouchableOpacity>
-                  {categoriesList.map((cat) => (
-                    <TouchableOpacity
-                      key={cat}
-                      style={[styles.dropdownItem, selectedCategory === cat && styles.dropdownItemSelected]}
-                      onPress={() => {
-                        setSelectedCategory(cat);
-                        setShowCategoryDropdown(false);
-                      }}
-                    >
-                      <View style={styles.dropdownItemLeft}>
-                        <View style={[styles.seasonNumberBox, selectedCategory === cat && styles.seasonNumberBoxSelected]}>
-                          <Text style={[styles.seasonNumberText, selectedCategory === cat && styles.seasonNumberTextSelected, { fontSize: 10 }]}>{cat.substring(0, 2).toUpperCase()}</Text>
-                        </View>
-                        <Text style={[styles.dropdownItemText, selectedCategory === cat && styles.dropdownItemTextSelected]} numberOfLines={1}>{cat}</Text>
-                      </View>
-                      {selectedCategory === cat && <Text style={styles.checkmark}>✓</Text>}
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
-              </Reanimated.View>
-            </>
-          )}
-
-          {filtered.length > 0 && (
-            <QuickScrollFab
-              onScrollToTop={() => liveTVFlatListRef.current?.scrollToOffset({ offset: 0, animated: true })}
-              onScrollToBottom={() => liveTVFlatListRef.current?.scrollToEnd({ animated: true })}
-              bottomOffset={105}
-              rightOffset={20}
-            />
-          )}
-        </Reanimated.View>
-      );
-    }
 
     const displaySections = sections;
 
@@ -1189,9 +733,6 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
             navigation={navigation}
             goDetail={goDetail}
             onDeleteHistoryItem={handleDeleteHistoryItem}
-            isLiveTab={false}
-            savedUrls={savedUrls}
-            onToggleSave={handleToggleSaveChannel}
           />
         ))}
       </Reanimated.View>
@@ -1205,11 +746,6 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
     navigation,
     goDetail,
     activeTab,
-    savedUrls,
-    handleToggleSaveChannel,
-    liveTVSearchQuery,
-    selectedCategory,
-    showCategoryDropdown,
   ]);
 
   return (
@@ -1274,7 +810,7 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
           />
         </BlurTargetView>
 
-        {/* ── Category tab row ── */}
+        {/* ── Header: tabs (flex row, no absolute positioning) + compact TV chip ── */}
         <Animated.View
           style={[styles.headerContainer, { top: insets.top + 4 }]}
         >
@@ -1310,93 +846,50 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
             </View>
           </Animated.View>
 
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.tabRow}
-            style={styles.tabRowWrap}
-          >
-            {CATEGORY_TABS.map((tab, i) => {
-              const isActive = i === activeTab;
-              return (
-                <TouchableOpacity
-                  key={tab}
-                  onPress={() => handleTabPress(i)}
-                  activeOpacity={0.75}
-                  style={[styles.tabItem, isActive && styles.tabItemActive]}
-                >
-                  <Text
-                    style={[styles.tabText, isActive && styles.tabTextActive]}
-                  >
-                    {tab}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-        </Animated.View>
-
-        {/* ── LiveTV Provider sub-tab row ── */}
-        {CATEGORY_TABS[activeTab] === "LiveTV" && liveTVProviders.length > 0 && (
-          <Animated.View
-            style={[
-              styles.subHeaderContainer,
-              {
-                top: insets.top + 4 + 48 + 8,
-              },
-            ]}
-          >
-            <View style={styles.blurBackdrop}>
-              {blurTarget && !showSkeleton ? (
-                <BlurView
-                  intensity={100}
-                  tint="dark"
-                  style={StyleSheet.absoluteFillObject}
-                  blurMethod="dimezisBlurView"
-                  blurTarget={{ current: blurTarget }}
-                />
-              ) : (
-                <View
-                  style={[
-                    StyleSheet.absoluteFillObject,
-                    { backgroundColor: "rgba(20, 18, 24, 0.95)" },
-                  ]}
-                />
-              )}
-              <View
-                style={[
-                  StyleSheet.absoluteFillObject,
-                  { backgroundColor: "rgba(15, 15, 20, 0.38)" },
-                ]}
-              />
-            </View>
-
+          <View style={styles.tabsFlexArea}>
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.subTabRow}
+              contentContainerStyle={styles.tabRow}
               style={styles.tabRowWrap}
             >
-              {liveTVProviders.map((provider) => {
-                const isActive = provider.name === activeLiveTVProvider;
+              {CATEGORY_TABS.map((tab, i) => {
+                const isActive = i === activeTab;
                 return (
                   <TouchableOpacity
-                    key={provider.id}
-                    onPress={() => handleLiveTVProviderPress(provider.name)}
+                    key={tab}
+                    onPress={() => handleTabPress(i)}
                     activeOpacity={0.75}
-                    style={[styles.subTabItem, isActive && styles.subTabItemActive]}
+                    style={[styles.tabItem, isActive && styles.tabItemActive]}
                   >
                     <Text
-                      style={[styles.subTabText, isActive && styles.subTabTextActive]}
+                      style={[styles.tabText, isActive && styles.tabTextActive]}
                     >
-                      {provider.name}
+                      {tab}
                     </Text>
                   </TouchableOpacity>
                 );
               })}
             </ScrollView>
-          </Animated.View>
-        )}
+          </View>
+
+          {/* Compact TV chip — flex sibling, never overlaps tabs */}
+          <TouchableOpacity
+            style={styles.tvCompactChip}
+            onPress={() => navigation?.navigate?.("LiveTV")}
+            activeOpacity={0.75}
+          >
+            <LinearGradient
+              colors={["#8B5CF6", "#6366F1", "#4338CA"]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.tvCompactChipGradient}
+            >
+              <MaterialIcons name="tv" size={16} color="#FFFFFF" />
+              <Text style={styles.tvCompactChipText}>TV</Text>
+            </LinearGradient>
+          </TouchableOpacity>
+        </Animated.View>
 
         <Animated.View style={{ flex: 1, zIndex: 1 }}>
           {/* ── Content ── */}
@@ -1421,11 +914,8 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
                 </TouchableOpacity>
               </BlurView>
             </ScrollView>
-          ) : CATEGORY_TABS[activeTab] === "LiveTV" ? (
-            renderedSections
           ) : (
             <Animated.ScrollView
-              scrollEnabled={!showCategoryDropdown}
               refreshControl={
                 <RefreshControl
                   refreshing={refreshing}
@@ -1503,7 +993,7 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
           ]}
           pointerEvents={loading ? "auto" : "none"}
         >
-          <HomeSkeletonScreen isLive={CATEGORY_TABS[activeTab] === "LiveTV" || loadingCategory === "LiveTV"} />
+          <HomeSkeletonScreen />
         </Animated.View>
       )}
 
@@ -1561,7 +1051,7 @@ const styles = StyleSheet.create({
     height: "100%",
   },
 
-  // category tabs — floating capsule with animated glass background
+  // category tabs ,  floating capsule with animated glass background
   headerContainer: {
     position: "absolute",
     left: SCREEN_WIDTH * 0.025,
@@ -1572,10 +1062,18 @@ const styles = StyleSheet.create({
     zIndex: 150,
     borderWidth: 1,
     borderColor: "rgba(255, 255, 255, 0.08)",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
   },
   blurBackdrop: {
     ...StyleSheet.absoluteFillObject,
     borderRadius: 24,
+    overflow: "hidden",
+  },
+  tabsFlexArea: {
+    flex: 1,
+    height: "100%",
     overflow: "hidden",
   },
   tabRowWrap: {
@@ -1600,7 +1098,7 @@ const styles = StyleSheet.create({
   tabText: { color: "rgba(255,255,255,0.5)", fontSize: 13, fontWeight: "600" },
   tabTextActive: { color: "#ffffff", fontWeight: "700" },
 
-  // hero card — poster only, scale+opacity animated by parent FlatList
+  // hero card ,  poster only, scale+opacity animated by parent FlatList
   heroCard: {
     width: HERO_CARD_WIDTH,
     height: HERO_CARD_HEIGHT,
@@ -1783,165 +1281,40 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: 1.5,
   },
-  subHeaderContainer: {
-    position: "absolute",
-    left: 20,
-    right: 20,
-    height: 38,
-    borderRadius: 19,
+  tvCompactChip: {
+    height: "100%",
+    borderTopRightRadius: 24,
+    borderBottomRightRadius: 24,
+    borderTopLeftRadius: 16,
+    borderBottomLeftRadius: 16,
     overflow: "hidden",
-    zIndex: 140,
-    backgroundColor: "rgba(20, 18, 24, 0.45)",
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.05)",
+    shadowColor: "#6366F1",
+    shadowOpacity: 0.55,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 8,
   },
-  subTabRow: {
-    paddingHorizontal: 12,
-    alignItems: "center",
-    gap: 6,
-  },
-  subTabItem: {
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 12,
-    backgroundColor: "transparent",
-  },
-  subTabItemActive: {
-    backgroundColor: "rgba(0, 71, 255, 0.15)",
-    borderWidth: 1,
-    borderColor: "rgba(0, 71, 255, 0.3)",
-  },
-  subTabText: {
-    color: "#8E8D92",
-    fontSize: 12,
-    fontWeight: "600",
-  },
-  subTabTextActive: {
-    color: "#ffffff",
-    fontWeight: "700",
-  },
-  liveTVControlRow: {
-    flexDirection: "row",
-    paddingHorizontal: 20,
-    marginTop: 16,
-    gap: 8,
-    alignItems: "center",
-    zIndex: 10,
-  },
-  liveTVSearchContainer: {
-    flex: 1.6,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "rgba(20, 18, 24, 0.65)",
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.08)",
-    justifyContent: "center",
-    paddingHorizontal: 16,
-  },
-  liveTVSearchInput: {
-    color: "#fff",
-    fontSize: 14,
-    fontWeight: "500",
-    padding: 0,
-  },
-  liveTVDropdown: {
+  tvCompactChipGradient: {
     flex: 1,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "rgba(20, 18, 24, 0.65)",
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.08)",
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 16,
-  },
-  liveTVDropdownText: {
-    color: "#fff",
-    fontSize: 13,
-    fontWeight: "600",
-    maxWidth: "80%",
-  },
-  floatingDropdown: {
-    position: "absolute",
-    top: 44, // Right below the live tv dropdown button (height: 40)
-    right: 0,
-    width: 220,
-    borderRadius: 20,
-    overflow: "hidden",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.12)",
-    zIndex: 100,
-  },
-  dropdownItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingVertical: 12,
+    justifyContent: "center",
     paddingHorizontal: 14,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "rgba(255,255,255,0.05)",
-  },
-  dropdownItemSelected: {
-    backgroundColor: "rgba(255,255,255,0.06)",
-  },
-  dropdownItemLeft: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-  },
-  seasonNumberBox: {
-    width: 28,
-    height: 28,
-    borderRadius: 8,
-    backgroundColor: "rgba(255,255,255,0.05)",
-    alignItems: "center",
-    justifyContent: "center",
+    gap: 6,
+    borderTopRightRadius: 24,
+    borderBottomRightRadius: 24,
+    borderTopLeftRadius: 16,
+    borderBottomLeftRadius: 16,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
+    borderColor: "rgba(255, 255, 255, 0.18)",
   },
-  seasonNumberBoxSelected: {
-    backgroundColor: "rgba(255,255,255,0.12)",
-    borderColor: "rgba(255,255,255,0.2)",
-  },
-  seasonNumberText: {
-    color: "rgba(255,255,255,0.5)",
-    fontSize: 12,
-    fontWeight: "700",
-  },
-  seasonNumberTextSelected: {
-    color: "#fff",
-  },
-  dropdownItemText: {
-    color: "rgba(255,255,255,0.65)",
-    fontSize: 14,
-    fontWeight: "600",
-  },
-  dropdownItemTextSelected: {
-    color: "#fff",
-    fontWeight: "700",
-  },
-  checkmark: {
-    color: "#fff",
-    fontSize: 14,
-    fontWeight: "bold",
-  },
-  liveTVRefreshButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "rgba(20, 18, 24, 0.65)",
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.08)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  gridContainer: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    justifyContent: "flex-start",
-    paddingHorizontal: 20,
-    gap: 8,
-    marginTop: 16,
+  tvCompactChipText: {
+    color: "#ffffff",
+    fontSize: 11,
+    fontWeight: "800",
+    letterSpacing: 0.6,
+    textShadowColor: "rgba(0, 0, 0, 0.4)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
   },
 });

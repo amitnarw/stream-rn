@@ -129,13 +129,24 @@ export function TransitionProvider({ children }: { children: React.ReactNode }) 
 
   const loadDetailFor = useCallback(async (nextItem: MediaItem) => {
     const requestId = ++requestIdRef.current;
-    setLoading(true);
     setError(null);
+    // Cache-first: render instantly from cache if available
+    try {
+      const cached = await bridge.peekDetailCache(nextItem.provider || 'Cinemeta', nextItem.url);
+      if (cached && requestId === requestIdRef.current) {
+        setDetail(cached);
+        setLoading(false);
+      } else {
+        setLoading(true);
+      }
+    } catch (_) {
+      setLoading(true);
+    }
     try {
       const result = await bridge.loadDetail(nextItem.provider || 'Cinemeta', nextItem.url);
       if (requestId === requestIdRef.current) {
         setDetail(result);
-        
+
         // Enrich cast/runtimes from TVmaze/TMDB in the background without blocking the UI
         bridge.enrichDetail(result).then(enriched => {
           if (requestId === requestIdRef.current) {
@@ -144,7 +155,7 @@ export function TransitionProvider({ children }: { children: React.ReactNode }) 
         }).catch(err => {
           console.warn("Background details enrichment failed:", err);
         });
-        
+
         // If provider has no recommendations, fetch tag-based related items on the same provider
         if (!result.recommendations || result.recommendations.length === 0) {
           const firstTag = result.tags?.[0];

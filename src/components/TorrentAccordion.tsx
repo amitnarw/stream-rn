@@ -68,7 +68,7 @@ export function TorrentAccordion({
         .split(",")
         .map((x: string) => x.trim())
         .forEach((l: string) => {
-          if (l && l !== "—") set.add(l);
+          if (l && l !== ", ") set.add(l);
         });
     });
     return ["All Audios", ...Array.from(set).sort()];

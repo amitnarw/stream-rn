@@ -6,6 +6,12 @@ A browse/search/play streaming Android app using **React Native (Expo SDK 55)** 
 
 **Core Architecture**: React Native old bridge (ReactContextBaseJavaModule) -> Kotlin native module -> CloudStream library (v4.7.0 on JitPack) -> .cs3 plugin files bundled in APK assets.
 
+**Content Sources (dual pipeline):**
+- **Listings/images/posters** ,  Cinemeta, TMDB, TVMaze, Stremio catalogs (Stremio, Netflix Addons, Hindi Addons, etc.). These are reliable, public APIs that always work.
+- **Stream links** ,  CloudStream `.cs3` plugins loaded at runtime (Phisher repo, CSX repo). These scrape the actual streaming source sites.
+
+These two are deliberately decoupled: a user browses a movie via Cinemeta posters, then `resolvePlaybackSources()` searches every registered `.cs3` plugin for that title to find playable sources.
+
 ---
 
 ## File Inventory
@@ -37,14 +43,20 @@ A browse/search/play streaming Android app using **React Native (Expo SDK 55)** 
 - `cloudstream/PlayerActivity.kt` - ExoPlayer (Media3) activity. **Landscape mode**, top overlay (title + back), auto-hide controls, DefaultTrackSelector for adaptive quality, subtitle track support.
 - `AndroidManifest.xml` - Added PlayerActivity with `Theme.AppCompat.NoActionBar`
 
-### Assets (Plugins) — actual files on disk
-- `android/app/src/main/assets/plugins/Goojara.cs3` ✅
-- `android/app/src/main/assets/plugins/FourKHDHub.cs3` ✅
-- `android/app/src/main/assets/plugins/YTS.cs3` ✅
-- `android/app/src/main/assets/plugins/CloudPlay.cs3` ✅
-- `android/app/src/main/assets/plugins/Movies4u.cs3` ✅
-- `android/app/src/main/assets/plugins/Movierulzhd.cs3` ✅
-- `android/app/src/main/assets/plugins/HDhub4u.cs3` ✅
+### Assets (Plugins) ,  90 .cs3 files bundled in APK (~6 MB total)
+**Source:** All plugins from `phisher98/cloudstream-extensions-phisher` (Phisher Repo) + a few from `SaurabhKaperwan/CSX` (Bollyflix, MoviesDrive, Moviesmod, VegaMovies) for Hindi/regional content.
+
+**English / Wide-content plugins (high value):**
+- StreamPlay, Ultima, XDMovies, Cinemacity, OneTouchTV, Jellyfin, TorraStream, ShowBox, SuperStream, StremioX, StremioAddon, SoraStream, FourKHDHub, UHDmoviesProvider, IStreamFlare, MovieBoxProvider, MPlayerProvider, Zinkmovies, Fibwatch, Hdmovie2, Microtv, Netcinez, AllMovieLandProvider, Fivemovierulz, WcofunProvider, KisskhProvider, Kissasian, AllWish, YTS, AnimePahe, YugenAnime
+
+**Hindi / Bollywood / Regional plugins:**
+- Movies4u, MoviesDrive, Moviesmod, Movierulzhd, Bollyflix, VegaMovies, Bolly4u (native Kotlin), CineStream, Cinefreak, Desicinemas, DudeFilms, Goojara, HDhub4u, Hindmoviez, Tamilblasters
+
+**Anime / Asian / Cartoon plugins:**
+- Anichi, AniDb, Anikage, AniKoto, Anilight, Animeav1, AnimeCloud, AnimeDekhoProvider, Animedubhindi, Animekhor, Animenosub, Animesalt, Animexin, Anineko, Aniworld, Anizone, BanglaPlex, CoFlix, Donghuastream, DoraBash, IdlixProvider, Kartoons, Kickassanime, Latanime, LayarKacaProvider, MassTamilanProvider, Megakino, MovieBlast, OHLI24, OnePace, Pencurimovie, Pinoymoviepedia, Piratexplay, Pmsm, RingZ, ToonHub, Toonstream, ToonTales, Topcartoons, Topstreamfilm
+
+**LiveTV / IPTV plugins:**
+- CloudPlay, IPTVPlayer, PublicSportsIPTV, QuickIPTV
 
 ---
 
@@ -118,7 +130,7 @@ $env:Path = "$env:ANDROID_HOME\platform-tools;$env:Path"
 npx expo run:android
 ```
 
-> **IMPORTANT**: When doing code review / quick verification, **always** use `compileDebugKotlin` or `lintDebug` from the `android/` directory. Do NOT run `assembleDebug` or `npx expo run:android` for simple Kotlin/lint checks — those take 2-3 minutes and are unnecessary.
+> **IMPORTANT**: When doing code review / quick verification, **always** use `compileDebugKotlin` or `lintDebug` from the `android/` directory. Do NOT run `assembleDebug` or `npx expo run:android` for simple Kotlin/lint checks ,  those take 2-3 minutes and are unnecessary.
 
 ### Key Dependencies (build.gradle)
 - Kotlin: 2.3.21 (root build.gradle - for CloudStream compatibility)
@@ -129,7 +141,7 @@ npx expo run:android
 
 ---
 
-## Current State (June 16, 2026)
+## Current State (Aug 31, 2026)
 
 ### Working
 - Kotlin compilation passes (`BUILD SUCCESSFUL`)
@@ -151,15 +163,38 @@ npx expo run:android
 - PlayerActivity: non-fatal error overlay with Retry/Back options
 - PlayerActivity: Next/Previous episode buttons + auto-play next
 - PlayerActivity: sleep timer (15min, 30min, 60min, End of episode)
-- PlayerActivity: MediaSession integration (lock-screen controls, notification, audio focus)
+- PlayerActivity: MediaSession integration (lock-screen listener, notification, audio focus)
+
+### New (Aug 31, 2026)
+- **90 plugins** loaded (~6 MB). All Phisher plugins added plus existing CSX plugins.
+- 4 stale plugins refreshed to current builds: CloudPlay, Hindmoviez, CineStream (from CSX), IPTVPlayer.
+- **MoviesNexus WebView resolver** (`src/api/moviesNexusResolver.ts`):
+  - Looks up TMDB ID from IMDb ID via `/find/3`.
+  - Mounts hidden `react-native-webview` at `https://www.moviesnexus.fun/movie/{tmdbId}` or `/tv/{id}/{season}/{episode}`.
+  - Injects JS that intercepts `fetch`/`XHR` to `/api/extract` and parses the JSON response.
+  - Returns server URLs as `VideoSource[]` with `provider: 'MoviesNexus'`.
+  - Added as a static tab in source picker (alongside VidSrcMe/VsEmbed).
+  - **Note**: a custom CloudStream `.cs3` plugin is NOT feasible because MoviesNexus uses a Next.js server action for token generation; we cannot replicate it from Kotlin. WebView interception is the only practical approach.
+
+### Updated (Aug 31, 2026 – evening)
+- **CloudPlay removed** as a default LiveTV / source-picker provider. Its `/main.php` backend was returning `error code: 1042` (server-side quota/signature error), which is not fixable from the app.
+- **Replaced with multiple Indian M3U sources** from `amazeyourself/m3u`:
+  - `DishTV d2h` (primary default; 18 KB, all Indian channels, full HD logos from Gracenote)
+  - `YuppTV Fast` (227 KB – broadest lineup)
+  - `SmartPlay` (61 KB), `StreamBridge`, `LiveBox`, `Pishow`, `Akash Go`, `Amigo FX`, `Riptv`
+- All M3U providers are registered through a single `M3U_SOURCE_MAP` in `src/api/cloudStreamBridge.ts:316`. `getMainPage` and `loadLinks` both branch on this map ,  no more hard-coded provider checks per name.
+- `Jio TV` and `Tango TV` retained as secondary options.
+- MoviesNexus WebView injector hardened to also forward `window.postMessage` events of type `MOVIE_NEXUS_SERVERS` (per MoviesNexus docs) and `data.servers` arrays, so server lists can be picked up whether they come via `/api/extract` or via `postMessage`.
 
 ### Not Yet Tested (Runtime)
 - All UI features are compile-verified but runtime-untested
+- MoviesNexus WebView interceptor is compile-verified but runtime-untested ,  actual API interception may not work depending on how the Next.js app loads (CSR vs RSC, bundle splitting, etc.)
 
 ### Known Issues
 - `expo-constants:createExpoConfig` warning about NODE_ENV (harmless)
 - Gradle deprecated features warnings (harmless)
 - The `kotlinVersion` in root project is 2.3.21 while Expo gradle plugin reports `kotlin: 2.1.20` (Expo modules are compiled with 2.1.20, metadata mismatch is non-fatal)
+- Several Phisher plugins may have dead source-site domains; runtime Logcat will reveal which need `DOMAIN_PATCHES` updates in `CloudStreamPluginHost.kt`.
 
 ---
 

@@ -121,7 +121,9 @@ class CloudStreamModule(reactContext: ReactApplicationContext) :
         logoUrl: String,
         provider: String,
         detailUrl: String,
-        isTorrentStream: Boolean
+        isTorrentStream: Boolean,
+        channelsJson: String,
+        currentChannelIndex: Int
     ) {
         try {
             val context = reactApplicationContext
@@ -145,6 +147,8 @@ class CloudStreamModule(reactContext: ReactApplicationContext) :
                 putExtra("provider", provider)
                 putExtra("detailUrl", detailUrl)
                 putExtra("isTorrentStream", isTorrentStream)
+                putExtra("channelsJson", channelsJson)
+                putExtra("currentChannelIndex", currentChannelIndex)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
             context.startActivity(intent)

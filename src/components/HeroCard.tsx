@@ -81,7 +81,7 @@ export const HeroCard = React.memo(function HeroCard({
         }).start();
       }
     } else if (phase === 'idle') {
-      // Animate non-target cards back to full opacity — never hard-snap.
+      // Animate non-target cards back to full opacity ,  never hard-snap.
       // setValue(1) on the same frame React commits the phase change caused
       // a visible 1-frame flash for all surrounding carousel cards.
       Animated.timing(overlayOpacity, {
@@ -91,7 +91,7 @@ export const HeroCard = React.memo(function HeroCard({
       }).start();
     }
     // During opening/open/closing phases, non-target cards keep their current
-    // overlay state — no change needed.
+    // overlay state ,  no change needed.
   }, [phase, isTarget]);
 
 
