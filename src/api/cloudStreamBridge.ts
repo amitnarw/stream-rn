@@ -237,12 +237,95 @@ interface M3uEntry {
   group: string;
   url: string;
   headers: Record<string, string>;
+  drmScheme: 'clearkey' | 'widevine' | null;
+  drmLicenseUrl: string | null;
+  drmKey: string | null;
+  manifestHeaders: Record<string, string>;
+}
+
+interface M3uParsedProps {
+  drmScheme: 'clearkey' | 'widevine' | null;
+  drmLicenseUrl: string | null;
+  drmKey: string | null;
+  manifestHeaders: Record<string, string>;
+}
+
+// Parses a "#KODIPROP:inputstream.adaptive.manifest_headers="Referer=...;Origin=...;User-Agent=..."" value
+// into a key->value record. Splits on `;`, then on the first `=` per pair.
+function parseManifestHeaders(raw: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  const pairs = raw.split(';');
+  for (const pair of pairs) {
+    const idx = pair.indexOf('=');
+    if (idx === -1) continue;
+    const key = pair.substring(0, idx).trim();
+    const val = pair.substring(idx + 1).trim();
+    if (key) out[key] = val;
+  }
+  return out;
+}
+
+// Reads KODIPROP lines attached to a pending entry. Supports the common Kodi inputstream.adaptive
+// properties seen in DishTV d2h / bhoomtv.me / keralive.workers.dev playlists:
+//   inputstream.adaptive.license_type=clearkey
+//   inputstream.adaptive.license_key={keyIdHex}:{keyHex}
+//   inputstream.adaptive.license_url=...    (optional)
+//   inputstream.adaptive.mimetype=application/dash+xml
+//   inputstream.adaptive.manifest_headers="Referer=...;Origin=...;User-Agent=..."
+function readKodiProps(rawLine: string, out: M3uParsedProps): void {
+  const body = rawLine.substring('#KODIPROP:'.length).trim();
+  const eqIdx = body.indexOf('=');
+  if (eqIdx === -1) return;
+  const key = body.substring(0, eqIdx).trim();
+  let val = body.substring(eqIdx + 1).trim();
+  // Strip surrounding quotes (Kodi often uses double quotes)
+  if (val.length >= 2 && val.startsWith('"') && val.endsWith('"')) {
+    val = val.substring(1, val.length - 1);
+  }
+
+  switch (key) {
+    case 'inputstream.adaptive.license_type': {
+      const norm = val.toLowerCase();
+      if (norm === 'clearkey' || norm === 'widevine') {
+        out.drmScheme = norm;
+      }
+      break;
+    }
+    case 'inputstream.adaptive.license_key': {
+      out.drmKey = val;
+      break;
+    }
+    case 'inputstream.adaptive.license_url':
+    case 'inputstream.adaptive.license_server': {
+      out.drmLicenseUrl = val;
+      break;
+    }
+    case 'inputstream.adaptive.manifest_headers': {
+      const parsed = parseManifestHeaders(val);
+      out.manifestHeaders = { ...out.manifestHeaders, ...parsed };
+      break;
+    }
+    default:
+      // Ignore unrelated KODIPROP keys (streamtype, flags, etc.)
+      break;
+  }
 }
 
 function parseM3u(text: string): M3uEntry[] {
   const entries: M3uEntry[] = [];
   const lines = text.split(/\r?\n/);
-  let pending: { name: string; logo: string | null; group: string; headers: Record<string, string> } | null = null;
+  let pending:
+    | {
+        name: string;
+        logo: string | null;
+        group: string;
+        headers: Record<string, string>;
+        drmScheme: 'clearkey' | 'widevine' | null;
+        drmLicenseUrl: string | null;
+        drmKey: string | null;
+        manifestHeaders: Record<string, string>;
+      }
+    | null = null;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
@@ -261,6 +344,12 @@ function parseM3u(text: string): M3uEntry[] {
       continue;
     }
 
+    if (line.startsWith('#KODIPROP')) {
+      if (!pending) continue;
+      readKodiProps(line, pending);
+      continue;
+    }
+
     if (line.startsWith('#EXTINF')) {
       const nameMatch = line.match(/,(.*)$/);
       const name = nameMatch ? nameMatch[1].trim() : 'Unknown Channel';
@@ -271,6 +360,10 @@ function parseM3u(text: string): M3uEntry[] {
         logo: tvgLogo ? tvgLogo[1] : null,
         group: group ? group[1] : 'General',
         headers: {},
+        drmScheme: null,
+        drmLicenseUrl: null,
+        drmKey: null,
+        manifestHeaders: {},
       };
       continue;
     }
@@ -279,7 +372,16 @@ function parseM3u(text: string): M3uEntry[] {
 
     if (pending) {
       pending.headers['User-Agent'] = pending.headers['http-user-agent'] ?? pending.headers['User-Agent'] ?? '';
-      entries.push({ ...pending, url: line });
+      // Merge any manifest_headers that are not already covered by EXTVLCOPT / User-Agent
+      pending.headers = { ...pending.manifestHeaders, ...pending.headers };
+      entries.push({
+        ...pending,
+        url: line,
+        drmScheme: pending.drmScheme,
+        drmLicenseUrl: pending.drmLicenseUrl,
+        drmKey: pending.drmKey,
+        manifestHeaders: pending.manifestHeaders,
+      });
       pending = null;
     }
   }
@@ -294,7 +396,15 @@ function parseM3uToSections(text: string, providerName: string): HomeSection[] {
     if (!entry.url.startsWith('http')) continue;
     const item = {
       provider: providerName,
-      url: JSON.stringify({ url: entry.url, headers: entry.headers, title: entry.name }),
+      url: JSON.stringify({
+        url: entry.url,
+        headers: entry.headers,
+        title: entry.name,
+        drmScheme: entry.drmScheme,
+        drmLicenseUrl: entry.drmLicenseUrl,
+        drmKey: entry.drmKey,
+        manifestHeaders: entry.manifestHeaders,
+      }),
       title: entry.name,
       posterUrl: entry.logo,
       type: 'live',
@@ -314,6 +424,8 @@ function parseM3uToSections(text: string, providerName: string): HomeSection[] {
 }
 
 export const M3U_SOURCE_MAP: Record<string, string> = {
+  // Zuno curated playlist (hosted in this repo, edited from data/zuno_tv.m3u)
+  'Zuno TV': 'https://raw.githubusercontent.com/amitnarw/stream-rn/main/data/zuno_tv.m3u',
   // Indian DTH / cable (primary)
   'DishTV d2h': 'https://raw.githubusercontent.com/amazeyourself/m3u/main/dishd2h.m3u',
   'Jio TV': 'https://raw.githubusercontent.com/amazeyourself/m3u/main/jtv.m3u',
@@ -337,15 +449,23 @@ export const M3U_SOURCE_MAP: Record<string, string> = {
   'Roarzone': 'https://raw.githubusercontent.com/amazeyourself/m3u/main/roarzone.m3u',
   'Jayam OTT': 'https://raw.githubusercontent.com/amazeyourself/m3u/main/jayamott.m3u',
   'Joshua OTT': 'https://raw.githubusercontent.com/amazeyourself/m3u/main/joshuaott.m3u',
+  // Sony channels via CloudPlay proxy (no login, plain HLS)
+  'SonyLIV CloudPlay': 'https://raw.githubusercontent.com/amazeyourself/m3u/main/sliv.m3u',
+  // TATA Play channels via third-party Cloudflare Worker (VPN may be required)
+  'TATA Play PiratesTV': 'https://tataplay.piratestv.workers.dev/',
   // International / curated
+  'IPTV Org Hindi': 'https://iptv-org.github.io/iptv/languages/hin.m3u',
   'IPTV Org India': 'https://iptv-org.github.io/iptv/countries/in.m3u',
   'DistroTV': 'https://raw.githubusercontent.com/amazeyourself/m3u/main/distrotv.m3u',
 };
 
 // Ordered provider list for the dedicated LiveTV screen
 export const M3U_PROVIDER_ORDER: string[] = [
+  'Zuno TV',
   'DishTV d2h',
   'Jio TV',
+  'SonyLIV CloudPlay',
+  'TATA Play PiratesTV',
   'Tango TV',
   'SmartPlay',
   'Pishow',
@@ -366,6 +486,7 @@ export const M3U_PROVIDER_ORDER: string[] = [
   'Roarzone',
   'Jayam OTT',
   'Joshua OTT',
+  'IPTV Org Hindi',
   'IPTV Org India',
   'DistroTV',
 ];

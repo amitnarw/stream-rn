@@ -48,8 +48,13 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.drm.DefaultDrmSessionManager
+import androidx.media3.exoplayer.drm.DrmSessionManager
+import androidx.media3.exoplayer.drm.FrameworkMediaDrm
+import androidx.media3.exoplayer.drm.LocalMediaDrmCallback
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
@@ -111,6 +116,7 @@ class KotlinPlayerActivity : AppCompatActivity() {
     private var logoBitmap: android.graphics.Bitmap? = null
     private var placeholderPulseAnimator: android.animation.ObjectAnimator? = null
     private var logoUrl: String = ""
+    private var currentTitle: String = ""
     private var currentProgressPercentage = 0
 
     private var mediaSession: MediaSession? = null
@@ -407,6 +413,7 @@ class KotlinPlayerActivity : AppCompatActivity() {
         val url = intent.getStringExtra("url")
         val headersJson = intent.getStringExtra("headers") ?: "{}"
         val videoTitle = intent.getStringExtra("title") ?: ""
+        currentTitle = videoTitle
         val subtitleUrl = intent.getStringExtra("subtitleUrl") ?: ""
         val sourcesJsonStr = intent.getStringExtra("sourcesJson") ?: ""
         val subtitlesJsonStr = intent.getStringExtra("subtitlesJson") ?: ""
@@ -501,82 +508,7 @@ class KotlinPlayerActivity : AppCompatActivity() {
         }
 
         if (logoUrl.isNotEmpty() || posterUrl.isNotEmpty()) {
-            CoroutineScope(Dispatchers.IO).launch {
-                var bitmap: android.graphics.Bitmap? = null
-                var isRealLogo = false
-                if (logoUrl.isNotEmpty()) {
-                    if (logoUrl.endsWith(".svg")) {
-                        try {
-                            val urlConnection = java.net.URL(logoUrl).openConnection()
-                            urlConnection.connect()
-                            val input = urlConnection.getInputStream()
-                            val svg = com.caverock.androidsvg.SVG.getFromInputStream(input)
-                            val width = dp(160)
-                            val height = dp(45)
-                            val bmp = android.graphics.Bitmap.createBitmap(width, height, android.graphics.Bitmap.Config.ARGB_8888)
-                            val canvas = android.graphics.Canvas(bmp)
-                            svg.documentWidth = width.toFloat()
-                            svg.documentHeight = height.toFloat()
-                            svg.renderToCanvas(canvas)
-                            bitmap = bmp
-                            isRealLogo = true
-                        } catch (e: Exception) {
-                            Log.e("KotlinPlayerActivity", "Failed to load SVG logo: ${e.message}")
-                        }
-                    } else {
-                        try {
-                            val urlConnection = java.net.URL(logoUrl).openConnection()
-                            urlConnection.connect()
-                            val input = urlConnection.getInputStream()
-                            bitmap = android.graphics.BitmapFactory.decodeStream(input)
-                            isRealLogo = true
-                        } catch (e: Exception) {
-                            Log.e("KotlinPlayerActivity", "Failed to load logo image: ${e.message}")
-                        }
-                    }
-                }
-                if (bitmap == null && posterUrl.isNotEmpty()) {
-                    try {
-                        val urlConnection = java.net.URL(posterUrl).openConnection()
-                        urlConnection.connect()
-                        val input = urlConnection.getInputStream()
-                        bitmap = android.graphics.BitmapFactory.decodeStream(input)
-                        isRealLogo = false
-                    } catch (e: Exception) {
-                        Log.e("KotlinPlayerActivity", "Failed to load fallback poster: ${e.message}")
-                    }
-                }
-                bitmap?.let { b ->
-                    withContext(Dispatchers.Main) {
-                        setupLogoOverlay(b)
-                        if (isRealLogo && ::logoBottomView.isInitialized && ::logoShadowWrapper.isInitialized) {
-                            logoBottomView.setImageBitmap(b)
-                            logoShadowWrapper.visibility = View.VISIBLE
-                            titleTv.visibility = View.GONE
-                        }
-                    }
-                }
-                
-                // Fetch and blur the poster for the background if it exists
-                if (posterUrl.isNotEmpty()) {
-                    try {
-                        val urlConnection = java.net.URL(posterUrl).openConnection()
-                        urlConnection.connect()
-                        val input = urlConnection.getInputStream()
-                        val posterBmp = android.graphics.BitmapFactory.decodeStream(input)
-                        withContext(Dispatchers.Main) {
-                            placeholderImageView?.setImageBitmap(posterBmp)
-                            placeholderImageView?.alpha = 0.2f
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                                val blur = android.graphics.RenderEffect.createBlurEffect(25f, 25f, android.graphics.Shader.TileMode.CLAMP)
-                                placeholderImageView?.setRenderEffect(blur)
-                            }
-                        }
-                    } catch (e: Exception) {
-                        Log.e("KotlinPlayerActivity", "Failed to load blurred background poster: ${e.message}")
-                    }
-                }
-            }
+            loadAndApplyLogo(logoUrl, posterUrl)
         }
 
         if (providerName != null && mediaRef != null) {
@@ -961,6 +893,38 @@ class KotlinPlayerActivity : AppCompatActivity() {
         return container
     }
 
+    /**
+     * Build a ClearKey JSON license response from a Kodi-style "{hex-kid}:{hex-key}" pair.
+     * The platform MediaDrm (ClearKey CDM) requires a W3C EME JSON license response with
+     * base64url-encoded `kid` and `k` values, not the raw hex strings.
+     */
+    private fun buildClearKeyLicenseJson(licenseKey: String): String {
+        val parts = licenseKey.split(":", limit = 2)
+        require(parts.size == 2) { "ClearKey license_key must be in 'hex-kid:hex-key' format" }
+        val keyIdBytes = hexToByteArray(parts[0].trim())
+        val keyBytes = hexToByteArray(parts[1].trim())
+        val keyIdB64 = android.util.Base64.encodeToString(
+            keyIdBytes,
+            android.util.Base64.URL_SAFE or android.util.Base64.NO_PADDING or android.util.Base64.NO_WRAP
+        )
+        val keyB64 = android.util.Base64.encodeToString(
+            keyBytes,
+            android.util.Base64.URL_SAFE or android.util.Base64.NO_PADDING or android.util.Base64.NO_WRAP
+        )
+        return """{"keys":[{"kty":"oct","k":"$keyB64","kid":"$keyIdB64"}],"type":"temporary"}"""
+    }
+
+    private fun hexToByteArray(hex: String): ByteArray {
+        val clean = hex.replace("0x", "").replace(" ", "")
+        require(clean.length % 2 == 0) { "Hex string must have an even number of characters: $hex" }
+        val out = ByteArray(clean.length / 2)
+        for (i in out.indices) {
+            val byte = clean.substring(i * 2, i * 2 + 2).toInt(16)
+            out[i] = byte.toByte()
+        }
+        return out
+    }
+
     private fun setupExoPlayer(url: String, headersJson: String, subtitleUrl: String) {
         isDolbyWarningShown = false
         val headers = try { JSONObject(headersJson) } catch (_: Exception) { JSONObject() }
@@ -1046,15 +1010,106 @@ class KotlinPlayerActivity : AppCompatActivity() {
         }
 
         val trackSelector = DefaultTrackSelector(this).apply {
-            setParameters(buildUponParameters().setMaxVideoSizeSd())
+            // Allow HD and above for live TV streams. Without overriding the SD cap,
+            // live M3U8 streams sometimes end up with the video track disabled and
+            // only audio plays. We also explicitly enable every track type so the
+            // selector never refuses the video renderer on adaptive variants.
+            setParameters(
+                buildUponParameters()
+                    .setMaxVideoSizeSd()
+                    .clearVideoSizeConstraints()
+                    .setForceHighestSupportedBitrate(true)
+                    .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, false)
+                    .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
+            )
         }
 
-        player = ExoPlayer.Builder(this)
+        val renderersFactory = DefaultRenderersFactory(this).apply {
+            // Fall back to a compatible decoder (including software) when the
+            // hardware decoder cannot handle the stream's codec/level. This keeps
+            // the video track alive on live TV streams that some Android devices
+            // refuse to decode in hardware (e.g. certain H.264 high-profile or
+            // HEVC variants used by Indian DTH/regional providers).
+            setEnableDecoderFallback(true)
+            setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
+        }
+
+        // Detect DASH / ClearKey streams. The bridge serializes any #KODIPROP-derived
+        // properties (drmScheme, drmKey, drmLicenseUrl) into the headers JSON under
+        // these keys; strip them before they get passed as HTTP headers.
+        val drmSchemeStr = headers.optString("drmScheme", "").lowercase()
+        val drmKey = headers.optString("drmKey", "")
+        val drmLicenseUrl = headers.optString("drmLicenseUrl", "")
+        val isDashUrl = url.contains(".mpd") || url.contains(".mpd?")
+        val isClearKey = (drmSchemeStr == "clearkey" || (isDashUrl && drmKey.isNotEmpty()))
+        val isDash = isDashUrl || isClearKey
+
+        // Strip the KODIPROP-derived meta fields so they are not sent as HTTP headers.
+        val internalKeys = setOf("drmScheme", "drmKey", "drmLicenseUrl", "manifestHeaders")
+        if (headers.length() > 0) {
+            val props = mutableMapOf<String, String>()
+            for (key in headers.keys()) {
+                if (key != "__originalMagnetUrl" && key !in internalKeys) {
+                    props[key] = headers.getString(key)
+                }
+            }
+            dataSourceFactory.setDefaultRequestProperties(props)
+        }
+
+        val playerBuilder = ExoPlayer.Builder(this)
+            .setRenderersFactory(renderersFactory)
             .setTrackSelector(trackSelector)
-            .setMediaSourceFactory(
+
+        if (isDash) {
+            // Build a ClearKey DRM session manager when the playlist provided a key.
+            // For unencrypted DASH we still build a default media source factory.
+            val drmSessionManager: DrmSessionManager? = if (isClearKey && drmKey.isNotEmpty()) {
+                try {
+                    val clearKeyJson = buildClearKeyLicenseJson(drmKey)
+                    val callback = LocalMediaDrmCallback(clearKeyJson.toByteArray(Charsets.UTF_8))
+                    val drmProvider = androidx.media3.exoplayer.drm.ExoMediaDrm.Provider { uuid ->
+                        // Provider must return non-null ExoMediaDrm; surface a wrapped
+                        // exception so the player surfaces a real error if init fails.
+                        try {
+                            FrameworkMediaDrm.newInstance(uuid)
+                        } catch (e: Exception) {
+                            Log.e("KotlinPlayerActivity", "FrameworkMediaDrm.newInstance failed", e)
+                            throw IllegalStateException("ClearKey MediaDrm unavailable", e)
+                        }
+                    }
+                    DefaultDrmSessionManager.Builder()
+                        .setUuidAndExoMediaDrmProvider(C.CLEARKEY_UUID, drmProvider)
+                        .setKeyRequestParameters(null)
+                        .build(callback)
+                } catch (e: Exception) {
+                    Log.e("KotlinPlayerActivity", "Failed to build ClearKey DRM session manager", e)
+                    null
+                }
+            } else {
+                null
+            }
+
+            // DefaultMediaSourceFactory.setDrmSessionManagerProvider requires a non-null
+            // DrmSessionManager. Provide a no-op one when no key is present so unencrypted
+            // DASH streams still play.
+            val finalDrmManager: DrmSessionManager =
+                drmSessionManager ?: androidx.media3.exoplayer.drm.DrmSessionManager.DRM_UNSUPPORTED
+
+            playerBuilder.setMediaSourceFactory(
+                androidx.media3.exoplayer.source.DefaultMediaSourceFactory(dataSourceFactory)
+                    .setDrmSessionManagerProvider { finalDrmManager }
+            )
+            Log.d(
+                "KotlinPlayerActivity",
+                "DASH source: $url (clearkey=$isClearKey, hasKey=${drmKey.isNotEmpty()}, licenseUrl=$drmLicenseUrl)"
+            )
+        } else {
+            playerBuilder.setMediaSourceFactory(
                 androidx.media3.exoplayer.source.DefaultMediaSourceFactory(dataSourceFactory)
             )
-            .build()
+        }
+
+        player = playerBuilder.build()
 
         playerView.player = player
 
@@ -1404,7 +1459,7 @@ class KotlinPlayerActivity : AppCompatActivity() {
 
     private fun updateLoadingTitleText() {
         if (!::loadingTitleTv.isInitialized) return
-        val mainTitle = intent.getStringExtra("title") ?: ""
+        val mainTitle = currentTitle.ifEmpty { intent.getStringExtra("title") ?: "" }
         val mediaType = intent.getStringExtra("mediaType") ?: "movie"
         val isSer = mediaType == "series" || mediaType == "show"
         
@@ -1537,6 +1592,74 @@ class KotlinPlayerActivity : AppCompatActivity() {
                 }
             } catch (_: Exception) {
                 // keep previous backdrop on failure
+            }
+        }
+    }
+
+    /**
+     * Loads the channel logo (or poster fallback) and applies it to the
+     * loading overlay + bottom title/logo bar. Safe to call multiple times,
+     * including after the user switches channels in the live TV grid.
+     */
+    private fun loadAndApplyLogo(logoUrlStr: String, posterUrlStr: String) {
+        if (logoUrlStr.isEmpty() && posterUrlStr.isEmpty()) return
+        CoroutineScope(Dispatchers.IO).launch {
+            var bitmap: android.graphics.Bitmap? = null
+            var isRealLogo = false
+            if (logoUrlStr.isNotEmpty()) {
+                if (logoUrlStr.endsWith(".svg")) {
+                    try {
+                        val urlConnection = java.net.URL(logoUrlStr).openConnection()
+                        urlConnection.connect()
+                        val input = urlConnection.getInputStream()
+                        val svg = com.caverock.androidsvg.SVG.getFromInputStream(input)
+                        val width = dp(160)
+                        val height = dp(45)
+                        val bmp = android.graphics.Bitmap.createBitmap(width, height, android.graphics.Bitmap.Config.ARGB_8888)
+                        val canvas = android.graphics.Canvas(bmp)
+                        svg.documentWidth = width.toFloat()
+                        svg.documentHeight = height.toFloat()
+                        svg.renderToCanvas(canvas)
+                        bitmap = bmp
+                        isRealLogo = true
+                    } catch (e: Exception) {
+                        Log.e("KotlinPlayerActivity", "Failed to load SVG logo: ${e.message}")
+                    }
+                } else {
+                    try {
+                        val urlConnection = java.net.URL(logoUrlStr).openConnection()
+                        urlConnection.connect()
+                        val input = urlConnection.getInputStream()
+                        bitmap = android.graphics.BitmapFactory.decodeStream(input)
+                        isRealLogo = true
+                    } catch (e: Exception) {
+                        Log.e("KotlinPlayerActivity", "Failed to load logo image: ${e.message}")
+                    }
+                }
+            }
+            if (bitmap == null && posterUrlStr.isNotEmpty()) {
+                try {
+                    val urlConnection = java.net.URL(posterUrlStr).openConnection()
+                    urlConnection.connect()
+                    val input = urlConnection.getInputStream()
+                    bitmap = android.graphics.BitmapFactory.decodeStream(input)
+                    isRealLogo = false
+                } catch (e: Exception) {
+                    Log.e("KotlinPlayerActivity", "Failed to load fallback poster: ${e.message}")
+                }
+            }
+            bitmap?.let { b ->
+                withContext(Dispatchers.Main) {
+                    setupLogoOverlay(b)
+                    if (isRealLogo && ::logoBottomView.isInitialized && ::logoShadowWrapper.isInitialized) {
+                        logoBottomView.setImageBitmap(b)
+                        logoShadowWrapper.visibility = View.VISIBLE
+                        titleTv.visibility = View.GONE
+                    } else if (::titleTv.isInitialized) {
+                        titleTv.visibility = View.VISIBLE
+                        titleTv.text = currentTitle
+                    }
+                }
             }
         }
     }
@@ -6717,8 +6840,14 @@ class KotlinPlayerActivity : AppCompatActivity() {
             if (newUrl.isEmpty()) return
 
             currentChannelIndex = index
+            this@KotlinPlayerActivity.currentTitle = newTitle
             updateTopBarTitle(newTitle)
+            updateLoadingTitleText()
             updatePlayerPosterForChannel(newPoster)
+            // Refresh the center loading-overlay logo so it tracks the new channel.
+            // For live TV, the "logo" is the channel's poster/tvg-logo and is the
+            // same image shown blurred behind the loading spinner.
+            loadAndApplyLogo(newPoster, newPoster)
 
             try {
                 val parsed = org.json.JSONObject(newUrl)

@@ -44,6 +44,7 @@ import {
 import ChannelCard from "../components/ChannelCard";
 import ProviderPickerSheet from "../components/ProviderPickerSheet";
 import PickerSheet from "../components/PickerSheet";
+import QuickScrollFab from "../components/QuickScrollFab";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const C_CARD_W = (SCREEN_WIDTH - 40 - 16) / 3 - 2;
@@ -159,7 +160,7 @@ export default function LiveTVScreen({ navigation }: { navigation?: any }) {
     async (force: boolean = false) => {
       if (!activeProvider) return;
       setError(null);
-      if (force) setLoading(true);
+      setLoading(true);
       try {
         const { channels, categories: cats } = await getLiveTVChannels(activeProvider, force);
         if (!mountedRef.current) return;
@@ -185,6 +186,16 @@ export default function LiveTVScreen({ navigation }: { navigation?: any }) {
     return () => {
       mountedRef.current = false;
     };
+  }, []);
+
+  const flatListRef = useRef<FlatList<LiveChannel>>(null);
+
+  const handleScrollToTop = useCallback(() => {
+    flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
+  }, []);
+
+  const handleScrollToBottom = useCallback(() => {
+    flatListRef.current?.scrollToEnd({ animated: true });
   }, []);
 
   useEffect(() => {
@@ -275,6 +286,7 @@ export default function LiveTVScreen({ navigation }: { navigation?: any }) {
     }
     return (
       <FlatList
+        ref={flatListRef}
         data={displayedChannels}
         numColumns={3}
         keyExtractor={(item, idx) => item.item.url + "_" + idx}
@@ -471,6 +483,15 @@ export default function LiveTVScreen({ navigation }: { navigation?: any }) {
           <ActivityIndicator size="large" color="#fff" />
           <Text style={styles.resolvingText}>{resolvingChannel}</Text>
         </View>
+      )}
+
+      {displayedChannels.length > 0 && (
+        <QuickScrollFab
+          onScrollToTop={handleScrollToTop}
+          onScrollToBottom={handleScrollToBottom}
+          bottomOffset={100}
+          rightOffset={20}
+        />
       )}
 
       {/* Premium Provider Bottom Sheet */}
