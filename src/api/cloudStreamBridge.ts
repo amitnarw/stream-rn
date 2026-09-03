@@ -901,7 +901,8 @@ async function fetchPunjabiSeriesHelper(): Promise<any[]> {
 }
 
 export async function fetchM3uSections(providerName: string, force: boolean = false): Promise<HomeSection[]> {
-  const cacheKey = `@zuno_cache_v13_cinemeta_cat_LiveTV_prov_${providerName}_page_1`;
+  const cacheKey = `@zuno_cache_v14_cinemeta_cat_LiveTV_prov_${providerName}_page_1`;
+  console.log(`[LiveTV] fetchM3uSections("${providerName}") -> url=${M3U_SOURCE_MAP[providerName] || ''}`);
   if (!force) {
     const settings = await getSettings();
     const cachedData = await getCache<HomeSection[]>(cacheKey, settings.mainPageTtl);
@@ -925,6 +926,10 @@ export async function fetchM3uSections(providerName: string, force: boolean = fa
     const resp = await fetch(m3uUrl);
     const text = await resp.text();
     const sections = parseM3uToSections(text, providerName);
+    console.log(
+      `[LiveTV] fetchM3uSections("${providerName}"): ${sections.length} sections, ` +
+        `${sections.reduce((n, s) => n + s.items.length, 0)} items, ${text.length} bytes`
+    );
     await setCache(cacheKey, sections);
     return sections;
   } catch (err) {

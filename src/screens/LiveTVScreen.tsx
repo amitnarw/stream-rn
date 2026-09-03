@@ -93,14 +93,21 @@ export default function LiveTVScreen({ navigation }: { navigation?: any }) {
           : null;
 
         // Always seed an initial activeProvider so the pill never shows blank.
+        // Default new installs and stale defaults to "Zuno TV" (the curated Hindi playlist).
+        const allCachedNames = cachedList
+          ? cachedList.m3u.concat(cachedList.cs).map((p) => p.name)
+          : [];
+        const isSavedValid = !!(saved && allCachedNames.includes(saved));
         const preliminary =
-          (cachedList && saved && cachedList.m3u.concat(cachedList.cs).some((p) => p.name === saved)
-            ? saved
-            : null) ||
-          (cachedList && (cachedList.m3u[0]?.name || cachedList.cs[0]?.name)) ||
-          saved ||
-          "DishTV d2h";
+          (isSavedValid ? saved : null) ||
+          (cachedList ? cachedList.m3u[0]?.name || cachedList.cs[0]?.name : null) ||
+          "Zuno TV";
         setActiveProvider(preliminary);
+
+        // Migrate stale/missing defaults to "Zuno TV" on first launch after this update.
+        if (!isSavedValid && preliminary === "Zuno TV") {
+          setDefaultIPTVProvider("Zuno TV").catch(() => {});
+        }
 
         if (cachedList) {
           setProviders(cachedList);
@@ -151,9 +158,9 @@ export default function LiveTVScreen({ navigation }: { navigation?: any }) {
   }, [providers]);
 
   // Always show a real provider name in the top-bar pill.
-  // Falls back to the saved default, then to "DishTV d2h".
+  // Falls back to the saved default, then to "Zuno TV".
   const providerDisplayName = useMemo(() => {
-    return activeProvider || savedDefault || "DishTV d2h";
+    return activeProvider || savedDefault || "Zuno TV";
   }, [activeProvider, savedDefault]);
 
   const loadChannels = useCallback(
