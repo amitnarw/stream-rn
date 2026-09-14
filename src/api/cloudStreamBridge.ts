@@ -389,11 +389,16 @@ function parseM3u(text: string): M3uEntry[] {
   return entries;
 }
 
+// Skip adult / 18+ groups from any M3U source (hygiene: some Xtream panels
+// include them in m3u_plus and we don't want them in the LiveTV grid).
+const ADULT_GROUP_REGEX = /(^|\s|\|)(adult|xxx|18\+|porn|nsfw)(\s|\||$)/i;
+
 function parseM3uToSections(text: string, providerName: string): HomeSection[] {
   const entries = parseM3u(text);
   const sectionsMap = new Map<string, any[]>();
   for (const entry of entries) {
     if (!entry.url.startsWith('http')) continue;
+    if (entry.group && ADULT_GROUP_REGEX.test(entry.group)) continue;
     const item = {
       provider: providerName,
       url: JSON.stringify({
@@ -426,6 +431,8 @@ function parseM3uToSections(text: string, providerName: string): HomeSection[] {
 export const M3U_SOURCE_MAP: Record<string, string> = {
   // Zuno curated playlist (hosted in this repo, edited from data/zuno_tv.m3u)
   'Zuno TV': 'https://raw.githubusercontent.com/amitnarw/stream-rn/main/data/zuno_tv.m3u',
+  // StarShare Xtream Codes panel (Indian IPTV, public shared credentials)
+  'StarShare': 'http://starshare.fun:8080/get.php?username=Deepak321&password=Deepak321&type=m3u_plus',
   // Indian DTH / cable (primary)
   'DishTV d2h': 'https://raw.githubusercontent.com/amazeyourself/m3u/main/dishd2h.m3u',
   'Jio TV': 'https://raw.githubusercontent.com/amazeyourself/m3u/main/jtv.m3u',
@@ -462,6 +469,7 @@ export const M3U_SOURCE_MAP: Record<string, string> = {
 // Ordered provider list for the dedicated LiveTV screen
 export const M3U_PROVIDER_ORDER: string[] = [
   'Zuno TV',
+  'StarShare',
   'DishTV d2h',
   'Jio TV',
   'SonyLIV CloudPlay',
@@ -498,7 +506,16 @@ export const CS_LIVE_TV_PROVIDERS: string[] = [
   'Sports IPTV',
   'Pirate IPTV',
   'Japan IPTV',
+  'IStreamFlare',
 ];
+
+// Sections to drop when flattening a CloudStream plugin's main page into
+// LiveTV channels (these are VOD sections, not live TV).
+const CS_VOD_SECTION_REGEX =
+  /^(movies?|web\s*series|anime|trending|most\s+watched.*|recently\s+added.*|top|popular|new\s*releases|coming\s*soon)$/i;
+
+// Explicit live section name (IStreamFlare uses "Live TV" as its mainPage entry).
+const CS_LIVE_SECTION_NAME = 'Live TV';
 
 const DEFAULT_IPTV_PROVIDER_KEY = '@sozo_default_iptv_provider';
 
@@ -1068,6 +1085,25 @@ function flattenSectionsToChannels(
   return { channels, categories: Array.from(categorySet).sort() };
 }
 
+// For CloudStream plugins, the mainPage can contain VOD sections alongside
+// live ones. Keep only the live TV section(s) so the LiveTV grid isn't
+// polluted by movie/web-series posters.
+function filterCsLiveTvSections(sections: HomeSection[]): HomeSection[] {
+  if (!sections || sections.length === 0) return sections;
+
+  // Prefer the explicit "Live TV" section if the plugin has it.
+  const liveOnly = sections.filter(
+    (s) => s.name && s.name.toLowerCase() === CS_LIVE_SECTION_NAME.toLowerCase()
+  );
+  if (liveOnly.length > 0) return liveOnly;
+
+  // Otherwise drop sections that look like VOD sections.
+  const filtered = sections.filter(
+    (s) => s.name && !CS_VOD_SECTION_REGEX.test(s.name)
+  );
+  return filtered.length > 0 ? filtered : sections;
+}
+
 export function clearLiveTVMemoryCache(): void {
   liveTvMemoryCache.clear();
 }
@@ -1112,6 +1148,12 @@ export async function getLiveTVChannels(
         sections = parseM3uToSections(text, providerName);
       } else {
         sections = await loadNativeLiveTV(providerName, 1);
+        // For CS plugins (e.g. IStreamFlare) the main page contains VOD
+        // sections (Movies, Trending, Most Watched, ...) mixed with live TV.
+        // Keep only Live TV-like sections so the LiveTV grid isn't polluted.
+        if (sections && sections.length > 0) {
+          sections = filterCsLiveTvSections(sections!);
+        }
       }
       // Persist for next cold start (background)
       if (sections && sections.length > 0) {
